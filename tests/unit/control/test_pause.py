@@ -112,6 +112,15 @@ def test_a_redelivered_event_is_still_a_duplicate_while_paused() -> None:
     assert (token.state, token.visit) == ("testing", 1)
     assert kinds(engine, "T-1").count("event_replayed") == 1
 
+    redelivered = engine.fire("T-1", "done", None, key="delivery-1")
+
+    assert redelivered.duplicate
+    accepted = [
+        e for e in engine.history("T-1") if e.kind == "event_accepted" and e.data["event"] == "done"
+    ]
+    assert len(accepted) == 1
+    assert (redelivered.token.state, redelivered.token.visit) == ("testing", 1)
+
 
 def test_only_a_paused_token_can_be_resumed() -> None:
     with pytest.raises(TokenNotActive, match="only a paused token"):
@@ -167,6 +176,39 @@ def test_retries_used_up_while_paused_hold_error_until_resume() -> None:
     assert engine.get("T-1").state == "coding"
     assert engine.history("T-1")[-1].data == {"event": "error", "payload": None}
     assert engine.resume("T-1").state == "triage"  # coding --error--> triage
+
+
+def test_a_lease_that_ends_while_paused_holds_error_until_resume() -> None:
+    clock = Clock()
+    engine = started(clock)
+    for _ in range(2):
+        engine.report(claimed(engine).task, Outcome(kind="failed", error="x"), supervisor="box-1")
+    claimed(engine)  # the last attempt
+    engine.pause("T-1")
+
+    clock.advance(minutes=2, seconds=1)
+    assert engine.tick() == 1
+
+    assert engine.get("T-1").state == "coding"
+    assert engine.history("T-1")[-1].data == {"event": "error", "payload": None}
+    assert engine.resume("T-1").state == "triage"  # coding --error--> triage
+
+
+def test_a_final_failure_with_no_error_transition_holds_until_resume_then_fails() -> None:
+    engine = started()
+    engine.fire("T-1", "done", None)  # testing: retries=0, no transition on error
+    grant = claimed(engine)
+    engine.pause("T-1")
+
+    engine.report(grant.task, Outcome(kind="failed", error="x"), supervisor="box-1")
+
+    token = engine.get("T-1")
+    assert (token.state, token.status) == ("testing", "paused")
+    assert engine.history("T-1")[-1].data == {"event": "error", "payload": None}
+
+    token = engine.resume("T-1")
+    assert token.status == "failed"
+    assert "testing" in engine.history("T-1")[-1].data["reason"]
 
 
 # ── cancelling ───────────────────────────────────────────────────────────

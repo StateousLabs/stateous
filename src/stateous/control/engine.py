@@ -558,7 +558,11 @@ class Engine:
                     timer.status = "cancelled"
             return
         task.status = "failed"
-        if not self.graph.candidates(row.state, ERROR):
+        if row.status == "paused":
+            # A paused token never moves or ends on its own. Hold `error`, as `_route`
+            # would; resume applies it, and fails the token if it still does not fit.
+            tx.append(row.token, "event_deferred", key=None, event=ERROR, payload=None)
+        elif not self.graph.candidates(row.state, ERROR):
             self._fail(tx, row, f"{task.state!r} failed, and has no transition on 'error': {error}")
         elif (refusal := self._route(tx, row, ERROR, None, key=None)) is not None:
             self._fail(tx, row, f"{task.state!r} failed, and 'error' cannot move it: {refusal}")
