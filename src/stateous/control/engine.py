@@ -509,6 +509,58 @@ class Engine:
             entered_by=entered_by,
         )
 
+    # ── time ────────────────────────────────────────────────────────────
+
+    def tick(self) -> int:
+        """What the clock does: end the leases of tasks whose supervisors stopped
+        answering, then fire each timer that is due (a timeout is one). Each in its
+        own transaction, which looks again: a token that moved meanwhile is left
+        alone. Returns how many leases ended and timers fired."""
+        return self._end_leases() + self._fire_timers()
+
+    def _end_leases(self) -> int:
+        """A task whose lease ended counts as a failed attempt."""
+        with self._transaction() as tx:
+            expired = tx.expired_leases()
+        ended = 0
+        for task_id in expired:
+            with self._transaction() as tx:
+                task = tx.task(task_id)
+                if task is None or task.status != "claimed":
+                    continue  # it finished meanwhile
+                if task.lease_until is None or task.lease_until >= tx.now:
+                    continue  # a heartbeat renewed it meanwhile
+                row = self._existing(tx, task.token)
+                who, span = task.claimed_by, _span(self.lease)
+                error = f"{who} stopped answering: no heartbeat for {span}"
+                self._task_failed(tx, row, task, error)
+                ended += 1
+        return ended
+
+    def _fire_timers(self) -> int:
+        """Fire each due timer as its event, from the clock, routed as any other."""
+        with self._transaction() as tx:
+            due = tx.due_timers()
+        fired = 0
+        for timer_id in due:
+            with self._transaction() as tx:
+                timer = tx.timer(timer_id)
+                if timer is None or timer.status != "pending" or timer.due_at > tx.now:
+                    continue  # cancelled, or moved by a resume, meanwhile
+                row = self._existing(tx, timer.token)
+                if row.status != "active" or (row.state, row.visit) != (timer.state, timer.visit):
+                    continue
+                timer.status = "fired"
+                tx.append(row.token, "timer_fired", event=timer.event)
+                refusal = self._route(tx, row, timer.event, timer.payload, key=None)
+                if refusal is not None:
+                    if timer.kind == "timeout":
+                        self._fail(tx, row, f"{row.state!r} timed out: {refusal}")
+                    else:
+                        tx.append(row.token, "event_rejected", event=timer.event, reason=refusal)
+                fired += 1
+        return fired
+
     # ── entering, leaving, ending ───────────────────────────────────────
 
     def _create(self, tx: Transaction, token: str, context: dict[str, Any]) -> tables.Token:
@@ -659,3 +711,12 @@ def _settled(result: Fired | Exception) -> Fired:
 def _iso(moment: datetime) -> str:
     """A stored moment (UTC, no zone) as ISO 8601 with `Z`."""
     return moment.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
+
+
+def _span(span: timedelta) -> str:
+    """'2 minutes', '30 seconds'."""
+    seconds = int(span.total_seconds())
+    if seconds % 60 == 0:
+        minutes = seconds // 60
+        return f"{minutes} minute{'' if minutes == 1 else 's'}"
+    return f"{seconds} second{'' if seconds == 1 else 's'}"
