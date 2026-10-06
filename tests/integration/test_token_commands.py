@@ -115,3 +115,12 @@ def test_a_control_plane_that_does_not_answer_is_one_sentence() -> None:
     assert "cannot reach the control plane" in result.output
     assert "Traceback" not in result.output
     assert len(result.output.strip().splitlines()) == 1
+
+
+def test_a_url_that_is_not_a_url_is_one_sentence() -> None:
+    result = run("token", "show", "--url", "http://[::1")
+
+    assert result.exit_code == 1
+    assert "http://[::1 is not a URL" in result.output
+    assert "Traceback" not in result.output
+    assert len(result.output.strip().splitlines()) == 1

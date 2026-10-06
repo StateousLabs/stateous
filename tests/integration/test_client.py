@@ -139,3 +139,19 @@ def test_a_refusal_that_is_not_json_keeps_its_text() -> None:
         client.get("T-1")
 
     assert (caught.value.status, caught.value.message) == (502, "bad gateway")
+
+
+def test_a_url_that_is_not_a_url_is_one_client_error() -> None:
+    with pytest.raises(ClientError) as caught:
+        Client("http://[::1")
+
+    assert str(caught.value).startswith("http://[::1 is not a URL: ")
+    assert "\n" not in str(caught.value)
+
+
+def test_a_request_url_that_cannot_be_built_is_one_client_error() -> None:
+    with Client(nowhere()) as client, pytest.raises(ClientError) as caught:
+        client.get("a" * 70_000)  # longer than a URL can be
+
+    assert " is not a URL: " in str(caught.value)
+    assert not isinstance(caught.value, Unreachable)

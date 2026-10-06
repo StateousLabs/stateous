@@ -46,7 +46,10 @@ class Client:
 
     def __init__(self, url: str, *, timeout: float = 30.0) -> None:
         self.url = url.rstrip("/")
-        self._http = httpx2.Client(base_url=self.url, timeout=timeout)
+        try:
+            self._http = httpx2.Client(base_url=self.url, timeout=timeout)
+        except httpx2.InvalidURL as error:
+            raise ClientError(_not_a_url(self.url, error)) from None
 
     def start(self, token: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start a token. A token that exists is returned as it is."""
@@ -140,6 +143,8 @@ class Client:
     ) -> Any:
         try:
             response = self._http.request(method, path, json=body, headers=headers, params=params)
+        except httpx2.InvalidURL as error:
+            raise ClientError(_not_a_url(self.url + path, error)) from None
         except httpx2.TransportError as error:
             raise Unreachable(f"cannot reach the control plane at {self.url}: {error}") from None
         if response.status_code >= 400:
@@ -169,6 +174,14 @@ class Client:
         return f"the control plane at {self.url} sent an answer of the wrong shape; check the URL"
 
 
+def _not_a_url(url: str, error: Exception) -> str:
+    """One sentence for a URL that httpx2 cannot build. A long URL is cut short."""
+    shown = url if len(url) <= 100 else f"{url[:100]}..."
+    return f"{shown} is not a URL: {' '.join(str(error).split())}"
+
+
 def _segment(name: str) -> str:
-    """`name` as one URL path segment: a `/` in it stays in the segment."""
+    """`name` with each reserved character escaped, a `/` too (as %2F). The server
+    decodes %2F back to `/` before it matches a route, so a name with a `/` does not
+    reach the token's routes: the answer is 404."""
     return quote(name, safe="")
