@@ -106,6 +106,10 @@ def text_of(log: Path) -> str:
     return log.read_text(encoding="utf-8", errors="replace")
 
 
+def says(log: Path, text: str) -> bool:
+    return text in text_of(log)
+
+
 def worker_folder(tmp_path: Path, url: str, routine: str = SLOW) -> Path:
     folder = tmp_path / "slow-worker"
     init_folder(url, folder)
@@ -245,4 +249,45 @@ def test_serve_with_supervise_refuses_a_folder_that_is_not_there(tmp_path: Path)
         assert process.wait(timeout=30) == 1
 
     assert "is not a folder" in text_of(log)
+    assert "Traceback" not in text_of(log)
+
+
+IN_A_THREAD = """
+import asyncio
+import time
+from pathlib import Path
+
+from contract import events, states
+
+from stateous import Context, on_state
+
+
+def nap() -> None:
+    Path(__file__).with_name("in-thread").touch()
+    time.sleep(3600)
+
+
+@on_state(states.slow)
+async def slow(ctx: Context) -> events.done:
+    await asyncio.to_thread(nap)
+    return events.done()
+"""
+
+
+def test_the_second_signal_exits_1_while_a_routine_waits_for_a_thread(tmp_path: Path) -> None:
+    graph = compile_flow(tmp_path, FLOW)
+    log = tmp_path / "supervise.log"
+    with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
+        folder = worker_folder(tmp_path, url, IN_A_THREAD)
+        client.start("T-1")
+        with started(["supervise", str(folder)], log) as process:
+            wait_for((folder / "in-thread").exists)
+            interrupt(process)
+            wait_for(says, log, "stopping: no new tasks")
+            interrupt(process)
+            began = time.monotonic()
+            assert process.wait(timeout=30) == 1, text_of(log)
+            took = time.monotonic() - began
+    assert took < 10, text_of(log)
+    assert "stopping now" in text_of(log)
     assert "Traceback" not in text_of(log)
