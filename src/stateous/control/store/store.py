@@ -13,7 +13,7 @@ import threading
 import uuid
 from collections.abc import Collection, Generator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Connection, create_engine, delete, event, func, select, text, update
@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from stateous.control.store import tables
+from stateous.control.store.errors import DatabaseHeld
 from stateous.control.store.migrations import migrate
 
 log = logging.getLogger("stateous.store")
@@ -35,6 +36,17 @@ TOKEN_LOCK = "token:"
 
 CANDIDATES = 20
 """How many queued tasks one claim looks at."""
+
+SERVING_LOCK = "@stateous/serve"
+"""The Postgres advisory-lock key of the serving hold. A token's key always starts
+with `token:`, so the two can never be equal."""
+
+SERVING_LEASE = timedelta(seconds=30)
+"""SQLite: a hold that is not renewed for this long has lapsed, and another store
+may take it."""
+
+RENEW_EVERY = timedelta(seconds=10)
+"""`keep_serving` writes `since` again when it is older than this."""
 
 
 def database_url(url: str) -> str:
@@ -83,6 +95,11 @@ def utc(moment: datetime) -> datetime:
     return moment
 
 
+def wall_clock() -> datetime:
+    """The real time. The serving hold is about real processes, not the engine's clock."""
+    return datetime.now(UTC)
+
+
 class Store:
     """A database that holds the ledger and the rows it explains."""
 
@@ -100,9 +117,15 @@ class Store:
             threading.RLock() if url.startswith("sqlite") else nullcontext()
         )
         try:
+            # Postgres: refuse before the migration, so that a refused control plane
+            # never changes the schema under the one that serves.
+            if hold and self.is_postgres and not self._try_take():
+                raise DatabaseHeld("another control plane serves this database; stop it first")
             migrate(self.engine)
+            if hold and not self.hold_serving():
+                raise DatabaseHeld(self._held_message())
         except BaseException:
-            self.close()
+            self.close()  # gives up the hold, if taken, and the connections
             raise
 
     @property
@@ -110,8 +133,100 @@ class Store:
         return self.engine.dialect.name == "postgresql"
 
     def close(self) -> None:
-        """Let go of the database's connections."""
+        """Give up the hold, if this store has it, and let go of the connections."""
+        if self._holding:
+            self._holding = False
+            try:
+                with self.transaction(wall_clock()) as tx:
+                    row = tx.control_plane()
+                    if row.serving == self.holder:
+                        row.serving, row.since = None, None
+            except Exception:  # the database can be gone; then the hold lapses by itself
+                log.warning("could not clear this control plane's hold; it lapses by itself")
+        if self._serving is not None:
+            self._serving.invalidate()  # its session ends, and the advisory lock with it
+            self._serving.close()
+            self._serving = None
         self.engine.dispose()
+
+    def hold_serving(self) -> bool:
+        """Take this database for this control plane, until `close()`. False if
+        another control plane holds it. Postgres: a session advisory lock, on a
+        connection set aside for it. SQLite: the `control_plane` row, which lapses
+        when no one renews it for `SERVING_LEASE`. On both, the row says who holds
+        the database, and since when."""
+        if self.is_postgres and self._serving is None and not self._try_take():
+            return False
+        with self.transaction(wall_clock()) as tx:
+            row = tx.control_plane()
+            if not self.is_postgres and not _free(row, self.holder, tx.now):
+                return False
+            row.serving, row.since = self.holder, tx.now
+        self._holding = True
+        return True
+
+    def keep_serving(self) -> bool:
+        """Check the hold again, and renew it. Call it at least every `RENEW_EVERY`.
+        On Postgres the lock's connection can die (the database restarted, the
+        network dropped it): then the lock is tried again on a new connection. A
+        hold that lapsed is taken back if no one else took it. False: another control
+        plane serves the database now, and this one must stop."""
+        if self.is_postgres and not self._keep_lock():
+            self._holding = False
+            return False
+        with self.transaction(wall_clock()) as tx:
+            row = tx.control_plane()
+            if row.serving == self.holder and row.since is not None:
+                if tx.now - row.since >= RENEW_EVERY:
+                    row.since = tx.now
+                return True
+            if not self.is_postgres and not _free(row, self.holder, tx.now):
+                self._holding = False
+                return False
+            row.serving, row.since = self.holder, tx.now
+        log.warning("this control plane took its hold on the database again")
+        self._holding = True
+        return True
+
+    def _held_message(self) -> str:
+        with self.transaction(wall_clock()) as tx:
+            row = tx.control_plane()
+            who, since = row.serving, row.since
+        if who is None or since is None:
+            return "another control plane serves this database; stop it first"
+        return (
+            f"another control plane serves this database ({who}, last seen at "
+            f"{since:%H:%M:%S} UTC); stop it first"
+        )
+
+    def _try_take(self) -> bool:
+        """`pg_try_advisory_lock(SERVING_LOCK)` on a new connection set aside for it:
+        `self._serving` when held; closed when not."""
+        connection = self.engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+        held = bool(
+            connection.scalar(
+                text("SELECT pg_try_advisory_lock(hashtextextended(:key, 0))"),
+                {"key": SERVING_LOCK},
+            )
+        )
+        if held:
+            self._serving = connection
+        else:
+            connection.close()
+        return held
+
+    def _keep_lock(self) -> bool:
+        """Postgres: whether this process still holds the advisory lock. A dead
+        connection is dropped, and the lock is tried again on a new one."""
+        if self._serving is not None:
+            try:
+                self._serving.scalar(text("SELECT 1"))
+                return True
+            except Exception:  # any failure means the connection is gone
+                self._serving.invalidate()
+                self._serving.close()
+                self._serving = None
+        return self._try_take()
 
     @contextmanager
     def transaction(self, now: datetime) -> Generator[Transaction]:
@@ -431,3 +546,11 @@ class Transaction:
             self._session.add(row)
             self._session.flush()
         return row
+
+
+def _free(row: tables.ControlPlane, holder: str, now: datetime) -> bool:
+    """SQLite: whether `holder` may take the database. Yes when no one holds it, when
+    `holder` holds it, or when the hold lapsed."""
+    if row.serving is None or row.serving == holder or row.since is None:
+        return True
+    return row.since + SERVING_LEASE < now
