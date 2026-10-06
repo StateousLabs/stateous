@@ -75,6 +75,7 @@ def test_a_folder_without_its_files_is_refused(tmp_path: Path, missing: str) -> 
     ("config", "said"),
     [
         ("url: http://x.test\ntasks: 0\n", "tasks: input should be greater than or equal to 1"),
+        ("url: http://x.test\ntasks: 1001\n", "tasks: input should be less than or equal to 1000"),
         ("url: http://x.test\nport: 9\n", "port: there is no such setting"),
         ("url: cp.internal:8080\n", "url: 'cp.internal:8080' is not an http:// or https://"),
         ("tasks: 2\n", "url: missing"),

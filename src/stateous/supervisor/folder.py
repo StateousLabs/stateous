@@ -21,6 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 CONFIG = "stateous.yaml"
 CONTRACT = "contract.py"
 DEFAULT_TASKS = 4
+MAX_TASKS = 1000
+"""The most routines at once: the API takes at most 1000 tasks in one heartbeat."""
 
 _CHECKSUM = re.compile(r'^__checksum__ = "(sha256:[0-9a-f]{64})"$', re.MULTILINE)
 
@@ -36,7 +38,7 @@ class FolderConfig(BaseModel):
 
     url: str
     """The control plane."""
-    tasks: int = Field(default=DEFAULT_TASKS, ge=1)
+    tasks: int = Field(default=DEFAULT_TASKS, ge=1, le=MAX_TASKS)
     """How many routines run at once."""
     name: str | None = Field(default=None, min_length=1, max_length=128)
     """The supervisor's name in the token's history. Default: the host name."""
