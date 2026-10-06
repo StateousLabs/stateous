@@ -5,4 +5,6 @@ supervisor, on any computer, does the work and reports what happened. Everything
 a user imports comes from here.
 """
 
-__all__: list[str] = []
+from stateous.model.workflow import END, START, Workflow
+
+__all__ = ["END", "START", "Workflow"]
