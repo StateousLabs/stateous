@@ -15,6 +15,7 @@ from stateous.cli.serving import (
     configure_logging,
     prepare_serve,
 )
+from stateous.cli.tokens import token_app
 from stateous.compiler.codegen import CodegenError, generate_contract
 from stateous.compiler.compile import compile_workflow
 from stateous.compiler.load import LoadError, load_workflow
@@ -85,3 +86,6 @@ def serve(
     finally:
         serving.close()
     typer.echo("stopped", err=True)
+
+
+app.add_typer(token_app, name="token")
