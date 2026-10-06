@@ -1,5 +1,6 @@
 """Two guards that could both be true are refused when compiling (design, section 5.1)."""
 
+from enum import Enum
 from typing import Literal
 
 import pytest
@@ -121,3 +122,98 @@ def test_searching_a_value_that_is_not_a_list_cannot_be_proven() -> None:
     problem = refused("1 in payload.score", "payload.score > 3")
 
     assert "`in` searches payload.score, which is not a list" in problem
+
+
+# ── what the review of phase 1 found ──────────────────────────────────────
+
+
+class Sev(Enum):
+    HIGH = "high"
+    LOW = "low"
+
+
+class Alarm(BaseModel):
+    sev: Sev
+    maybe: Sev | None = None
+
+
+class Counter(BaseModel):
+    n: int = 0
+    tags: list[str] = []
+    delta: int = 0
+
+
+def alarm_checked(*guards: str) -> None:
+    """Like `checked`, but the payload has an Enum field and the context has a list."""
+    flow = Workflow("sdlc", context=Counter)
+    judge = flow.state("judge")
+    alarm = flow.event("alarm", payload=Alarm)
+    flow.transition(START, judge)
+    for guard in guards:
+        flow.transition(judge, END, on=alarm, when=guard)
+    validate(flow)
+
+
+def alarm_refused(*guards: str) -> str:
+    with pytest.raises(DefinitionError) as caught:
+        alarm_checked(*guards)
+    return str(caught.value)
+
+
+def test_two_equal_guards_on_an_enum_field_are_refused() -> None:
+    problem = alarm_refused("payload.sev == 'high'", "payload.sev == 'high'")
+
+    assert "payload.sev = 'high'" in problem
+
+
+def test_an_optional_enum_field_is_read_through_its_definition() -> None:
+    problem = alarm_refused("payload.maybe == 'low'", "payload.maybe != 'high'")
+
+    assert "payload.maybe = 'low'" in problem
+
+
+def test_the_values_of_an_enum_are_used_to_prove_it() -> None:
+    alarm_checked("payload.sev != 'high'", "payload.sev != 'low'")
+
+
+def test_a_number_read_as_true_or_false_is_tried_below_zero() -> None:
+    problem = alarm_refused("ctx['n'] < 1", "ctx['n']")
+
+    assert "ctx['n'] = -1" in problem
+
+
+def test_a_list_literal_is_one_value_when_compared_for_equality() -> None:
+    problem = alarm_refused("ctx['tags'] == ['a']", "ctx['tags'] == ['a']")
+
+    assert "ctx['tags'] = ['a']" in problem
+
+
+def test_a_list_that_holds_a_member_but_is_not_the_literal_is_tried() -> None:
+    problem = alarm_refused("ctx['tags'] != ['a']", "'a' in ctx['tags']")
+
+    assert "can both be true" in problem
+
+
+def test_a_list_literal_searched_for_in_a_list_is_one_member() -> None:
+    problem = alarm_refused("['a'] in ctx['tags']", "['a'] in ctx['tags']")
+
+    assert "can both be true" in problem
+
+
+def test_ordering_a_list_cannot_be_proven() -> None:
+    problem = alarm_refused("ctx['tags'] < ['b']", "ctx['tags'] > ['a']")
+
+    assert "cannot prove" in problem
+
+
+def test_a_negative_literal_divides_the_numbers() -> None:
+    alarm_checked("ctx['delta'] > -5", "ctx['delta'] <= -5")
+    problem = alarm_refused("ctx['delta'] > -5", "ctx['delta'] < -3")
+
+    assert "ctx['delta'] = -4" in problem
+
+
+def test_a_negative_literal_in_a_list_is_tried() -> None:
+    problem = alarm_refused("ctx['delta'] in [-1, -2]", "ctx['delta'] < 0")
+
+    assert "ctx['delta'] = -2" in problem or "ctx['delta'] = -1" in problem

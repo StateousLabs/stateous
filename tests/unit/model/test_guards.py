@@ -20,6 +20,9 @@ from stateous.model.guards import GuardError, GuardInput, evaluate, parse_guard
         "ctx['pr_number'] != null or true",
         "count('review_done') >= 2 and ctx['rejected'] == 0",
         "1 < count('failed') < 3",
+        "ctx['delta'] > -5",
+        "ctx['delta'] in [-1, 2.5]",
+        "payload.severity in ctx['levels']",
     ],
 )
 def test_the_grammar_accepts(expression: str) -> None:
@@ -44,6 +47,11 @@ def test_the_grammar_accepts(expression: str) -> None:
         ("count('a') <", "not a valid expression"),
         ("lambda: 1", "lambdas are not part of the guard language"),
         ("ctx['a'] == [ctx['b']]", "a list may only contain literals"),
+        ("payload.s in 'abc'", "search a list literal or a value"),
+        ("payload.s not in 'abc'", "search a list literal or a value"),
+        ("1 in 3", "search a list literal or a value"),
+        ("-ctx['a'] < 3", "UnaryOp is not part of the guard language"),
+        ("-'a' == ctx['a']", "UnaryOp is not part of the guard language"),
     ],
 )
 def test_the_grammar_refuses(expression: str, reason: str) -> None:
@@ -96,6 +104,10 @@ def given(**overrides: Any) -> GuardInput:
         ("not (count('failed') > 1) or ctx['repo'] != null", True),
         ("1 < count('failed') < 3", True),
         ("count('review_done') >= 2 and ctx['rejected'] == 0", True),
+        ("ctx['rejected'] > -5", True),
+        ("ctx['rejected'] < -5", False),
+        ("ctx['rejected'] not in [-1, -2]", True),
+        ("not ctx['rejected'] > -1", False),
     ],
 )
 def test_guards_evaluate_against_what_a_token_knows(expression: str, expected: bool) -> None:

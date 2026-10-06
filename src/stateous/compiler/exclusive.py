@@ -11,8 +11,11 @@ value also stays in what its schema allows: an `int` is never 3.5, a
 `Literal['high', 'low']` is never 'medium', a count is never negative. Then the
 engine's own evaluator evaluates the guards, so an example found is a real one.
 
-A guard that compares two values with each other cannot be decided, and is
-refused: a guard that cannot be proven exclusive is not.
+A value read as true or false is also compared with 0, so a number on each side
+of 0 is tried. A list literal is one value, except where `in` searches it.
+
+A guard that compares two values with each other, or orders a list, cannot be
+decided, and is refused: a guard that cannot be proven exclusive is not.
 """
 
 from __future__ import annotations
@@ -24,9 +27,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PydanticUserError
 
-from stateous.model.guards import Guard, GuardInput, evaluate
+from stateous.model.guards import Guard, GuardInput, evaluate, negative_number
 
 MAX_TRIES = 200_000
 """How many combinations of values to try before a pair is called undecidable."""
@@ -127,7 +130,7 @@ def _collect(node: ast.expr, reads: dict[Atom, list[Any]]) -> str | None:
         case _:
             atom = _atom(node)
             if atom is not None:  # a value used as a truth value, e.g. `ctx['flag']`
-                reads.setdefault(atom, []).extend([True, False])
+                reads.setdefault(atom, []).extend([True, False, 0])
             return None
 
 
@@ -137,10 +140,19 @@ def _pair(
     left_atom, right_atom = _atom(left), _atom(right)
     if left_atom is not None and right_atom is not None:
         return "a guard compares two values with each other"
+    searched = isinstance(op, ast.In | ast.NotIn)
     literals: list[Any] = []
     for side in (left, right):
         if _atom(side) is None:
-            literals.extend(_literals(side))
+            value = _literal(side)
+            if isinstance(value, list) and not (searched and side is right):
+                if not isinstance(op, ast.Eq | ast.NotEq | ast.In | ast.NotIn):
+                    return "a guard orders a list"
+                literals.append(value)  # one value, e.g. ctx['tags'] == ['a']
+            elif isinstance(value, list):
+                literals.extend(cast("list[Any]", value))  # what `in` searches
+            elif value is not _NOTHING:
+                literals.append(value)
     for atom in (left_atom, right_atom):
         if atom is not None:
             if isinstance(op, ast.In | ast.NotIn) and atom is right_atom:
@@ -162,20 +174,26 @@ def _atom(node: ast.expr) -> Atom | None:
             return None
 
 
-def _literals(node: ast.expr) -> list[Any]:
+_NOTHING = object()
+"""What `_literal` gives for a node that is not a literal."""
+
+
+def _literal(node: ast.expr) -> Any:
+    """The value of a literal node, a list literal as a list; else `_NOTHING`."""
     match node:
         case ast.Constant(value=value):
-            return [value]
+            return value
         case ast.Name(id="true"):
-            return [True]
+            return True
         case ast.Name(id="false"):
-            return [False]
+            return False
         case ast.Name(id="null"):
-            return [None]
+            return None
         case ast.List(elts=elements):
-            return [v for e in elements for v in _literals(e)]
+            return [_literal(e) for e in elements]
         case _:
-            return []
+            number = negative_number(node)
+            return _NOTHING if number is None else number
 
 
 # ── the values worth trying ─────────────────────────────────────────────────
@@ -189,6 +207,7 @@ def _candidates(domain: Domain, compared: list[Any]) -> list[Any]:
     literals = [c for c in compared if not isinstance(c, tuple)]
     numbers = sorted({v for v in literals if _is_number(v)})
     strings = sorted({v for v in literals if isinstance(v, str)})
+    lists = [cast("list[Any]", v) for v in literals if isinstance(v, list)]
     kinds = domain.kinds
     tries: list[Any] = []
 
@@ -214,13 +233,25 @@ def _candidates(domain: Domain, compared: list[Any]) -> list[Any]:
         if kinds & {"object", "any"}:
             tries.append(_OBJECT)
         if kinds & {"array", "any"}:
-            members = sorted({v for group in containers for v in group}, key=repr)
-            tries += [
-                list(s) for r in range(len(members) + 1) for s in itertools.combinations(members, r)
-            ]
+            tries += _lists(_distinct(v for group in containers for v in group), lists)
     if kinds & {"null", "any"}:
         tries.append(None)
     return _distinct(tries)
+
+
+def _lists(members: list[Any], literals: list[list[Any]]) -> list[Any]:
+    """Lists that `in` and `==` tell apart: each list literal, and for each set of
+    the searched members, a list that holds just those and equals no literal."""
+    known = [*members, *(v for literal in literals for v in literal)]
+    filler = "~"
+    while filler in known:
+        filler += "~"
+    tries: list[Any] = [*literals]
+    for r in range(len(members) + 1):
+        for chosen in itertools.combinations(members, r):
+            value = list(chosen)
+            tries.append(value if value not in literals else [*value, filler])
+    return tries
 
 
 def _distinct(values: Iterable[Any]) -> list[Any]:
@@ -270,19 +301,29 @@ def _label(atom: Atom) -> str:
 def _field_domain(model: type[BaseModel] | None, name: str) -> Domain:
     if model is None:
         return ANY
-    schema = model.model_json_schema()
+    try:
+        schema = model.model_json_schema()
+    except PydanticUserError:  # validate reports it; any value is a safe guess here
+        return ANY
     prop = cast("dict[str, Any] | None", schema.get("properties", {}).get(name))
     if prop is None:
         return ANY
-    return _domain(prop)
+    return _domain(prop, cast("Mapping[str, Any]", schema.get("$defs", {})))
 
 
-def _domain(schema: Mapping[str, Any]) -> Domain:
-    if "$ref" in schema:
-        return Domain(frozenset({"object"}))
+def _domain(schema: Mapping[str, Any], definitions: Mapping[str, Any]) -> Domain:
+    """The values `schema` allows. A `$ref` (pydantic writes one for an Enum or a
+    model) is read through `definitions`."""
+    ref = schema.get("$ref")
+    if isinstance(ref, str):
+        target = definitions.get(ref.rsplit("/", 1)[-1])
+        if target is None:
+            return ANY
+        rest = {key: value for key, value in schema.items() if key != "$ref"}
+        return _domain({**cast("Mapping[str, Any]", target), **rest}, definitions)
     for combined in ("anyOf", "oneOf"):
         if combined in schema:
-            parts = [_domain(cast("Mapping[str, Any]", s)) for s in schema[combined]]
+            parts = [_domain(cast("Mapping[str, Any]", s), definitions) for s in schema[combined]]
             if any(p.kinds == ANY.kinds for p in parts):
                 return ANY
             enums = [p.enum for p in parts if p.enum is not None]

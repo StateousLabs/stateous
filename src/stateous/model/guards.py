@@ -6,11 +6,15 @@ expression; then each node is checked against the grammar below. Nothing goes to
 
     comparison   <  <=  >  >=  ==  !=  in  not in
     boolean      and  or  not
-    literals     numbers, strings, true, false, null, lists of literals
+    literals     numbers (also negative), strings, true, false, null,
+                 lists of literals
     accessors    ctx['key']         the token's context
                  payload.<field>    the payload of the event being routed
                  count('event')     accepted occurrences of the event on the
                                     token, the one being routed included
+
+`in` and `not in` search a list literal or a value that an accessor reads, never
+a string literal.
 """
 
 from __future__ import annotations
@@ -57,6 +61,20 @@ def parse_guard(expression: str) -> Guard:
     )
 
 
+def negative_number(node: ast.expr) -> int | float | None:
+    """The value of a negative number literal, such as `-5`; else None."""
+    match node:
+        case ast.UnaryOp(op=ast.USub(), operand=ast.Constant(value=int() | float() as value)):
+            return None if isinstance(value, bool) else -value
+        case _:
+            return None
+
+
+def _searchable(node: ast.expr) -> bool:
+    """What `in` may search: a list literal, or a value an accessor reads."""
+    return isinstance(node, ast.List | ast.Subscript | ast.Attribute | ast.Call)
+
+
 class _Checker:
     def __init__(self, expression: str) -> None:
         self.expression = expression
@@ -74,9 +92,16 @@ class _Checker:
                     self.check(value)
             case ast.UnaryOp(op=ast.Not(), operand=operand):
                 self.check(operand)
+            case ast.UnaryOp() if negative_number(node) is not None:
+                pass
             case ast.Compare(left=left, ops=ops, comparators=comparators):
                 if not all(isinstance(op, _COMPARISONS) for op in ops):
                     raise self.fail("compare with < <= > >= == != in or not in")
+                for op, searched in zip(ops, comparators, strict=True):
+                    if isinstance(op, ast.In | ast.NotIn) and not _searchable(searched):
+                        raise self.fail(
+                            "`in` must search a list literal or a value, e.g. ctx['key']"
+                        )
                 for operand in (left, *comparators):
                     self.check(operand)
             case ast.Constant(value=value):
@@ -84,7 +109,8 @@ class _Checker:
                     raise self.fail(f"{value!r} is not a literal of the guard language")
             case ast.List(elts=elements):
                 for element in elements:
-                    if not isinstance(element, ast.Constant | ast.Name):
+                    literal = isinstance(element, ast.Constant | ast.Name)
+                    if not literal and negative_number(element) is None:
                         raise self.fail("a list may only contain literals")
                     self.check(element)
             case ast.Name(id=name):
@@ -172,8 +198,10 @@ class _Evaluator:
                 return all(self.value(v) for v in values)
             case ast.BoolOp(values=values):
                 return any(self.value(v) for v in values)
-            case ast.UnaryOp(operand=operand):
+            case ast.UnaryOp(op=ast.Not(), operand=operand):
                 return not self.value(operand)
+            case ast.UnaryOp() if (number := negative_number(node)) is not None:
+                return number
             case ast.Compare(left=left, ops=ops, comparators=comparators):
                 current = self.value(left)
                 for op, comparator in zip(ops, comparators, strict=True):
