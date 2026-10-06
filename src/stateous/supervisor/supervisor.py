@@ -26,9 +26,12 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import signal
+import sys
 import threading
-from collections.abc import Collection
+from collections.abc import Collection, Generator
 from dataclasses import dataclass
+from types import FrameType
 from typing import Any, Literal, Protocol, cast
 
 from pydantic import BaseModel
@@ -37,6 +40,7 @@ from stateous.model.context import Context
 from stateous.model.contract import StateRef
 from stateous.model.events import Occurrence
 from stateous.model.wire import Outcome, TaskGrant
+from stateous.supervisor.folder import CONTRACT, Folder
 from stateous.supervisor.registry import Registry, Routine
 from stateous.supervisor.remote import Refused
 
@@ -432,3 +436,69 @@ async def _in_thread(routine: Routine, ctx: Context[Any]) -> Any:
 
     threading.Thread(target=work, name=f"stateous-routine-{ctx.task}", daemon=True).start()
     return await result
+
+
+async def open_supervisor(
+    folder: Folder,
+    api: Api,
+    *,
+    heartbeat_every: float = HEARTBEAT_EVERY,
+    idle: float = IDLE,
+) -> Supervisor:
+    """The supervisor of `folder`, checked against the control plane: its
+    `contract.py` must be for the graph the control plane serves, and the folder
+    must have routines. An unreachable control plane is tried again with backoff."""
+    try:
+        health = await api.health()
+    except Refused as error:
+        raise SupervisorError(
+            f"{api.url} did not answer as a Stateous control plane: {error.message}"
+        ) from None
+    served = health.get("checksum")
+    if served != folder.checksum:
+        raise SupervisorError(
+            f"{folder.path / CONTRACT} is for another version of the workflow "
+            f"({folder.checksum}; the control plane serves {served}): "
+            f"run `stateous init {api.url} {folder.path}` again"
+        )
+    try:
+        registry = Registry.discover(folder.path)
+    except Exception as error:
+        raise SupervisorError(
+            f"cannot load the routines in {folder.path}: {type(error).__name__}: {error}"
+        ) from None
+    if not registry.served:
+        raise SupervisorError(
+            f"{folder.path} has no routine: mark a function with @on_state(states.<state>)"
+        )
+    name = folder.config.supervisor_name()
+    log.info("%s serves %s; the control plane is %s", name, ", ".join(registry.served), api.url)
+    return Supervisor(
+        api,
+        registry,
+        name=name,
+        tasks=folder.config.tasks,
+        heartbeat_every=heartbeat_every,
+        idle=idle,
+    )
+
+
+@contextlib.contextmanager
+def stop_on_signals(supervisor: Supervisor) -> Generator[None]:
+    """While the block runs, SIGINT (Ctrl-C, also on Windows), SIGTERM and, on
+    Windows, SIGBREAK (Ctrl-Break) go to `supervisor.on_signal`. The old handlers
+    come back after the block. Use it in the main thread only."""
+
+    def handle(signum: int, frame: FrameType | None) -> None:
+        supervisor.on_signal()
+
+    signums = [signal.SIGINT, signal.SIGTERM]
+    if sys.platform == "win32":
+        signums.append(signal.SIGBREAK)
+    previous = {signum: signal.signal(signum, handle) for signum in signums}
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            if handler is not None:  # None: a handler that Python did not install
+                signal.signal(signum, handler)
