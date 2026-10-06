@@ -114,31 +114,14 @@ def _stores_on_postgres(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         drop_postgres_database(_created_databases.pop())
 
 
-def straggler_databases() -> list[str]:
-    """Databases still named `t_<hex>` on the test server, never a template."""
-    assert POSTGRES is not None
-    admin = create_engine(database_url(POSTGRES), isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        names = (
-            connection.execute(
-                text(
-                    "SELECT datname FROM pg_database "
-                    "WHERE datname LIKE 't\\_%' ESCAPE '\\' AND NOT datistemplate"
-                )
-            )
-            .scalars()
-            .all()
-        )
-    admin.dispose()
-    return list(names)
-
-
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
-    """A safety net for a test session that stopped before its stores were closed."""
+    """A safety net for a test session that stopped before its stores were closed. It
+    drops only the databases that this session made; other sessions can share the
+    server."""
     if POSTGRES is None:
         return
-    for name in straggler_databases():
-        drop_postgres_database(name)
+    while _created_databases:
+        drop_postgres_database(_created_databases.pop())
 
 
 needs_postgres = pytest.mark.skipif(POSTGRES is None, reason="set STATEOUS_TEST_POSTGRES")
