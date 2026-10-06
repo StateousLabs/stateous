@@ -1,0 +1,226 @@
+"""Pause, resume and cancel: a paused token does not move, and holds its events."""
+
+from datetime import UTC, datetime
+
+import pytest
+
+from stateous.control.engine import Engine, TokenNotActive
+from stateous.model.wire import Outcome, Schedule, TaskGrant
+
+from .support import TESTS_PASSED, TICKET, Clock, kinds, new_engine
+
+
+def started(clock: Clock | None = None) -> Engine:
+    engine = new_engine(clock=clock)
+    engine.start("T-1", TICKET)
+    return engine
+
+
+def claimed(engine: Engine) -> TaskGrant:
+    grant = engine.claim("box-1", ["coding", "testing", "triage"])
+    assert grant is not None
+    return grant
+
+
+def memory_of(engine: Engine, state: str) -> dict[str, object]:
+    with engine.store.transaction(datetime.now(UTC)) as tx:
+        return tx.memory("T-1", state)
+
+
+# ── pausing ──────────────────────────────────────────────────────────────
+
+
+def test_a_paused_token_does_not_move_and_its_events_are_held() -> None:
+    engine = started()
+    engine.pause("T-1")
+
+    fired = engine.fire("T-1", "done", None)
+
+    assert (fired.token.state, fired.token.status) == ("coding", "paused")
+    held = engine.history("T-1")[-1]
+    assert (held.kind, held.data) == ("event_deferred", {"event": "done", "payload": None})
+
+
+def test_only_an_active_token_can_be_paused() -> None:
+    engine = started()
+    engine.pause("T-1")
+
+    with pytest.raises(TokenNotActive, match="only an active token"):
+        engine.pause("T-1")
+
+
+def test_a_paused_tokens_queued_task_is_not_handed_out() -> None:
+    engine = started()
+    engine.pause("T-1")
+
+    assert engine.claim("box-1", ["coding"]) is None
+    engine.resume("T-1")
+    assert engine.claim("box-1", ["coding"]) is not None
+
+
+def test_a_running_task_finishes_and_its_outcome_is_held() -> None:
+    engine = started()
+    grant = claimed(engine)
+    engine.pause("T-1")
+
+    fired = engine.report(grant.task, Outcome(kind="event", event="done"), supervisor="box-1")
+
+    assert (fired.token.state, fired.token.status) == ("coding", "paused")
+    assert engine.heartbeat("box-1", [grant.task]) == [grant.task]  # the work is done
+    assert engine.resume("T-1").state == "testing"
+    assert "event_replayed" in kinds(engine, "T-1")
+
+
+# ── resuming ─────────────────────────────────────────────────────────────
+
+
+def test_resuming_applies_the_held_events_in_order() -> None:
+    engine = started()
+    engine.pause("T-1")
+    engine.fire("T-1", "done", None)
+    engine.fire("T-1", "passed", TESTS_PASSED)
+
+    token = engine.resume("T-1")
+
+    assert (token.state, token.status) == ("testing", "completed")
+    assert kinds(engine, "T-1").count("event_replayed") == 2
+
+
+def test_a_held_event_that_no_longer_fits_is_dropped_and_recorded() -> None:
+    engine = started()
+    engine.pause("T-1")
+    engine.fire("T-1", "done", None)
+    engine.fire("T-1", "done", None)
+
+    assert engine.resume("T-1").state == "testing"
+
+    dropped = [e for e in engine.history("T-1") if e.kind == "event_dropped"]
+    assert [e.data for e in dropped] == [
+        {"event": "done", "reason": "no transition for 'done' from 'testing'"}
+    ]
+
+
+def test_a_redelivered_event_is_still_a_duplicate_while_paused() -> None:
+    engine = started()
+    engine.pause("T-1")
+    engine.fire("T-1", "done", None, key="delivery-1")
+
+    again = engine.fire("T-1", "done", None, key="delivery-1")
+
+    assert again.duplicate
+    token = engine.resume("T-1")
+    assert (token.state, token.visit) == ("testing", 1)
+    assert kinds(engine, "T-1").count("event_replayed") == 1
+
+
+def test_only_a_paused_token_can_be_resumed() -> None:
+    with pytest.raises(TokenNotActive, match="only a paused token"):
+        started().resume("T-1")
+
+
+def test_a_paused_tokens_timeout_does_not_fire_and_the_paused_time_is_added() -> None:
+    clock = Clock()
+    engine = started(clock)  # coding times out at 15:00
+    clock.advance(hours=5)
+    engine.pause("T-1")
+    clock.advance(hours=10)
+    assert engine.tick() == 0
+
+    engine.resume("T-1")  # paused for 10 hours: it now times out at 01:00
+    clock.advance(minutes=59)
+    assert engine.tick() == 0
+    clock.advance(minutes=1)
+    assert engine.tick() == 1
+
+    assert engine.get("T-1").state == "triage"
+
+
+def test_a_timer_set_while_paused_moves_only_by_the_pause_after_it_was_set() -> None:
+    clock = Clock()
+    engine = started(clock)
+    grant = claimed(engine)
+    engine.pause("T-1")
+    clock.advance(hours=1)
+    timer = Schedule(event="stuck", payload=None, after="10m")
+    outcome = Outcome(kind="waiting", schedules=(timer,))
+    engine.report(grant.task, outcome, supervisor="box-1")  # due 10:10
+    clock.advance(hours=1)
+
+    engine.resume("T-1")  # one hour of the pause came after it was set: due 11:10
+    clock.advance(minutes=9)
+    assert engine.tick() == 0
+    clock.advance(minutes=1)
+    assert engine.tick() == 1
+
+    assert engine.get("T-1").status == "completed"
+
+
+def test_retries_used_up_while_paused_hold_error_until_resume() -> None:
+    engine = started()
+    for _ in range(2):
+        engine.report(claimed(engine).task, Outcome(kind="failed", error="x"), supervisor="box-1")
+    last = claimed(engine)
+    engine.pause("T-1")
+
+    engine.report(last.task, Outcome(kind="failed", error="x"), supervisor="box-1")
+
+    assert engine.get("T-1").state == "coding"
+    assert engine.history("T-1")[-1].data == {"event": "error", "payload": None}
+    assert engine.resume("T-1").state == "triage"  # coding --error--> triage
+
+
+# ── cancelling ───────────────────────────────────────────────────────────
+
+
+def test_a_cancelled_token_stops_its_task_and_forgets_its_memory() -> None:
+    engine = started()
+    grant = claimed(engine)
+    engine.set_memory(grant.task, "dev", "s-1")
+
+    token = engine.cancel("T-1")
+
+    assert (token.state, token.status) == ("coding", "cancelled")
+    assert kinds(engine, "T-1")[-2:] == ["task_cancelled", "cancelled"]
+    assert engine.heartbeat("box-1", [grant.task]) == [grant.task]
+    assert memory_of(engine, "coding") == {}
+
+
+def test_a_paused_token_can_be_cancelled_and_drops_what_it_held() -> None:
+    engine = started()
+    engine.pause("T-1")
+    engine.fire("T-1", "done", None)
+
+    engine.cancel("T-1")
+
+    dropped = [e for e in engine.history("T-1") if e.kind == "event_dropped"]
+    assert [e.data for e in dropped] == [{"event": "done", "reason": "the token was cancelled"}]
+
+
+def test_a_token_that_ended_cannot_be_paused_or_cancelled() -> None:
+    engine = started()
+    engine.fire("T-1", "stuck", None)
+
+    with pytest.raises(TokenNotActive, match="completed"):
+        engine.pause("T-1")
+    with pytest.raises(TokenNotActive, match="only an active or paused token"):
+        engine.cancel("T-1")
+
+
+def test_a_cancelled_tokens_timers_do_not_fire() -> None:
+    clock = Clock()
+    engine = started(clock)
+    engine.cancel("T-1")
+
+    clock.advance(hours=6)
+
+    assert engine.tick() == 0
+
+
+def test_live_tokens_counts_paused_tokens_too() -> None:
+    engine = started()
+    engine.start("T-2", TICKET)
+    engine.start("T-3", TICKET)
+    engine.pause("T-2")
+    engine.cancel("T-3")
+
+    assert engine.live_tokens() == 2

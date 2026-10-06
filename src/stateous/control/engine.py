@@ -187,6 +187,77 @@ class Engine:
             self._existing(tx, token)
             return [_entry(entry) for entry in tx.entries(token)]
 
+    # ── steering ────────────────────────────────────────────────────────
+
+    def pause(self, token: str) -> Token:
+        """Stop a token: it does not move, its queued task is not handed out, its
+        timers stand still. Events that arrive meanwhile are held, not lost."""
+        with self._transaction() as tx:
+            row = self._existing(tx, token)
+            if row.status != "active":
+                raise TokenNotActive(
+                    f"token {token!r} is {row.status}; only an active token can be paused"
+                )
+            row.status = "paused"
+            tx.append(token, "paused")
+            return _token(row)
+
+    def resume(self, token: str) -> Token:
+        """Let a paused token move again. Its timers get the paused time back. The
+        held events apply in the order they arrived; those that no longer fit are
+        dropped and recorded."""
+        with self._transaction() as tx:
+            row = self._existing(tx, token)
+            if row.status != "paused":
+                raise TokenNotActive(
+                    f"token {token!r} is {row.status}; only a paused token can be resumed"
+                )
+            entries = tx.entries(token)
+            paused_at = max((e.at for e in entries if e.kind == "paused"), default=tx.now)
+            for timer in tx.pending_timers(token):
+                # Only the part of the pause after the timer was set.
+                timer.due_at += tx.now - max(paused_at, timer.set_at)
+            row.status = "active"
+            tx.append(token, "resumed")
+            for event, payload in _held_events(entries):
+                self._replay(tx, row, event, payload)
+            return _token(row)
+
+    def cancel(self, token: str) -> Token:
+        """Stop a token for good: its tasks and timers are cancelled, its memory is
+        deleted, and anything it held is dropped."""
+        with self._transaction() as tx:
+            row = self._existing(tx, token)
+            if row.status not in ("active", "paused"):
+                raise TokenNotActive(
+                    f"token {token!r} is {row.status}; only an active or paused token "
+                    "can be cancelled"
+                )
+            if row.status == "paused":
+                for event, _ in _held_events(tx.entries(token)):
+                    tx.append(token, "event_dropped", event=event, reason="the token was cancelled")
+            self._leave(tx, row, via=None)
+            self._end(tx, row, "cancelled")
+            return _token(row)
+
+    def _replay(
+        self, tx: Transaction, row: tables.Token, event: str, payload: dict[str, Any] | None
+    ) -> None:
+        """Apply one held event, or drop it and say why. An own event (`error`) that
+        cannot apply fails the token: it has no task left to move it."""
+        if row.status != "active":
+            reason = f"token {row.token!r} is {row.status}; it takes no events"
+            tx.append(row.token, "event_dropped", event=event, reason=reason)
+            return
+        decision = self._decide(tx, row, event, payload, row.context)
+        if isinstance(decision, _Refusal):
+            tx.append(row.token, "event_dropped", event=event, reason=decision.reason)
+            if decision.fail or event in OWN_EVENTS:
+                self._fail(tx, row, decision.reason)
+            return
+        tx.append(row.token, "event_replayed", event=event)
+        self._take(tx, row, decision, event, payload, key=None)
+
     # ── the graph on record, for serve ──────────────────────────────────
 
     def recorded_graph(self) -> RecordedGraph | None:
@@ -720,3 +791,14 @@ def _span(span: timedelta) -> str:
         minutes = seconds // 60
         return f"{minutes} minute{'' if minutes == 1 else 's'}"
     return f"{seconds} second{'' if seconds == 1 else 's'}"
+
+
+def _held_events(entries: list[tables.LedgerEntry]) -> list[tuple[str, dict[str, Any] | None]]:
+    """The events a paused token holds: those deferred since it was last paused.
+    Each resume settles all of them, so nothing older is still held."""
+    since = max((e.seq for e in entries if e.kind == "paused"), default=0)
+    return [
+        (e.data["event"], e.data.get("payload"))
+        for e in entries
+        if e.kind == "event_deferred" and e.seq > since
+    ]
