@@ -22,6 +22,7 @@ _TAKEN = {
     "Any",
     "BaseModel",
     "Context",
+    "Field",
     "Literal",
     "Never",
     "Occurrence",
@@ -48,6 +49,8 @@ class _Field:
 class _Model:
     name: str
     fields: list[_Field]
+    alias: str | None = None
+    """For an Enum or a constant: the `Literal[...]` it is written as, not a class."""
 
 
 def generate_contract(document: dict[str, Any]) -> str:
@@ -63,7 +66,10 @@ def generate_contract(document: dict[str, Any]) -> str:
     _model_names([model.name for model in models], context)
     seal = checksum(document)
 
-    annotations = " ".join(f.annotation for model in models for f in model.fields)
+    annotations = " ".join(
+        [model.alias or "" for model in models]
+        + [f.annotation for model in models for f in model.fields]
+    )
     typing = [name for name in ("Any", "Literal") if re.search(rf"\b{name}\b", annotations)]
     if any(not spec.get("emits") for spec in states.values()):
         typing.append("Never")  # for `StateRef[Never]`, a state with no events
@@ -78,8 +84,11 @@ def generate_contract(document: dict[str, Any]) -> str:
     ]
     if typing:
         lines += [f"from typing import {', '.join(typing)}", ""]
-    if models:
-        lines += ["from pydantic import BaseModel", ""]
+    classes = [model for model in models if model.alias is None]
+    if classes:
+        defaults = [f.default or "" for model in classes for f in model.fields]
+        field = ", Field" if any(d.startswith("Field(") for d in defaults) else ""
+        lines += [f"from pydantic import BaseModel{field}", ""]
     lines += [
         f"from stateous import {', '.join(imported)}",
         "",
@@ -87,6 +96,9 @@ def generate_contract(document: dict[str, Any]) -> str:
         f"__checksum__ = {json.dumps(seal)}",
     ]
     for model in models:
+        if model.alias is not None:
+            lines += ["", "", f"{model.name} = {model.alias}"]
+            continue
         lines += ["", "", f"class {model.name}(BaseModel):"]
         if not model.fields:
             lines.append("    pass")
@@ -178,6 +190,8 @@ def _model_names(names: list[str], context: str | None) -> None:
 
 
 def _model(name: str, schema: dict[str, Any]) -> _Model:
+    if "enum" in schema or "const" in schema:  # pydantic writes an Enum this way
+        return _Model(name, [], alias=_annotation(schema))
     properties = cast("dict[str, dict[str, Any]]", schema.get("properties", {}))
     required = set(cast("list[str]", schema.get("required", [])))
     fields: list[_Field] = []
@@ -186,9 +200,19 @@ def _model(name: str, schema: dict[str, Any]) -> _Model:
             raise CodegenError(
                 f"the field {field_name!r} of {name} cannot be used as a Python name"
             )
-        default = None if field_name in required else _literal(field_schema.get("default"))
+        default = None if field_name in required else _default(field_schema)
         fields.append(_Field(field_name, _annotation(field_schema), default))
     return _Model(name, fields)
+
+
+def _default(schema: dict[str, Any]) -> str | None:
+    """The default of a field that is not required. Pydantic writes no `default`
+    for a `default_factory`: an empty list or dict is made again here; any other
+    field without a default becomes required."""
+    if "default" in schema:
+        return _literal(schema["default"])
+    factory = {"array": "list", "object": "dict"}.get(str(schema.get("type")))
+    return None if factory is None else f"Field(default_factory={factory})"
 
 
 def _annotation(schema: dict[str, Any]) -> str:

@@ -5,12 +5,13 @@ import json
 import subprocess
 import sys
 from collections.abc import Iterator
+from enum import Enum
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from stateous import END, START, OutcomeError, StateRef, Workflow
 from stateous.compiler.codegen import CodegenError, generate_contract, generate_stub
@@ -261,6 +262,82 @@ def test_without_a_context_model_there_is_no_alias_and_no_unused_import(tmp_path
     assert "pydantic" not in source
     assert "Context" not in source
     assert contract.states.a.emits == (contract.events.done,)
+
+
+class Sev(Enum):
+    HIGH = "high"
+    LOW = "low"
+
+
+class Alarm(BaseModel):
+    sev: Sev
+    level: Literal[1, 2] | None = None
+
+
+def alarm_document() -> dict[str, Any]:
+    flow = Workflow("alarms")
+    triage = flow.state("triage")
+    flow.transition(START, triage)
+    flow.transition(triage, END, on=flow.event("raised", payload=Alarm))
+    return compile_workflow(flow)
+
+
+def test_an_enum_becomes_a_literal_alias_not_a_model(tmp_path: Path) -> None:
+    source = generate_contract(alarm_document())
+    contract = load(tmp_path, "contract", source)
+
+    assert 'Sev = Literal["high", "low"]\n' in source
+    assert "class Sev(" not in source
+    assert source.index("Sev = Literal") < source.index("class Alarm(BaseModel):")
+    happened: Any = contract.states.triage.outcome({"event": "raised", "payload": {"sev": "high"}})
+    assert happened.payload.sev == "high"
+    schema = contract.states.triage.outcome_schema()
+    sev = schema["oneOf"][0]["properties"]["payload"]["properties"]["sev"]
+    assert sev["enum"] == ["high", "low"]
+    with pytest.raises(OutcomeError, match="sev"):
+        contract.states.triage.outcome({"event": "raised", "payload": {"sev": "medium"}})
+
+
+def test_a_contract_with_an_enum_is_formatted_as_ruff_formats_it(tmp_path: Path) -> None:
+    path = tmp_path / "contract.py"
+    path.write_text(generate_contract(alarm_document()), encoding="utf-8")
+
+    result = ruff_formatted(path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+class Basket(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+    meta: dict[str, int] = Field(default_factory=dict)
+    size: int = Field(default_factory=lambda: 3)
+
+
+def basket_document() -> dict[str, Any]:
+    flow = Workflow("shop", context=Basket)
+    a = flow.state("a")
+    flow.transition(START, a)
+    flow.transition(a, END, on=flow.event("done"))
+    return compile_workflow(flow)
+
+
+def test_a_default_factory_gives_an_empty_list_or_dict(tmp_path: Path) -> None:
+    source = generate_contract(basket_document())
+    contract = load(tmp_path, "contract", source)
+
+    assert "from pydantic import BaseModel, Field\n" in source
+    assert "    tags: list[str] = Field(default_factory=list)\n" in source
+    assert "    meta: dict[str, int] = Field(default_factory=dict)\n" in source
+    assert "    size: int\n" in source
+    basket = contract.Basket(size=1)
+    assert (basket.tags, basket.meta) == ([], {})
+    path = tmp_path / "formatted.py"
+    path.write_text(source, encoding="utf-8")
+    assert ruff_formatted(path).returncode == 0
+
+
+def test_field_is_imported_only_when_it_is_used(sdlc_document: dict[str, Any]) -> None:
+    assert "from pydantic import BaseModel\n" in generate_contract(sdlc_document)
 
 
 # ── names that cannot be Python ───────────────────────────────────────────
