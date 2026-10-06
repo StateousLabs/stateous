@@ -47,12 +47,18 @@ class StateRef(Generic[O]):
 
     def outcome_schema(self) -> dict[str, Any]:
         """The events this state may emit, with their payloads, as one JSON schema.
-        An agent's final answer that fits it names one event and its payload."""
+        An agent's final answer that fits it names one event and its payload.
+        `OutcomeError` for a state that may emit no event: no answer fits."""
+        if not self.emits:
+            raise OutcomeError(f"{self._allowed()}, so no outcome schema fits it")
         return {"oneOf": [_branch(event) for event in self.emits]}
 
     def outcome(self, data: Any) -> O:
         """The occurrence that `data` names: `{"event": ..., "payload": ...}`.
-        `OutcomeError` when `data` does not fit `outcome_schema()`."""
+        `OutcomeError` when `data` does not fit `outcome_schema()`.
+
+        The payload is validated as pydantic validates JSON, not in strict mode:
+        an agent sends JSON, so the string "3" fits an `int` field."""
         allowed = self._allowed()
         if not isinstance(data, dict):
             raise OutcomeError(
@@ -72,7 +78,7 @@ class StateRef(Generic[O]):
         model = event.payload_model()
         payload = body.get("payload")
         if model is None:
-            if payload is not None:
+            if "payload" in body:
                 raise OutcomeError(
                     f"{name!r} carries no payload, but the outcome has one; {allowed}"
                 )

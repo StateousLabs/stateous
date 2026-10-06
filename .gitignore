@@ -6,3 +6,4 @@ __pycache__/
 dist/
 *.egg-info/
 stateous.db
+.import_linter_cache/

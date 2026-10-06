@@ -72,7 +72,7 @@ def load_graph(text: str) -> dict[str, Any]:
             f"the graph file has format {version!r}, but this Stateous reads format "
             f"{FORMAT}; run `stateous compile` again"
         )
-    _refuse_bad_timeouts(document)
+    _refuse_bad_settings(document)
     return document
 
 
@@ -81,15 +81,22 @@ def _hash(document: dict[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _refuse_bad_timeouts(document: dict[str, Any]) -> None:
-    """Each state's `timeout`, checked with the rule the compiler uses. A file can
-    carry one that the engine's clock cannot hold, e.g. after a hand edit."""
+def _refuse_bad_settings(document: dict[str, Any]) -> None:
+    """Each state's `timeout` and `retries`, checked with the rules the compiler
+    uses. A file can carry one that the engine cannot use, e.g. after a hand edit."""
     states: Any = document["states"]
     if not isinstance(states, dict):
         raise GraphFileError("the graph file's 'states' is not an object")
     for name, options in cast("dict[str, Any]", states).items():
         if not isinstance(options, dict):
             raise GraphFileError(f"the graph file's state {name!r} is not an object")
-        timeout = cast("dict[str, Any]", options).get("timeout")
+        settings = cast("dict[str, Any]", options)
+        timeout = settings.get("timeout")
         if timeout is not None and (problem := duration_problem(timeout)):
             raise GraphFileError(f"the graph file's state {name!r}: {problem}")
+        retries = settings.get("retries", 0)
+        if type(retries) is not int or retries < 0:
+            raise GraphFileError(
+                f"the graph file's state {name!r}: retries is a whole number of 0 or "
+                f"more, not {retries!r}"
+            )

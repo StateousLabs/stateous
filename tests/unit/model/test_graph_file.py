@@ -112,3 +112,17 @@ def test_a_bad_timeout_is_refused_by_state(sdlc_document: dict[str, Any]) -> Non
 
     with pytest.raises(GraphFileError, match=r"state 'testing'.*too long"):
         load_graph(json.dumps(sdlc_document))
+
+
+@pytest.mark.parametrize("retries", [-1, 1.5, True, "2", None])
+def test_bad_retries_are_refused_by_state(sdlc_document: dict[str, Any], retries: Any) -> None:
+    sdlc_document["states"]["testing"]["retries"] = retries
+
+    with pytest.raises(GraphFileError, match=r"state 'testing': retries is a whole number"):
+        load_graph(json.dumps(sdlc_document))
+
+
+def test_retries_of_zero_or_more_are_read(sdlc_document: dict[str, Any]) -> None:
+    sdlc_document["states"]["testing"]["retries"] = 0
+
+    assert load_graph(json.dumps(sdlc_document))["states"]["testing"]["retries"] == 0

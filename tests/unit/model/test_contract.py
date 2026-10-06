@@ -152,7 +152,6 @@ def test_outcome_turns_an_answer_into_its_occurrence() -> None:
     assert type(happened) is passed
     assert happened.payload == Report(passed=3, failed=0)
     assert type(testing.outcome({"event": "done"})) is done
-    assert type(testing.outcome({"event": "done", "payload": None})) is done
 
 
 @pytest.mark.parametrize(
@@ -164,6 +163,7 @@ def test_outcome_turns_an_answer_into_its_occurrence() -> None:
         ({"event": "passed", "payload": {"passed": "x", "failed": 0}}, "does not fit Report"),
         ({"event": "passed"}, "the payload of 'passed' does not fit Report"),
         ({"event": "done", "payload": {"a": 1}}, "'done' carries no payload"),
+        ({"event": "done", "payload": None}, "'done' carries no payload"),
         ({"event": "done", "extra": 1}, "not 'extra'"),
     ],
 )
@@ -172,6 +172,28 @@ def test_an_answer_that_does_not_fit_is_refused(data: Any, reason: str) -> None:
         testing.outcome(data)
 
     assert "'testing' may emit 'passed', 'done'" in str(raised.value)
+
+
+def test_outcome_and_the_schema_agree_on_a_null_payload() -> None:
+    answer = {"event": "done", "payload": None}
+
+    assert not fits_schema(testing.outcome_schema(), answer)
+    with pytest.raises(OutcomeError):
+        testing.outcome(answer)
+
+
+def test_a_payload_is_validated_as_pydantic_validates_json() -> None:
+    # Lax on purpose: agents send JSON, and "3" is read as 3.
+    happened = testing.outcome({"event": "passed", "payload": {"passed": "3", "failed": 0}})
+
+    assert happened.payload == Report(passed=3, failed=0)
+
+
+def test_a_state_with_no_events_has_no_outcome_schema() -> None:
+    waiting: StateRef[Any] = StateRef("waiting")
+
+    with pytest.raises(OutcomeError, match="'waiting' may emit no event"):
+        waiting.outcome_schema()
 
 
 # ── on_state ──────────────────────────────────────────────────────────────
