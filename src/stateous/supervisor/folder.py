@@ -10,11 +10,13 @@ import ast
 import json
 import re
 import socket
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx2
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -23,6 +25,10 @@ CONTRACT = "contract.py"
 DEFAULT_TASKS = 4
 MAX_TASKS = 1000
 """The most routines at once: the API takes at most 1000 tasks in one heartbeat."""
+
+TAKEN_NAMES = frozenset({"contract", "stateous", *sys.stdlib_module_names})
+"""Module names that a stub file must not have: a file of the folder with such a
+name would hide that module (the folder is first on the import path)."""
 
 _CHECKSUM = re.compile(r'^__checksum__ = "(sha256:[0-9a-f]{64})"$', re.MULTILINE)
 
@@ -48,6 +54,17 @@ class FolderConfig(BaseModel):
     def _http(cls, url: str) -> str:
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"url: {url!r} is not an http:// or https:// address")
+        try:
+            parsed = httpx2.URL(url)
+        except (httpx2.InvalidURL, ValueError) as error:
+            said = str(error)
+            raise ValueError(
+                f"url: {url!r} is not a valid address: {said[:1].lower()}{said[1:]}"
+            ) from None
+        if not parsed.host:
+            raise ValueError(f"url: {url!r} has no host")
+        if parsed.port is not None and not 0 < parsed.port <= 65535:
+            raise ValueError(f"url: {url!r} has the port {parsed.port}; a port is 1 to 65535")
         return url.rstrip("/")
 
     def supervisor_name(self) -> str:
@@ -110,8 +127,12 @@ def plain_problems(error: ValidationError) -> str:
 
 
 def stub_name(state: str) -> str:
-    """The file a state's stub goes in."""
-    return f"{_identifier(state)}.py"
+    """The file a state's stub goes in: `<state>.py`, or `<state>_routine.py` when
+    `<state>` is the name of a module that the file would hide (`TAKEN_NAMES`)."""
+    name = _identifier(state)
+    if name in TAKEN_NAMES:
+        return f"{name}_routine.py"
+    return f"{name}.py"
 
 
 def implemented_states(folder: Path) -> set[str]:
@@ -160,7 +181,10 @@ def write_folder(
             done.append(f"skipped  {path}: the file exists and has no routine for {state!r}")
         else:
             path.write_text(stub(state), encoding="utf-8", newline="\n")
-            done.append(f"wrote    {path}")
+            why = ""
+            if _identifier(state) in TAKEN_NAMES:
+                why = f" ({_identifier(state)}.py would hide a Python module)"
+            done.append(f"wrote    {path}{why}")
     config = folder / CONFIG
     if config.exists():
         done.append(f"kept     {config}")

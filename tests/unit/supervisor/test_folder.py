@@ -1,11 +1,13 @@
 """The supervisor's folder: stateous.yaml, the contract's checksum, and the stubs."""
 
+import json
 import socket
 from pathlib import Path
 
 import pytest
 
 from stateous.supervisor.folder import (
+    FolderConfig,
     FolderError,
     implemented_states,
     load_folder,
@@ -183,3 +185,47 @@ def test_a_file_with_the_stubs_name_is_never_written_over(tmp_path: Path) -> Non
 
     assert (folder / "coding.py").read_text(encoding="utf-8") == "HELPERS = 1\n"
     assert any(line.startswith("skipped") and "'coding'" in line for line in lines)
+
+
+@pytest.mark.parametrize(
+    ("url", "said"),
+    [
+        ("http://[::1", "url: 'http://[::1' is not a valid address: invalid port: ':1'"),
+        ("http://", "url: 'http://' has no host"),
+        ("http://:8080", "url: 'http://:8080' has no host"),
+        ("http://127.0.0.1:99999", "url: 'http://127.0.0.1:99999' has the port 99999"),
+        ("http://127.0.0.1:0", "url: 'http://127.0.0.1:0' has the port 0"),
+    ],
+)
+def test_a_url_that_cannot_be_reached_is_refused_in_one_sentence(
+    tmp_path: Path, url: str, said: str
+) -> None:
+    folder = folder_with(tmp_path, f"url: {json.dumps(url)}\n")
+
+    with pytest.raises(FolderError) as raised:
+        load_folder(folder)
+
+    assert said in str(raised.value)
+    assert "\n" not in str(raised.value)
+
+
+def test_an_ipv6_url_with_a_port_is_taken() -> None:
+    assert FolderConfig(url="https://[::1]:8443/").url == "https://[::1]:8443"
+
+
+@pytest.mark.parametrize("state", ["contract", "stateous", "json", "asyncio", "typing"])
+def test_a_stub_never_takes_the_name_of_a_python_module(state: str) -> None:
+    assert stub_name(state) == f"{state}_routine.py"
+
+
+def test_init_says_why_a_stub_has_another_name(tmp_path: Path) -> None:
+    folder = tmp_path / "sdlc-worker"
+
+    lines = write_folder(
+        folder, url="http://a.test", contract=CONTRACT_TEXT, states=["json", "coding"], stub=stub
+    )
+
+    assert (folder / "json_routine.py").read_text(encoding="utf-8") == stub("json")
+    assert not (folder / "json.py").exists()
+    assert f"wrote    {folder / 'json_routine.py'} (json.py would hide a Python module)" in lines
+    assert f"wrote    {folder / 'coding.py'}" in lines
