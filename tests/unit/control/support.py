@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from stateous.control.engine import Engine
+from stateous.control.graph import Graph
+from stateous.control.store import Store
 
 
 def sdlc() -> dict[str, Any]:
@@ -54,3 +59,30 @@ def sdlc() -> dict[str, Any]:
             },
         },
     }
+
+
+TICKET: dict[str, Any] = {"repo": "acme/api"}
+TESTS_PASSED: dict[str, Any] = {"passed": 4, "failed": 0}
+TESTS_FAILED: dict[str, Any] = {"passed": 3, "failed": 1}
+
+
+class Clock:
+    """A clock that the test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = datetime(2026, 10, 6, 9, 0, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, *, hours: float = 0, minutes: float = 0, seconds: float = 0) -> None:
+        self.now += timedelta(hours=hours, minutes=minutes, seconds=seconds)
+
+
+def new_engine(document: dict[str, Any] | None = None, *, clock: Clock | None = None) -> Engine:
+    """An engine of `sdlc()` (or `document`) over a new in-memory store."""
+    return Engine(Store("sqlite://"), Graph(document or sdlc()), clock=clock or Clock())
+
+
+def kinds(engine: Engine, token: str) -> list[str]:
+    return [entry.kind for entry in engine.history(token)]
