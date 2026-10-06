@@ -1,0 +1,93 @@
+{
+  "stateous": 1,
+  "workflow": "sdlc",
+  "context": "Ticket",
+  "states": {
+    "coding": {
+      "timeout": "6h",
+      "retries": 2,
+      "emits": [
+        "done",
+        "stuck"
+      ]
+    },
+    "testing": {
+      "timeout": "1h",
+      "emits": [
+        "passed",
+        "failed"
+      ]
+    }
+  },
+  "events": {
+    "done": {},
+    "stuck": {},
+    "passed": {
+      "payload": "Tests"
+    },
+    "failed": {
+      "payload": "Tests"
+    }
+  },
+  "transitions": [
+    {
+      "from": "__start__",
+      "to": "coding"
+    },
+    {
+      "from": "coding",
+      "to": "testing",
+      "on": "done"
+    },
+    {
+      "from": "coding",
+      "to": "__end__",
+      "on": "stuck"
+    },
+    {
+      "from": "testing",
+      "to": "__end__",
+      "on": "passed"
+    },
+    {
+      "from": "testing",
+      "to": "coding",
+      "on": "failed",
+      "when": "count('failed') < 3"
+    },
+    {
+      "from": "testing",
+      "to": "__end__",
+      "on": "failed",
+      "otherwise": true
+    }
+  ],
+  "schemas": {
+    "Tests": {
+      "properties": {
+        "passed": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "passed",
+        "failed"
+      ],
+      "type": "object"
+    },
+    "Ticket": {
+      "properties": {
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo"
+      ],
+      "type": "object"
+    }
+  }
+}

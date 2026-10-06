@@ -49,14 +49,30 @@ select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF"]
 # Errors keep the names docs/design.md gives them, without an "Error" suffix.
 ignore = ["N818"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["stateous"]
+# The example's own modules, imported from their folder (design §3)
+known-local-folder = ["contract", "schemas"]
+
+[tool.ruff.lint.per-file-ignores]
+# Generated (contract §7): `class events:` and `class done(...)` are lower case on purpose
+"examples/*/contract.py" = ["N801", "RUF003"]
+
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "examples"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
+executionEnvironments = [
+    { root = "examples/sdlc" },
+    { root = "examples/sdlc-worker", extraPaths = ["tests/examples/phd_stub"] },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
+markers = [
+    "e2e: the example as real processes, about two minutes; skip it with -m 'not e2e'",
+]
 
 # ── Architecture ─────────────────────────────────────────────────────────
 # The control plane and the supervisor never import each other: the supervisor
