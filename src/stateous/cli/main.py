@@ -81,10 +81,22 @@ def serve(
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(1) from None
     typer.echo(f"serving on {serving.url} (Ctrl-C stops)", err=True)
+    server = GracefulServer(serving.config)
+
+    def stop() -> None:
+        server.should_exit = True
+
+    serving.on_lost(stop)
     try:
-        GracefulServer(serving.config).run(sockets=[serving.listener])
+        server.run(sockets=[serving.listener])
     finally:
         serving.close()
+    if serving.clock.lost:
+        typer.echo(
+            "error: another control plane took the database; this control plane stopped",
+            err=True,
+        )
+        raise typer.Exit(1)
     typer.echo("stopped", err=True)
 
 

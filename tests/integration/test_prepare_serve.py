@@ -15,13 +15,14 @@ from typing import Any
 import httpx2
 import pytest
 import uvicorn
+from sqlalchemy import create_engine, update
 
 from stateous import Client
 from stateous.cli import serving as serving_module
-from stateous.cli.serving import ServeRefused, Serving, prepare_serve
+from stateous.cli.serving import GracefulServer, ServeRefused, Serving, prepare_serve
 from stateous.control.engine import Engine, RecordedGraph
 from stateous.control.graph import Graph
-from stateous.control.store import Store
+from stateous.control.store import Store, tables
 
 
 def write(path: Path, document: dict[str, Any]) -> Path:
@@ -263,3 +264,65 @@ def test_a_wide_listen_prints_one_warning_line(
     assert "no authentication" in err
     assert len(err.strip().splitlines()) == 1
     assert serving.url.startswith("http://127.0.0.1:")  # where this computer reaches it
+
+
+def test_a_graph_file_that_is_not_utf8_is_one_sentence(tmp_path: Path, db: str) -> None:
+    graph = tmp_path / "utf16.json"
+    graph.write_bytes(b"\xff\xfe{\x00}\x00")
+
+    with pytest.raises(ServeRefused, match="is not a graph file") as caught:
+        prepare_serve(graph, db, "127.0.0.1:0")
+
+    assert "\n" not in str(caught.value)
+
+
+def test_a_graph_file_that_the_graph_cannot_read_is_one_sentence(
+    tmp_path: Path, sdlc: dict[str, Any], db: str
+) -> None:
+    document = copy.deepcopy(sdlc)
+    document["transitions"] = "x"
+    graph = write(tmp_path / "odd.json", document)
+
+    with pytest.raises(ServeRefused, match="is not a graph file") as caught:
+        prepare_serve(graph, db, "127.0.0.1:0")
+
+    assert "\n" not in str(caught.value)
+
+
+def take_the_hold(db: str) -> None:
+    """Write another control plane into the hold, as if it took the database."""
+    engine = create_engine(db)
+    with engine.begin() as connection:
+        connection.execute(update(tables.ControlPlane).values(serving="another-control-plane"))
+    engine.dispose()
+
+
+def test_a_lost_hold_calls_on_lost_and_the_server_stops(
+    tmp_path: Path, sdlc: dict[str, Any], db: str
+) -> None:
+    serving = prepare_serve(write(tmp_path / "sdlc.json", sdlc), db, "127.0.0.1:0")
+    server = GracefulServer(serving.config)
+    calls: list[None] = []
+
+    def stop() -> None:
+        calls.append(None)
+        server.should_exit = True
+
+    serving.on_lost(stop)
+    thread = threading.Thread(
+        target=server.run, kwargs={"sockets": [serving.listener]}, daemon=True
+    )
+    thread.start()
+    try:
+        until(lambda: server.started or not thread.is_alive())
+        assert server.started, "the control plane did not start"
+        take_the_hold(db)
+        thread.join(timeout=15)
+        assert not thread.is_alive(), "the server did not stop after the lost hold"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=15)
+        serving.close()
+
+    assert calls == [None]
+    assert serving.clock.lost

@@ -130,3 +130,23 @@ def test_after_a_lost_hold_each_request_is_503() -> None:
 
     assert answer.status_code == 503
     assert "another control plane took this database" in answer.json()["error"]
+
+
+def test_a_lost_hold_calls_on_lost_once_after_the_line(caplog: pytest.LogCaptureFixture) -> None:
+    lines: list[int] = []  # how many lost lines were logged when on_lost ran
+    clock = Clock(Ticks(), Hold([False]), every=0.01)
+    clock.on_lost = lambda: lines.append(caplog.text.count("another control plane took"))
+
+    run_until(clock, lambda: clock.lost)
+
+    assert lines == [1]
+
+
+def test_a_kept_hold_never_calls_on_lost() -> None:
+    calls: list[None] = []
+    ticks = Ticks()
+    clock = Clock(ticks, Hold([True]), every=0.01, on_lost=lambda: calls.append(None))
+
+    run_until(clock, lambda: ticks.count >= 3)
+
+    assert calls == []

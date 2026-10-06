@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx2
+from sqlalchemy import create_engine, update
 from typer.testing import CliRunner
 
 from stateous import Client
 from stateous.cli.main import app
 from stateous.cli.serving import prepare_serve
+from stateous.control.store import tables
 
 runner = CliRunner()
 
@@ -104,30 +106,35 @@ def wait_for_health(url: str, process: subprocess.Popen[str]) -> None:
     raise AssertionError("serve did not answer within 30 seconds")
 
 
+def start_serve(tmp_path: Path, graph: Path, port: int) -> subprocess.Popen[str]:
+    """`stateous serve` in its own process (on Windows: its own process group, so
+    that CTRL_BREAK_EVENT reaches only it)."""
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    command = [
+        sys.executable, "-m", "stateous", "serve", str(graph),
+        "--db", database(tmp_path), "--listen", f"127.0.0.1:{port}",
+    ]  # fmt: skip
+    return subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=flags
+    )
+
+
+STOP: int = signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGINT
+"""The signal that stops `serve` gracefully."""
+
+
 def test_serve_runs_until_a_signal_and_then_releases_the_database(
     tmp_path: Path, sdlc: dict[str, Any]
 ) -> None:
     graph = write(tmp_path / "sdlc.json", sdlc)
     port = free()
     url = f"http://127.0.0.1:{port}"
-    if sys.platform == "win32":
-        flags: int = subprocess.CREATE_NEW_PROCESS_GROUP
-        stop: int = signal.CTRL_BREAK_EVENT
-    else:
-        flags = 0
-        stop = signal.SIGINT
-    command = [
-        sys.executable, "-m", "stateous", "serve", str(graph),
-        "--db", database(tmp_path), "--listen", f"127.0.0.1:{port}",
-    ]  # fmt: skip
-    process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=flags
-    )
+    process = start_serve(tmp_path, graph, port)
     try:
         wait_for_health(url, process)
         with Client(url) as client:
             assert client.start("T-1", {"repo": "acme/api"})["state"] == "coding"
-        process.send_signal(stop)
+        process.send_signal(STOP)
         _, err = process.communicate(timeout=30)
     finally:
         if process.poll() is None:
@@ -139,3 +146,31 @@ def test_serve_runs_until_a_signal_and_then_releases_the_database(
     assert "stopped" in err
     assert "Traceback" not in err
     prepare_serve(graph, database(tmp_path), "127.0.0.1:0").close()  # the hold was given up
+
+
+def test_serve_stops_with_exit_1_when_another_control_plane_takes_the_database(
+    tmp_path: Path, sdlc: dict[str, Any]
+) -> None:
+    graph = write(tmp_path / "sdlc.json", sdlc)
+    port = free()
+    process = start_serve(tmp_path, graph, port)
+    try:
+        wait_for_health(f"http://127.0.0.1:{port}", process)
+        engine = create_engine(database(tmp_path))
+        with engine.begin() as connection:
+            connection.execute(update(tables.ControlPlane).values(serving="another-control-plane"))
+        engine.dispose()
+        _, err = process.communicate(timeout=30)
+    finally:
+        if process.poll() is None:
+            process.send_signal(STOP)
+            try:
+                process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+
+    assert process.returncode == 1, err
+    assert "another control plane took this database" in err
+    assert err.strip().splitlines()[-1].startswith("error: ")
+    assert "Traceback" not in err

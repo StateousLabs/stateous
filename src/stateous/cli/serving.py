@@ -6,7 +6,9 @@ refusal is a `ServeRefused` with one plain sentence. The app in `Serving.config`
 runs the clock in its ASGI lifespan: about once a second the clock renews the hold
 on the database and calls `engine.tick()`. `GracefulServer` stops gracefully on
 Ctrl-C, SIGTERM or Ctrl-Break (Windows): requests in progress finish, and the
-command exits 0. A second signal stops it at once."""
+command exits 0. A second signal stops it at once. When another control plane takes
+the database, the clock calls the callback of `Serving.on_lost`: `serve` then stops,
+and exits 1."""
 
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ import ipaddress
 import logging
 import re
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
@@ -126,15 +129,25 @@ class Clock:
     renews the hold on the database (`Store.keep_serving`) and then calls
     `engine.tick()` (due timers, timeouts, ended leases). Both are synchronous, so
     they run on a worker thread. When another control plane took the hold, it sets
-    `lost`, logs one error line, and ends. A tick that fails, or a database that does
-    not answer, is logged; the clock goes on."""
+    `lost`, logs one error line, calls `on_lost` (if set) once, and ends. A tick that
+    fails, or a database that does not answer, is logged; the clock goes on."""
 
-    def __init__(self, engine: Ticking, hold: Holding, *, every: float = TICK_EVERY) -> None:
+    def __init__(
+        self,
+        engine: Ticking,
+        hold: Holding,
+        *,
+        every: float = TICK_EVERY,
+        on_lost: Callable[[], None] | None = None,
+    ) -> None:
         self.engine = engine
         self.hold = hold
         self.every = every
         self.lost = False
         """True when another control plane took the database while this one served."""
+        self.on_lost = on_lost
+        """Called once, with no arguments, on the server's event loop, after the line
+        of a lost hold. It must not block: e.g. it sets `server.should_exit`."""
         self._stopping = asyncio.Event()
 
     async def run(self) -> None:
@@ -157,6 +170,8 @@ class Clock:
         if not kept:
             self.lost = True
             log.error(LOST)
+            if self.on_lost is not None:
+                self.on_lost()
             return
         try:
             await asyncio.to_thread(self.engine.tick)
@@ -228,12 +243,22 @@ class Serving:
     """A control plane that is ready to serve: its port is bound, and its database is
     held. `config` is uvicorn's configuration; its app runs the clock while it serves.
     `url` is where a client on this computer reaches it (with port 0: the port that
-    the listener got)."""
+    the listener got). `clock` is the clock that the app runs; `clock.lost` is True
+    after another control plane took the database."""
 
     config: uvicorn.Config
     listener: socket.socket
     url: str
     store: Store
+    clock: Clock
+
+    def on_lost(self, callback: Callable[[], None]) -> None:
+        """Call `callback()` once when another control plane takes the database. The
+        clock calls it on the server's event loop, after it logs the line of the lost
+        hold, so it must not block: it stops the server (`server.should_exit = True`)
+        and what runs beside it. Until the server stops, each request gets 503. Call
+        `on_lost` before the server runs; a second call replaces the callback."""
+        self.clock.on_lost = callback
 
     def close(self) -> None:
         """Close the listener and the store. Closing the store gives up the hold. A
@@ -260,14 +285,15 @@ def prepare_serve(graph: Path, db: str, listen: str) -> Serving:
         _check_structure(engine)
         if (warning := listen_warning(host)) is not None:
             typer.echo(warning, err=True)
-        app = ClockedApp(create_app(engine), Clock(engine, store))
+        clock = Clock(engine, store)
+        app = ClockedApp(create_app(engine), clock)
         config = uvicorn.Config(app, log_level="warning", timeout_graceful_shutdown=SHUTDOWN_WITHIN)
         url = _url(host, listener)
     except BaseException:
         store.close()
         listener.close()
         raise
-    return Serving(config=config, listener=listener, url=url, store=store)
+    return Serving(config=config, listener=listener, url=url, store=store, clock=clock)
 
 
 class GracefulServer(uvicorn.Server):
@@ -290,14 +316,20 @@ def configure_logging() -> None:
 
 
 def _load(path: Path) -> Graph:
+    """The graph in the file at `path`. A file that `load_graph` accepts but that
+    `Graph` cannot read is also not a graph file."""
     try:
-        return Graph(load_graph(path.read_text(encoding="utf-8")))
+        document = load_graph(path.read_text(encoding="utf-8"))
     except OSError as error:
         raise ServeRefused(
             f"cannot read the graph file {path}: {error.strerror or error}"
         ) from None
-    except GraphFileError as error:
-        raise ServeRefused(f"{path} is not a graph file: {error}") from None
+    except (GraphFileError, UnicodeDecodeError) as error:
+        raise ServeRefused(f"{path} is not a graph file: {_one_line(error)}") from None
+    try:
+        return Graph(document)
+    except Exception as error:
+        raise ServeRefused(f"{path} is not a graph file: {_one_line(error)}") from None
 
 
 def _listen(host: str, port: int) -> socket.socket:
