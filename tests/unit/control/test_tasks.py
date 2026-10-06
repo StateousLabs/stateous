@@ -415,3 +415,19 @@ def test_a_memory_key_is_1_to_128_characters(key: str) -> None:
 
     with pytest.raises(InvalidPayload, match="1 to 128"):
         engine.set_memory(grant.task, key, "v")
+
+
+def test_a_report_that_routing_refuses_after_the_decision_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+
+    def refuses(*_: object, **__: object) -> str:
+        return "a refusal the decision did not foresee"
+
+    monkeypatch.setattr(engine, "_route", refuses)
+
+    with pytest.raises(RuntimeError, match="a refusal the decision did not foresee"):
+        engine.report(grant.task, done(), supervisor="box-1")

@@ -4,10 +4,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from stateous.control.engine import Engine, TokenNotActive
+from stateous.control.engine import Engine, EventNotAllowed, TokenNotActive
 from stateous.model.wire import Outcome, Schedule, TaskGrant
 
-from .support import TESTS_PASSED, TICKET, Clock, kinds, new_engine
+from .support import TESTS_FAILED, TESTS_PASSED, TICKET, Clock, kinds, new_engine
 
 
 def started(clock: Clock | None = None) -> Engine:
@@ -25,6 +25,17 @@ def claimed(engine: Engine) -> TaskGrant:
 def memory_of(engine: Engine, state: str) -> dict[str, object]:
     with engine.store.transaction(datetime.now(UTC)) as tx:
         return tx.memory("T-1", state)
+
+
+def held_error(engine: Engine) -> tuple[str, int]:
+    """The state and visit of the `error` that the last ledger entry holds."""
+    held = engine.history("T-1")[-1]
+    assert (held.kind, held.data["event"], held.data["payload"]) == (
+        "event_deferred",
+        "error",
+        None,
+    )
+    return held.data["state"], held.data["visit"]
 
 
 # ── pausing ──────────────────────────────────────────────────────────────
@@ -174,7 +185,7 @@ def test_retries_used_up_while_paused_hold_error_until_resume() -> None:
     engine.report(last.task, Outcome(kind="failed", error="x"), supervisor="box-1")
 
     assert engine.get("T-1").state == "coding"
-    assert engine.history("T-1")[-1].data == {"event": "error", "payload": None}
+    assert held_error(engine) == ("coding", 1)
     assert engine.resume("T-1").state == "triage"  # coding --error--> triage
 
 
@@ -190,7 +201,7 @@ def test_a_lease_that_ends_while_paused_holds_error_until_resume() -> None:
     assert engine.tick() == 1
 
     assert engine.get("T-1").state == "coding"
-    assert engine.history("T-1")[-1].data == {"event": "error", "payload": None}
+    assert held_error(engine) == ("coding", 1)
     assert engine.resume("T-1").state == "triage"  # coding --error--> triage
 
 
@@ -204,7 +215,7 @@ def test_a_final_failure_with_no_error_transition_holds_until_resume_then_fails(
 
     token = engine.get("T-1")
     assert (token.state, token.status) == ("testing", "paused")
-    assert engine.history("T-1")[-1].data == {"event": "error", "payload": None}
+    assert held_error(engine) == ("testing", 1)
 
     token = engine.resume("T-1")
     assert token.status == "failed"
@@ -266,3 +277,77 @@ def test_live_tokens_counts_paused_tokens_too() -> None:
     engine.cancel("T-3")
 
     assert engine.live_tokens() == 2
+
+
+# ── what a paused token holds from its tasks ─────────────────────────────
+
+
+def guarded() -> dict[str, object]:
+    """One state `a` that emits `go`. `go` leads to END only when ctx['ok'] holds;
+    there is no otherwise."""
+    return {
+        "stateous": 1,
+        "workflow": "guarded",
+        "context": "Flags",
+        "states": {"a": {"emits": ["go"]}},
+        "events": {"go": {}},
+        "transitions": [
+            {"from": "__start__", "to": "a"},
+            {"from": "a", "to": "__end__", "on": "go", "when": "ctx['ok'] == true"},
+        ],
+        "schemas": {
+            "Flags": {
+                "type": "object",
+                "properties": {"ok": {"type": "boolean", "default": False}},
+            }
+        },
+    }
+
+
+def test_a_report_while_paused_is_refused_as_when_active() -> None:
+    engine = new_engine(guarded())
+    engine.start("T-1", {})
+    grant = engine.claim("box-1", ["a"])
+    assert grant is not None
+    engine.pause("T-1")
+
+    with pytest.raises(EventNotAllowed, match="no guard matched 'go'"):
+        engine.report(grant.task, Outcome(kind="event", event="go"), supervisor="box-1")
+
+    assert engine.history("T-1")[-1].kind == "event_rejected"
+    assert engine.heartbeat("box-1", [grant.task]) == []  # still held
+    assert "event_deferred" not in kinds(engine, "T-1")
+
+
+def test_a_held_error_from_a_state_the_token_left_is_dropped_on_resume() -> None:
+    engine = started()
+    engine.fire("T-1", "done", None)  # testing: retries=0
+    grant = claimed(engine)
+    engine.pause("T-1")
+    engine.fire("T-1", "failed", TESTS_FAILED)  # held, from outside
+    engine.report(grant.task, Outcome(kind="failed", error="x"), supervisor="box-1")
+
+    held = engine.history("T-1")[-1]
+    assert held.data == {
+        "event": "error", "payload": None, "state": "testing", "visit": 1, "task": grant.task,
+    }  # fmt: skip
+
+    token = engine.resume("T-1")
+
+    assert (token.state, token.status) == ("coding", "active")
+    assert engine.claim("box-1", ["coding"]) is not None  # its new task
+    dropped = [e.data for e in engine.history("T-1") if e.kind == "event_dropped"]
+    assert dropped == [{"event": "error", "reason": "the token left the state it came from"}]
+
+
+def test_a_held_outcome_records_the_state_and_task_it_came_from() -> None:
+    engine = started()
+    grant = claimed(engine)
+    engine.pause("T-1")
+
+    engine.report(grant.task, Outcome(kind="event", event="done"), supervisor="box-1")
+
+    deferred = next(e for e in engine.history("T-1") if e.kind == "event_deferred")
+    assert deferred.data == {
+        "event": "done", "payload": None, "state": "coding", "visit": 1, "task": grant.task,
+    }  # fmt: skip

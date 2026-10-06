@@ -219,8 +219,8 @@ class Engine:
                 timer.due_at += tx.now - max(paused_at, timer.set_at)
             row.status = "active"
             tx.append(token, "resumed")
-            for event, payload in _held_events(entries):
-                self._replay(tx, row, event, payload)
+            for held in _held_events(entries):
+                self._replay(tx, row, held)
             return _token(row)
 
     def cancel(self, token: str) -> Token:
@@ -234,19 +234,24 @@ class Engine:
                     "can be cancelled"
                 )
             if row.status == "paused":
-                for event, _ in _held_events(tx.entries(token)):
-                    tx.append(token, "event_dropped", event=event, reason="the token was cancelled")
+                for held in _held_events(tx.entries(token)):
+                    reason = "the token was cancelled"
+                    tx.append(token, "event_dropped", event=held.event, reason=reason)
             self._leave(tx, row, via=None)
             self._end(tx, row, "cancelled")
             return _token(row)
 
-    def _replay(
-        self, tx: Transaction, row: tables.Token, event: str, payload: dict[str, Any] | None
-    ) -> None:
-        """Apply one held event, or drop it and say why. An own event (`error`) that
-        cannot apply fails the token: it has no task left to move it."""
+    def _replay(self, tx: Transaction, row: tables.Token, held: _Held) -> None:
+        """Apply one held event, or drop it and say why. An event from a task applies
+        only in the state and visit of that task. An own event (`error`) that cannot
+        apply there fails the token: it has no task left to move it."""
+        event, payload = held.event, held.payload
         if row.status != "active":
             reason = f"token {row.token!r} is {row.status}; it takes no events"
+            tx.append(row.token, "event_dropped", event=event, reason=reason)
+            return
+        if held.origin is not None and held.origin != (row.state, row.visit):
+            reason = "the token left the state it came from"
             tx.append(row.token, "event_dropped", event=event, reason=reason)
             return
         decision = self._decide(tx, row, event, payload, row.context)
@@ -328,14 +333,16 @@ class Engine:
         payload: dict[str, Any] | None,
         *,
         key: str | None,
+        task: tables.Task | None = None,
     ) -> str | None:
         """Decide where one event leads, and record it: the heart of the engine. A
-        paused token holds the event. Returns why the event cannot move the token, or
+        paused token holds the event; an event from `task` is held with the state,
+        visit and task it came from. Returns why the event cannot move the token, or
         None. The caller records the refusal."""
         if row.status in ENDED:
             return f"token {row.token!r} is {row.status}; it takes no events"
         if row.status == "paused":
-            tx.append(row.token, "event_deferred", key=key, event=event, payload=payload)
+            self._hold(tx, row, event, payload, key=key, task=task)
             return None
         decision = self._decide(tx, row, event, payload, row.context)
         if isinstance(decision, _Refusal):
@@ -345,6 +352,26 @@ class Engine:
             return decision.reason
         self._take(tx, row, decision, event, payload, key=key)
         return None
+
+    def _hold(
+        self,
+        tx: Transaction,
+        row: tables.Token,
+        event: str,
+        payload: dict[str, Any] | None,
+        *,
+        key: str | None,
+        task: tables.Task | None,
+    ) -> None:
+        """Hold an event for a paused token. An event from a task is bound to the
+        task's state and visit: resume drops it if the token left them."""
+        if task is None:
+            tx.append(row.token, "event_deferred", key=key, event=event, payload=payload)
+        else:
+            tx.append(
+                row.token, "event_deferred", key=key, event=event, payload=payload,
+                state=task.state, visit=task.visit, task=task.id,
+            )  # fmt: skip
 
     def _decide(
         self,
@@ -502,17 +529,18 @@ class Engine:
             return self._reject(tx, row, event, reason, EventNotAllowed)
         if errors := self.graph.payload_errors(event, outcome.payload):
             raise InvalidPayload(f"{event}: " + "; ".join(errors))
-        if row.status == "active":
-            # The guards read the context with the routine's changes. Decide first:
-            # a refused outcome saves none of the changes.
-            decision = self._decide(tx, row, event, outcome.payload, context)
-            if isinstance(decision, _Refusal) and not decision.fail:
-                return self._reject(tx, row, event, decision.reason, EventNotAllowed)
+        # The guards read the context with the routine's changes. Decide first: a
+        # refused outcome saves none of the changes. A paused token decides too, so
+        # it refuses what an active token refuses, and holds only what can apply.
+        decision = self._decide(tx, row, event, outcome.payload, context)
+        if isinstance(decision, _Refusal) and not decision.fail:
+            return self._reject(tx, row, event, decision.reason, EventNotAllowed)
         self._apply(tx, row, outcome, context)
         # No idempotency key here: that key space is for a caller's `fire`. A task
         # is reported once, since `_worked_task` refuses a second report on it.
-        refusal = self._route(tx, row, event, outcome.payload, key=None)
-        assert refusal is None, "the decision above found a transition"
+        refusal = self._route(tx, row, event, outcome.payload, key=None, task=task)
+        if refusal is not None:
+            raise RuntimeError(f"the decision found a transition, but routing refused: {refusal}")
         if row.status == "paused":  # the event is held; the work is done
             task.status, task.lease_until = "done", None
             tx.append(row.token, "task_done", task=task.id)
@@ -561,7 +589,7 @@ class Engine:
         if row.status == "paused":
             # A paused token never moves or ends on its own. Hold `error`, as `_route`
             # would; resume applies it, and fails the token if it still does not fit.
-            tx.append(row.token, "event_deferred", key=None, event=ERROR, payload=None)
+            self._hold(tx, row, ERROR, None, key=None, task=task)
         elif not self.graph.candidates(row.state, ERROR):
             self._fail(tx, row, f"{task.state!r} failed, and has no transition on 'error': {error}")
         elif (refusal := self._route(tx, row, ERROR, None, key=None)) is not None:
@@ -797,12 +825,27 @@ def _span(span: timedelta) -> str:
     return f"{seconds} second{'' if seconds == 1 else 's'}"
 
 
-def _held_events(entries: list[tables.LedgerEntry]) -> list[tuple[str, dict[str, Any] | None]]:
+@dataclass(frozen=True)
+class _Held:
+    """An event that a paused token holds."""
+
+    event: str
+    payload: dict[str, Any] | None
+    origin: tuple[str, int] | None
+    """The state and visit of the task the event came from; None for an event from
+    outside, which applies in any state."""
+
+
+def _held_events(entries: list[tables.LedgerEntry]) -> list[_Held]:
     """The events a paused token holds: those deferred since it was last paused.
     Each resume settles all of them, so nothing older is still held."""
     since = max((e.seq for e in entries if e.kind == "paused"), default=0)
     return [
-        (e.data["event"], e.data.get("payload"))
+        _Held(
+            event=e.data["event"],
+            payload=e.data.get("payload"),
+            origin=(e.data["state"], e.data["visit"]) if "state" in e.data else None,
+        )
         for e in entries
         if e.kind == "event_deferred" and e.seq > since
     ]
