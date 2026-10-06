@@ -14,7 +14,7 @@ from stateous.control.engine import (
 )
 from stateous.model.wire import EventRecord, Outcome, TaskGrant
 
-from .support import TESTS_FAILED, TICKET, kinds, new_engine
+from .support import TESTS_FAILED, TESTS_PASSED, TICKET, Clock, kinds, new_engine
 
 STATES = ["triage", "coding", "testing"]
 
@@ -102,6 +102,21 @@ def test_a_reported_event_moves_the_token_and_the_task_is_done() -> None:
     assert fired.token.state == "testing"
     assert "task_done" in kinds(engine, "T-1")
     assert engine.heartbeat("box-1", [grant.task]) == [grant.task]
+
+
+def test_a_reports_own_routing_does_not_use_up_a_key_a_caller_might_fire_with() -> None:
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+
+    engine.report(grant.task, done(), supervisor="box-1")
+
+    # The task's own report moved the token with no idempotency key of its own.
+    # A caller is free to use a key that happens to look like the task's id.
+    fired = engine.fire("T-1", "passed", TESTS_PASSED, key=f"task:{grant.task}")
+
+    assert not fired.duplicate
+    assert fired.token.status == "completed"
 
 
 def test_the_routines_context_changes_are_saved_with_the_outcome() -> None:
@@ -274,6 +289,16 @@ def test_a_heartbeat_names_the_tasks_the_supervisor_no_longer_holds() -> None:
 
     assert engine.heartbeat("box-1", [first.task, second.task, 999]) == [second.task, 999]
     assert engine.heartbeat("box-2", [first.task]) == [first.task]
+
+
+def test_a_heartbeat_does_not_revive_a_task_whose_lease_already_ended() -> None:
+    clock = Clock()
+    engine = new_engine(clock=clock)
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+    clock.advance(minutes=3)  # past the default 2-minute lease
+
+    assert engine.heartbeat("box-1", [grant.task]) == [grant.task]  # lost, not renewed
 
 
 # ── notes ────────────────────────────────────────────────────────────────

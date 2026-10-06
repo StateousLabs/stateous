@@ -438,7 +438,9 @@ class Engine:
             if isinstance(decision, _Refusal) and not decision.fail:
                 return self._reject(tx, row, event, decision.reason, EventNotAllowed)
         self._apply(tx, row, outcome, context)
-        refusal = self._route(tx, row, event, outcome.payload, key=f"task:{task.id}")
+        # No idempotency key here: that key space is for a caller's `fire`. A task
+        # is reported once, since `_worked_task` refuses a second report on it.
+        refusal = self._route(tx, row, event, outcome.payload, key=None)
         assert refusal is None, "the decision above found a transition"
         if row.status == "paused":  # the event is held; the work is done
             task.status, task.lease_until = "done", None

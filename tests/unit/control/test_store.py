@@ -114,6 +114,27 @@ def test_renewing_leases_names_only_the_tasks_the_supervisor_still_holds() -> No
         assert task is not None and task.lease_until == until
 
 
+def test_renewing_leases_does_not_revive_one_whose_lease_already_ended() -> None:
+    store = Store("sqlite://")
+    add_token(store, "T-1")
+    with store.transaction(NOW) as tx:
+        tx.queue_task("T-1", "coding", 1)
+    with store.transaction(NOW) as tx:
+        task = tx.claim_task("box-1", ["coding"])
+        assert task is not None
+        task.lease_until = utc(NOW + timedelta(minutes=2))
+        task_id = task.id
+
+    past_lease = NOW + timedelta(minutes=10)  # well after the lease ended
+    with store.transaction(past_lease) as tx:
+        renewed = tx.renew_leases("box-1", [task_id], utc(past_lease + timedelta(minutes=2)))
+
+    assert renewed == set()
+    with store.transaction(NOW) as tx:
+        task = tx.task(task_id)
+        assert task is not None and task.lease_until == utc(NOW + timedelta(minutes=2))
+
+
 def test_memory_is_kept_per_token_and_state_and_deleted_with_the_token() -> None:
     store = Store("sqlite://")
     with store.transaction(NOW) as tx:

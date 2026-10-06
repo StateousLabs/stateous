@@ -16,7 +16,7 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Connection, create_engine, delete, event, func, select, text, update
+from sqlalchemy import Connection, create_engine, delete, event, func, or_, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -424,8 +424,10 @@ class Transaction:
 
     def renew_leases(self, supervisor: str, ids: Collection[int], until: datetime) -> set[int]:
         """Move the lease of each task in `ids` that `supervisor` still holds (claimed,
-        by it) to `until`. Returns those ids. No token lock: one statement, so a
-        heartbeat never waits for a token."""
+        by it, with no lease yet, or a lease that has not yet ended) to `until`.
+        Returns those ids. A task whose lease already ended is not renewed: it is
+        reported lost, even before the sweep that frees it runs. No token lock: one
+        statement, so a heartbeat never waits for a token."""
         if not ids:
             return set()
         renewed = self._session.scalars(
@@ -434,6 +436,7 @@ class Transaction:
                 tables.Task.id.in_(sorted(ids)),
                 tables.Task.claimed_by == supervisor,
                 tables.Task.status == "claimed",
+                or_(tables.Task.lease_until.is_(None), tables.Task.lease_until >= self.now),
             )
             .values(lease_until=until)
             .returning(tables.Task.id)
