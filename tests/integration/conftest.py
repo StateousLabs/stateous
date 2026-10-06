@@ -81,8 +81,16 @@ def served(engine: Engine) -> Iterator[str]:
     server = uvicorn.Server(uvicorn.Config(create_app(engine), log_level="warning"))
     thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
     thread.start()
-    while not server.started:
-        time.sleep(0.01)
-    yield f"http://127.0.0.1:{listener.getsockname()[1]}"
-    server.should_exit = True
-    thread.join(timeout=10)
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started:
+            if not thread.is_alive():
+                pytest.fail("the server thread died before the server started")
+            if time.monotonic() > deadline:
+                pytest.fail("the server did not start within 10 seconds")
+            time.sleep(0.01)
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+        listener.close()

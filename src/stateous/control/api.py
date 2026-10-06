@@ -3,7 +3,7 @@
 There are no keys and no tenants: a caller that reaches the port may call every
 route. `stateous serve` listens on 127.0.0.1 by default. Every refusal is
 `{"error": "<one plain sentence>"}`. The engine is synchronous and does one
-transaction for each call, so each call runs on a worker thread."""
+transaction for each call, so each call runs on a thread from the pool."""
 
 from __future__ import annotations
 
@@ -30,10 +30,13 @@ from stateous.control.engine import (
     InvalidContext,
     InvalidPayload,
     InvalidTokenId,
+    TaskNotFound,
+    TaskNotHeld,
     Token,
     TokenNotActive,
     TokenNotFound,
 )
+from stateous.model.wire import Outcome, WireError
 
 MAX_BODY = 1024 * 1024
 """The largest request body the API reads, in bytes: 1 MiB."""
@@ -51,10 +54,16 @@ MAX_KEY = 256
 """The longest idempotency key: the size of the ledger's `key` column."""
 
 MAX_NAME = 128
-"""The longest supervisor name, state name in a claim, or memory key."""
+"""The longest state name in a claim, or memory key."""
+
+MAX_SUPERVISOR = 256
+"""The longest supervisor name: the engine's own limit."""
 
 MAX_NOTE = 500
 """The longest note, after the spaces at its two ends are removed."""
+
+MAX_TASK = 2**63 - 1
+"""The largest task id that a database integer holds."""
 
 STATUSES = ("active", "paused", "completed", "failed", "cancelled")
 
@@ -123,6 +132,47 @@ def create_app(engine: Engine) -> Starlette:
     async def health_check(request: Request) -> Response:
         return JSONResponse(health)
 
+    async def claim(request: Request) -> Response:
+        body = await body_of(request)
+        supervisor = _name(body.get("supervisor"), "supervisor", MAX_SUPERVISOR)
+        states = _names(body.get("states"), "states")
+        grant = await run_in_threadpool(lambda: engine.claim(supervisor, states))
+        if grant is None:
+            return Response(status_code=204)
+        return JSONResponse(grant.to_json())
+
+    async def report(request: Request) -> Response:
+        task = _task(request)
+        body = await body_of(request)
+        named = body.pop("supervisor", None)
+        supervisor = None if named is None else _name(named, "supervisor", MAX_SUPERVISOR)
+        outcome = Outcome.from_json(body)
+        fired = await run_in_threadpool(lambda: engine.report(task, outcome, supervisor=supervisor))
+        return JSONResponse(token_json(fired.token))
+
+    async def heartbeat(request: Request) -> Response:
+        body = await body_of(request)
+        supervisor = _name(body.get("supervisor"), "supervisor", MAX_SUPERVISOR)
+        tasks = _task_ids(body.get("tasks"))
+        lost = await run_in_threadpool(lambda: engine.heartbeat(supervisor, tasks))
+        return JSONResponse({"lost": lost})
+
+    async def note(request: Request) -> Response:
+        task = _task(request)
+        text = _note((await body_of(request)).get("text"))
+        await run_in_threadpool(lambda: engine.note(task, text))
+        return Response(status_code=204)
+
+    async def memory(request: Request) -> Response:
+        task = _task(request)
+        body = await body_of(request)
+        key = _name(body.get("key"), "key")
+        if "value" not in body:
+            raise Problem(422, "memory needs a 'value'; null deletes the key")
+        value = body["value"]
+        await run_in_threadpool(lambda: engine.set_memory(task, key, value))
+        return Response(status_code=204)
+
     routes = [
         Route("/tokens", start, methods=["POST"]),
         Route("/tokens", list_tokens, methods=["GET"]),
@@ -134,6 +184,11 @@ def create_app(engine: Engine) -> Starlette:
         Route("/tokens/{token}/cancel", steer(engine.cancel), methods=["POST"]),
         Route("/workflow", workflow, methods=["GET"]),
         Route("/health", health_check, methods=["GET"]),
+        Route("/tasks/claim", claim, methods=["POST"]),
+        Route("/tasks/heartbeat", heartbeat, methods=["POST"]),
+        Route("/tasks/{task:int}/report", report, methods=["POST"]),
+        Route("/tasks/{task:int}/note", note, methods=["POST"]),
+        Route("/tasks/{task:int}/memory", memory, methods=["PUT"]),
     ]
     return Starlette(
         routes=routes,
@@ -211,6 +266,43 @@ def _check_key(key: str) -> None:
         raise Problem(422, f"an idempotency key has 1 to {MAX_KEY} characters")
     if any(ord(c) < 32 or ord(c) == 127 for c in key):
         raise Problem(422, "an idempotency key has no control characters")
+
+
+def _task(request: Request) -> int:
+    """The task id in the path. An id that no database integer holds is not there."""
+    task: int = request.path_params["task"]
+    if task > MAX_TASK:
+        raise Problem(404, f"there is no task {task}")
+    return task
+
+
+def _name(value: Any, what: str, limit: int = MAX_NAME) -> str:
+    if not isinstance(value, str) or not 1 <= len(value) <= limit:
+        raise Problem(422, f"'{what}' is a string of 1 to {limit} characters")
+    return value
+
+
+def _names(value: Any, what: str) -> list[str]:
+    items = cast("list[Any]", value) if isinstance(value, list) else None
+    if items is None or not all(isinstance(i, str) and 1 <= len(i) <= MAX_NAME for i in items):
+        raise Problem(422, f"'{what}' is a list of state names")
+    return cast("list[str]", items)
+
+
+def _task_ids(value: Any) -> list[int]:
+    items = cast("list[Any]", value) if isinstance(value, list) else None
+    if items is None or not all(
+        isinstance(i, int) and not isinstance(i, bool) and 0 < i <= MAX_TASK for i in items
+    ):
+        raise Problem(422, "'tasks' is a list of task ids")
+    return cast("list[int]", items)
+
+
+def _note(value: Any) -> str:
+    text = value.strip() if isinstance(value, str) else ""
+    if not 1 <= len(text) <= MAX_NOTE:
+        raise Problem(422, f"a note needs a 'text' of 1 to {MAX_NOTE} characters")
+    return text
 
 
 async def body_of(request: Request) -> dict[str, Any]:
@@ -377,6 +469,9 @@ _HANDLERS: dict[Any, Handler] = {
     InvalidTokenId: _answer(422),
     EventNotAllowed: _answer(409),
     TokenNotActive: _answer(409),
+    TaskNotFound: _answer(404),
+    TaskNotHeld: _answer(409),
+    WireError: _answer(422),
     OperationalError: _database_busy,
     Exception: _unexpected,
 }
