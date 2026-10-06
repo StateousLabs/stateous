@@ -4,10 +4,15 @@ Reads come from the task's grant. Writes to the token's context, and timers the
 routine sets, are kept here and travel back with the report: they are saved with
 the outcome, or not at all. Memory and notes are different: they are sent at
 once, through the callables the supervisor passes in, so they survive a crash.
+
+A value read is a copy, and a value written is kept as JSON keeps it (a tuple
+becomes a list). So a change made in place, such as `ctx["items"].append(2)`,
+changes nothing: write the new value with `ctx["items"] = ...`.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from typing import Any, Generic, TypeVar
@@ -38,7 +43,7 @@ class Memory(MutableMapping[str, Any]):
         self._save = save
 
     def __getitem__(self, key: str) -> Any:
-        return self._values[key]
+        return copy.deepcopy(self._values[key])
 
     def __iter__(self) -> Iterator[str]:
         return iter(self._values)
@@ -52,9 +57,9 @@ class Memory(MutableMapping[str, Any]):
             raise ValueError(
                 f"memory[{key!r}] = None: use `del ctx.memory[{key!r}]` to delete a key"
             )
-        _check_json(f"memory[{key!r}]", value)
-        self._save(key, value)
-        self._values[key] = value
+        kept = _as_json(f"memory[{key!r}]", value)
+        self._save(key, copy.deepcopy(kept))
+        self._values[key] = kept
 
     def __delitem__(self, key: str) -> None:
         if key not in self._values:
@@ -101,16 +106,16 @@ class Context(Generic[C]):
     def __getitem__(self, key: str) -> Any:
         if key not in self._values:
             raise KeyError(f"the token's context has no {key!r}")
-        return self._values[key]
+        return copy.deepcopy(self._values[key])
 
     def __setitem__(self, key: str, value: Any) -> None:
-        _check_json(f"ctx[{key!r}]", value)
-        self._values[key] = value
-        self._writes[key] = value
+        kept = _as_json(f"ctx[{key!r}]", value)
+        self._values[key] = kept
+        self._writes[key] = copy.deepcopy(kept)
 
     def get(self, key: str, default: Any = None) -> Any:
-        """The token's context value at `key`, or `default` if it is not set."""
-        return self._values.get(key, default)
+        """A copy of the token's context value at `key`, or `default` if it is not set."""
+        return copy.deepcopy(self._values[key]) if key in self._values else default
 
     def note(self, text: str) -> None:
         """One line of progress in the token's history, sent at once."""
@@ -142,7 +147,7 @@ class Context(Generic[C]):
 
     def writes(self) -> dict[str, Any]:
         """The keys this routine set, with their values; sent with the report."""
-        return dict(self._writes)
+        return copy.deepcopy(self._writes)
 
     def schedules(self) -> list[Schedule]:
         """The timers this routine set; sent with the report."""
@@ -155,8 +160,9 @@ def _check_key(key: str) -> None:
         raise ValueError(f"a memory key is 1 to {MAX_MEMORY_KEY} characters, not {key!r}")
 
 
-def _check_json(what: str, value: Any) -> None:
+def _as_json(what: str, value: Any) -> Any:
+    """`value` as JSON keeps it: a copy that shares nothing with `value`."""
     try:
-        json.dumps(value, allow_nan=False)
+        return json.loads(json.dumps(value, allow_nan=False))
     except (TypeError, ValueError) as error:
         raise TypeError(f"{what} must be JSON: {error}") from None

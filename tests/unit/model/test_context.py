@@ -210,3 +210,65 @@ def test_a_failed_save_leaves_memory_as_it_was() -> None:
     with pytest.raises(ConnectionError):
         memory["dev"] = "s-2"
     assert memory["dev"] == "s-1"
+
+
+# ── values are copies ─────────────────────────────────────────────────────
+
+
+def nested_grant() -> TaskGrant:
+    return TaskGrant(
+        task=1,
+        token="T",
+        state="s",
+        visit=1,
+        attempt=1,
+        context={"items": [1], "meta": {"a": 1}},
+        memory={"seen": [1]},
+        entered_by=None,
+    )
+
+
+def test_changing_a_value_read_from_the_context_changes_nothing() -> None:
+    ctx = Context[Any](nested_grant(), save_memory=Calls().save, note=Calls().note)
+
+    ctx["items"].append(2)
+    ctx.get("meta")["a"] = 2
+
+    assert ctx["items"] == [1]
+    assert ctx.get("meta") == {"a": 1}
+    assert ctx.writes() == {}
+
+
+def test_changing_a_value_after_writing_it_changes_nothing() -> None:
+    ctx = Context[Any](nested_grant(), save_memory=Calls().save, note=Calls().note)
+    items = [1, 2]
+
+    ctx["items"] = items
+    items.append(99)
+    ctx.writes()["items"].append(3)
+
+    assert ctx["items"] == [1, 2]
+    assert ctx.writes() == {"items": [1, 2]}
+
+
+def test_a_write_is_kept_as_json_keeps_it() -> None:
+    ctx = Context[Any](nested_grant(), save_memory=Calls().save, note=Calls().note)
+
+    ctx["pair"] = (1, 2)
+
+    assert ctx["pair"] == [1, 2]
+    assert ctx.writes() == {"pair": [1, 2]}
+
+
+def test_changing_a_value_read_from_memory_changes_nothing() -> None:
+    calls = Calls()
+    ctx = Context[Any](nested_grant(), save_memory=calls.save, note=calls.note)
+
+    ctx.memory["seen"].append(2)
+    later = [3]
+    ctx.memory["later"] = later
+    later.append(4)
+
+    assert ctx.memory["seen"] == [1]
+    assert ctx.memory["later"] == [3]
+    assert calls.saved == [("later", [3])]
