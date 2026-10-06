@@ -51,6 +51,9 @@ TOKEN_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
 KEY_LENGTH = 256
 NOTE_LENGTH = 500
 MEMORY_KEY_LENGTH = 128
+SUPERVISOR_LENGTH = 256
+MOST_TOKENS = 1000
+"""The most tokens that one listing returns."""
 WORKED_ON = ("claimed", "waiting")
 """A task in one of these statuses is still worked on: by its supervisor, or outside."""
 
@@ -59,39 +62,47 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class TokenNotFound(LookupError):
+class EngineError(Exception):
+    """The base of every error that the engine raises for a request."""
+
+
+class TokenNotFound(EngineError, LookupError):
     """No token has this id."""
 
 
-class TaskNotFound(LookupError):
+class TaskNotFound(EngineError, LookupError):
     """No task has this id."""
 
 
-class InvalidContext(ValueError):
+class InvalidContext(EngineError, ValueError):
     """A context, or a routine's changes to it, breaks the workflow's context schema;
     or no transition from START holds on the starting context."""
 
 
-class InvalidPayload(ValueError):
+class InvalidPayload(EngineError, ValueError):
     """A payload breaks its event's schema; or a schedule, a note, a memory key or
     value, or an idempotency key is not valid."""
 
 
-class InvalidTokenId(ValueError):
+class InvalidArgument(EngineError, ValueError):
+    """A supervisor name or a listing limit is out of its range."""
+
+
+class InvalidTokenId(EngineError, ValueError):
     """A token id does not match the allowed pattern, or differs only in case from
     an existing one."""
 
 
-class EventNotAllowed(ValueError):
+class EventNotAllowed(EngineError, ValueError):
     """The event cannot move the token: the workflow does not declare it, it is
     Stateous's own, the state has no transition on it, or no guard holds."""
 
 
-class TokenNotActive(ValueError):
+class TokenNotActive(EngineError, ValueError):
     """The token is in a status that does not allow the request."""
 
 
-class TaskNotHeld(ValueError):
+class TaskNotHeld(EngineError, ValueError):
     """The task is not this supervisor's, or no one works on it any more."""
 
 
@@ -179,6 +190,8 @@ class Engine:
 
     def tokens(self, *, status: str | None = None, limit: int = 100) -> list[Token]:
         """Tokens, the most recently moved first."""
+        if not 0 < limit <= MOST_TOKENS:
+            raise InvalidArgument(f"a listing returns 1 to {MOST_TOKENS} tokens, not {limit}")
         with self._transaction() as tx:
             return [_token(row) for row in tx.find_tokens(status, limit)]
 
@@ -293,6 +306,8 @@ class Engine:
         delivery of the same event is answered as a duplicate, and changes nothing."""
         if key is not None and not 0 < len(key) <= KEY_LENGTH:
             raise InvalidPayload(f"an idempotency key is 1 to {KEY_LENGTH} characters")
+        if problem := _not_json(payload):
+            raise InvalidPayload(f"the payload of {event!r} is not JSON: {problem}")
         with self._transaction() as tx:
             row = self._existing(tx, token)
             result = self._fire(tx, row, event, payload, key)
@@ -429,6 +444,7 @@ class Engine:
     def claim(self, supervisor: str, states: Collection[str]) -> TaskGrant | None:
         """The oldest queued task of `states` whose token is active, now claimed by
         `supervisor` with a lease; None if there is none."""
+        _check_supervisor(supervisor)
         if not states:
             return None
         with self._transaction() as tx:
@@ -446,6 +462,9 @@ class Engine:
         """The outcome of a task. With `supervisor`: from the supervisor that claimed
         it. Without: from outside (CI, a person), for a claimed or waiting task, with
         an event or a failure."""
+        if supervisor is not None:
+            _check_supervisor(supervisor)
+        _check_outcome(outcome)
         with self._transaction() as tx:
             held = self._worked_task(tx, task, supervisor, waiting=outcome.kind == "waiting")
             row = self._existing(tx, held.token)
@@ -456,6 +475,7 @@ class Engine:
         """Renew the leases of the tasks that `supervisor` still holds. Returns the
         others, sorted: the token left the state, was cancelled, or the lease ended.
         The supervisor stops the routines of those tasks."""
+        _check_supervisor(supervisor)
         with self._transaction() as tx:
             renewed = tx.renew_leases(supervisor, tasks, tx.now + self.lease)
         return sorted(set(tasks) - renewed)
@@ -668,6 +688,8 @@ class Engine:
 
     def _create(self, tx: Transaction, token: str, context: dict[str, Any]) -> tables.Token:
         values = self.graph.with_defaults(context)
+        if problem := _not_json(values):
+            raise InvalidContext(f"the context is not JSON: {problem}")
         if errors := self.graph.context_errors(values):
             raise InvalidContext(f"{self.graph.name}: " + "; ".join(errors))
         chosen = self._start_transition(values)
@@ -809,6 +831,32 @@ def _settled(result: Fired | Exception) -> Fired:
     if isinstance(result, Exception):
         raise result
     return result
+
+
+def _not_json(value: Any) -> str | None:
+    """Why a value cannot be stored as JSON (NaN and Infinity are not JSON); or None."""
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError) as error:
+        return str(error)
+    return None
+
+
+def _check_outcome(outcome: Outcome) -> None:
+    """Refuse an outcome with a value that is not JSON: in its context changes, its
+    payload, or the payload of one of its timers."""
+    if problem := _not_json(outcome.context):
+        raise InvalidContext(f"the context changes are not JSON: {problem}")
+    if problem := _not_json(outcome.payload):
+        raise InvalidPayload(f"the payload of {outcome.event!r} is not JSON: {problem}")
+    for schedule in outcome.schedules:
+        if problem := _not_json(schedule.payload):
+            raise InvalidPayload(f"a timer for {schedule.event!r} is not JSON: {problem}")
+
+
+def _check_supervisor(supervisor: str) -> None:
+    if not 0 < len(supervisor) <= SUPERVISOR_LENGTH:
+        raise InvalidArgument(f"a supervisor name is 1 to {SUPERVISOR_LENGTH} characters")
 
 
 def _iso(moment: datetime) -> str:
