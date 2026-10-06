@@ -39,8 +39,6 @@ from stateous.model.graph_file import GraphFileError, load_graph
 
 log = logging.getLogger("stateous.serve")
 
-DEFAULT_DB = "sqlite:///stateous.db"
-DEFAULT_LISTEN = "127.0.0.1:8080"
 LOCAL_HOSTS = ("127.0.0.1", "::1", "localhost")
 """The hosts that only this computer reaches: no warning."""
 

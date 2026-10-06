@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import ParamSpec, TypeVar
+from typing import NoReturn, ParamSpec, TypeVar
 
 import typer
 
@@ -17,6 +17,12 @@ R = TypeVar("R")
 
 class CommandError(Exception):
     """A command cannot go on. The message is one plain sentence."""
+
+
+def exit_with(message: str) -> NoReturn:
+    """One plain sentence to stderr, then exit code 1. Never a traceback."""
+    typer.echo(f"error: {message}", err=True)
+    raise typer.Exit(1)
 
 
 def reported(command: Callable[P, R]) -> Callable[P, R]:

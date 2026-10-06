@@ -12,7 +12,7 @@ import pytest
 import uvicorn
 from starlette.applications import Starlette
 
-from stateous.cli import main
+from stateous.cli import running
 from stateous.supervisor.folder import Folder, FolderConfig
 
 
@@ -30,8 +30,8 @@ class FakeSupervisor:
         return 0
 
 
-def server() -> main._SupervisedServer:  # pyright: ignore[reportPrivateUsage]
-    return main._SupervisedServer(uvicorn.Config(Starlette()))  # pyright: ignore[reportPrivateUsage]
+def server() -> running.SupervisedServer:
+    return running.SupervisedServer(uvicorn.Config(Starlette()))
 
 
 def test_a_signal_goes_to_the_supervisor_while_it_runs() -> None:
@@ -64,12 +64,12 @@ def test_after_the_supervisor_ran_signals_stop_the_server_and_a_second_forces_it
     async def open_fake(folder: Folder, api: Any) -> FakeSupervisor:
         return fake
 
-    monkeypatch.setattr(main, "open_supervisor", open_fake)
+    monkeypatch.setattr(running, "open_supervisor", open_fake)
     supervised = server()
     supervised.started = True
     folder = Folder(tmp_path, FolderConfig(url="http://cp.test"), "sha256:x")
 
-    code = asyncio.run(main._supervise_beside(supervised, folder, None))  # pyright: ignore[reportPrivateUsage, reportArgumentType]
+    code = asyncio.run(running.supervise_beside(supervised, folder, None))  # pyright: ignore[reportArgumentType]
 
     assert code == 0
     supervised.handle_exit(signal.SIGINT, None)

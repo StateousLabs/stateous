@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 
-from stateous.cli.main import _log_to_stderr, _run_bounded  # pyright: ignore[reportPrivateUsage]
+from stateous.cli.running import log_to_stderr, run_bounded
 from stateous.cli.serving import configure_logging
 
 
@@ -16,8 +16,8 @@ def test_log_to_stderr_adds_no_second_handler() -> None:
     configure_logging()
     handlers = len(logging.getLogger().handlers)
 
-    _log_to_stderr()
-    _log_to_stderr()
+    log_to_stderr()
+    log_to_stderr()
 
     assert len(logging.getLogger().handlers) == handlers
     assert logging.getLogger("stateous").level == logging.INFO
@@ -38,7 +38,7 @@ def test_the_loop_ends_although_a_task_ignores_its_cancellation() -> None:
         return 1
 
     began = time.monotonic()
-    code, _ = _run_bounded(main(), leftover_wait=0.2)
+    code, _ = run_bounded(main(), leftover_wait=0.2)
 
     assert code == 1
     assert time.monotonic() - began < 3
@@ -48,7 +48,7 @@ def test_the_loop_returns_the_code_of_main() -> None:
     async def main() -> int:
         return 0
 
-    assert _run_bounded(main(), leftover_wait=0.2) == (0, True)
+    assert run_bounded(main(), leftover_wait=0.2) == (0, True)
 
 
 def test_the_end_is_not_clean_while_a_thread_of_the_loop_still_runs() -> None:
@@ -61,7 +61,7 @@ def test_the_end_is_not_clean_while_a_thread_of_the_loop_still_runs() -> None:
 
     began = time.monotonic()
     try:
-        result = _run_bounded(main(), leftover_wait=0.2)
+        result = run_bounded(main(), leftover_wait=0.2)
     finally:
         release.set()
 
@@ -74,4 +74,4 @@ def test_the_end_is_clean_when_the_threads_of_the_loop_are_done() -> None:
         await asyncio.to_thread(time.sleep, 0)
         return 0
 
-    assert _run_bounded(main(), leftover_wait=0.2) == (0, True)
+    assert run_bounded(main(), leftover_wait=0.2) == (0, True)

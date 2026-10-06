@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-stateous = "stateous.cli.main:app"
+stateous = "stateous.cli.main:main"
 
 [dependency-groups]
 dev = [

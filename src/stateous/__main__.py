@@ -1,6 +1,6 @@
 """`python -m stateous`: the same as the `stateous` command."""
 
-from stateous.cli.main import app
+from stateous.cli.main import main
 
 if __name__ == "__main__":
-    app(prog_name="stateous")
+    main()
