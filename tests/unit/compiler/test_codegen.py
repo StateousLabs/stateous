@@ -306,6 +306,24 @@ def test_a_model_may_not_take_a_name_the_contract_uses() -> None:
         generate_contract(compile_workflow(flow))
 
 
+@pytest.mark.parametrize("field_name", ["in-progress", "class"])
+def test_a_field_name_that_is_not_a_python_name_is_refused(field_name: str) -> None:
+    document: dict[str, Any] = {
+        "workflow": "w",
+        "events": {},
+        "states": {},
+        "schemas": {
+            "Bad": {
+                "properties": {field_name: {"type": "string"}},
+                "required": [field_name],
+            }
+        },
+    }
+
+    with pytest.raises(CodegenError, match=f"the field {field_name!r} of Bad"):
+        generate_contract(document)
+
+
 # ── stubs ─────────────────────────────────────────────────────────────────
 
 
