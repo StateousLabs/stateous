@@ -1,7 +1,7 @@
 """One control plane serves one database. These tests use SQLite files; the
 Postgres lock is tested in tests/postgres/test_serving.py."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -81,13 +81,31 @@ def test_a_hold_that_is_not_renewed_lapses_and_another_store_takes_it(tmp_path: 
         crashed.engine.dispose()
 
 
-def test_keep_serving_renews_the_hold(tmp_path: Path) -> None:
+class FakeClock:
+    """A stand-in for `wall_clock` that moves only when a test tells it to. Some
+    assertions depend on how much simulated time passed since the hold, or since its
+    last renewal; the real clock must not be free to add its own, unplanned time."""
+
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+
+    def __call__(self) -> datetime:
+        return self._now
+
+    def advance(self, by: timedelta) -> None:
+        self._now += by
+
+
+def test_keep_serving_renews_the_hold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     url = sqlite_url(tmp_path / "s.db")
+    clock = FakeClock(datetime(2026, 1, 1, tzinfo=UTC))
+    monkeypatch.setattr("stateous.control.store.store.wall_clock", clock)
+
     store = Store(url, hold=True)
     try:
-        age_the_hold(url, timedelta(seconds=20))
-        assert store.keep_serving()
-        age_the_hold(url, timedelta(seconds=20))  # 40 seconds without the renewal
+        clock.advance(timedelta(seconds=20))
+        assert store.keep_serving()  # 20s since the hold: past RENEW_EVERY, so it renews
+        clock.advance(timedelta(seconds=20))  # 40s since the hold, 20s since the renewal
 
         with pytest.raises(DatabaseHeld):
             Store(url, hold=True)
