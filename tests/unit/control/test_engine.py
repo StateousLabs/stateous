@@ -222,6 +222,23 @@ def test_an_event_with_no_transition_from_the_state_is_refused_and_recorded() ->
     assert engine.get("T-1").state == "coding"
 
 
+def test_a_guard_that_does_not_hold_with_no_otherwise_is_refused_and_recorded() -> None:
+    document = sdlc()
+    for transition in document["transitions"]:
+        if transition["from"] == "coding" and transition.get("on") == "done":
+            transition["when"] = "ctx['urgent'] == true"
+    engine = new_engine(document)
+    engine.start("T-1", TICKET)
+
+    with pytest.raises(EventNotAllowed, match="no guard matched"):
+        engine.fire("T-1", "done", None, key="k")
+
+    assert engine.history("T-1")[-1].kind == "event_rejected"
+    assert engine.get("T-1").state == "coding"
+    with pytest.raises(EventNotAllowed, match="no guard matched"):
+        engine.fire("T-1", "done", None, key="k")  # the same key again: not a duplicate
+
+
 def test_an_invalid_payload_is_refused_and_records_nothing() -> None:
     engine = new_engine()
     engine.start("T-1", TICKET)

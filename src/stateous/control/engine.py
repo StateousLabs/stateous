@@ -17,8 +17,9 @@ completed. It keeps the state it came from, so the history shows how it ended.
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -26,6 +27,7 @@ from typing import Any, Literal
 
 from stateous.control.graph import (
     END,
+    ERROR,
     OWN_EVENTS,
     START,
     STARTED,
@@ -34,8 +36,9 @@ from stateous.control.graph import (
     TransitionSpec,
 )
 from stateous.control.store import Store, Transaction, tables
-from stateous.model.durations import parse_duration
+from stateous.model.durations import duration_problem, parse_duration
 from stateous.model.guards import GuardInput, evaluate
+from stateous.model.wire import EventRecord, Outcome, Schedule, TaskGrant
 
 DEFAULT_LEASE = timedelta(minutes=2)
 """How long a claimed task stays with its supervisor without a heartbeat."""
@@ -46,6 +49,10 @@ ENDED = ("completed", "failed", "cancelled")
 TOKEN_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
 """A token id: a letter or digit, then up to 127 letters, digits, `.`, `_` or `-`."""
 KEY_LENGTH = 256
+NOTE_LENGTH = 500
+MEMORY_KEY_LENGTH = 128
+WORKED_ON = ("claimed", "waiting")
+"""A task in one of these statuses is still worked on: by its supervisor, or outside."""
 
 
 def utcnow() -> datetime:
@@ -318,6 +325,187 @@ class Engine:
             self._end(tx, row, "completed")
         else:
             self._enter(tx, row, chosen.target)
+
+    # ── tasks: the control plane's side of the supervisor ───────────────
+
+    def claim(self, supervisor: str, states: Collection[str]) -> TaskGrant | None:
+        """The oldest queued task of `states` whose token is active, now claimed by
+        `supervisor` with a lease; None if there is none."""
+        if not states:
+            return None
+        with self._transaction() as tx:
+            task = tx.claim_task(supervisor, states)
+            if task is None:
+                return None
+            task.lease_until = tx.now + self.lease
+            tx.append(
+                task.token, "task_claimed",
+                task=task.id, supervisor=supervisor, attempt=task.attempt,
+            )  # fmt: skip
+            return self._grant(tx, task)
+
+    def report(self, task: int, outcome: Outcome, *, supervisor: str | None = None) -> Fired:
+        """The outcome of a task. With `supervisor`: from the supervisor that claimed
+        it. Without: from outside (CI, a person), for a claimed or waiting task, with
+        an event or a failure."""
+        with self._transaction() as tx:
+            held = self._worked_task(tx, task, supervisor, waiting=outcome.kind == "waiting")
+            row = self._existing(tx, held.token)
+            result = self._report(tx, row, held, outcome)
+        return _settled(result)
+
+    def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
+        """Renew the leases of the tasks that `supervisor` still holds. Returns the
+        others, sorted: the token left the state, was cancelled, or the lease ended.
+        The supervisor stops the routines of those tasks."""
+        with self._transaction() as tx:
+            renewed = tx.renew_leases(supervisor, tasks, tx.now + self.lease)
+        return sorted(set(tasks) - renewed)
+
+    def note(self, task: int, text: str) -> None:
+        """One line of progress in the token's history."""
+        line = text.strip()
+        if not 0 < len(line) <= NOTE_LENGTH:
+            raise InvalidPayload(f"a note is 1 to {NOTE_LENGTH} characters")
+        with self._transaction() as tx:
+            held = self._worked_task(tx, task, None, waiting=False)
+            tx.append(held.token, "note", task=held.id, text=line)
+
+    def set_memory(self, task: int, key: str, value: Any) -> None:
+        """Save one key of the routine memory of the task's token and state, at once.
+        `None` deletes the key. The history records the key, never the value."""
+        if not 0 < len(key) <= MEMORY_KEY_LENGTH:
+            raise InvalidPayload(f"a memory key is 1 to {MEMORY_KEY_LENGTH} characters")
+        if value is not None:
+            try:
+                json.dumps(value, allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise InvalidPayload(f"the value of {key!r} is not JSON: {error}") from None
+        with self._transaction() as tx:
+            held = self._worked_task(tx, task, None, waiting=False)
+            if value is None:
+                if tx.forget(held.token, held.state, key):
+                    tx.append(held.token, "memory_deleted", state=held.state, memory_key=key)
+            else:
+                tx.set_memory(held.token, held.state, key, value)
+                tx.append(held.token, "memory_set", state=held.state, memory_key=key)
+
+    def _worked_task(
+        self, tx: Transaction, task_id: int, supervisor: str | None, *, waiting: bool
+    ) -> tables.Task:
+        """The task, if it is still worked on, and, with `supervisor`, by it."""
+        task = tx.task(task_id)
+        if task is None:
+            raise TaskNotFound(f"there is no task {task_id}")
+        if task.status not in WORKED_ON:
+            raise TaskNotHeld(f"task {task_id} is {task.status}; no one works on it now")
+        if supervisor is not None and (task.status != "claimed" or task.claimed_by != supervisor):
+            raise TaskNotHeld(f"task {task_id} is not held by {supervisor!r}")
+        if supervisor is None and waiting:
+            raise TaskNotHeld("only the supervisor that holds a task reports it waiting")
+        return task
+
+    def _report(
+        self, tx: Transaction, row: tables.Token, task: tables.Task, outcome: Outcome
+    ) -> Fired | Exception:
+        if outcome.kind == "failed":
+            error = outcome.error or "the routine failed, and said no more"
+            self._task_failed(tx, row, task, error)
+            return Fired(_token(row))
+        context = {**row.context, **outcome.context}
+        if errors := self.graph.context_errors(context):
+            raise InvalidContext("the context changes break the schema: " + "; ".join(errors))
+        for schedule in outcome.schedules:
+            if problem := self._schedule_problem(schedule):
+                raise InvalidPayload(problem)
+        if outcome.kind == "waiting":
+            self._apply(tx, row, outcome, context)
+            task.status, task.lease_until = "waiting", None
+            tx.append(row.token, "task_waiting", task=task.id)
+            return Fired(_token(row))
+        event = outcome.event or ""
+        emits = self.graph.state(task.state).emits
+        if event not in emits:
+            allowed = ", ".join(emits) or "nothing"
+            reason = f"{task.state!r} may not emit {event!r}; it may emit: {allowed}"
+            return self._reject(tx, row, event, reason, EventNotAllowed)
+        if errors := self.graph.payload_errors(event, outcome.payload):
+            raise InvalidPayload(f"{event}: " + "; ".join(errors))
+        if row.status == "active":
+            # The guards read the context with the routine's changes. Decide first:
+            # a refused outcome saves none of the changes.
+            decision = self._decide(tx, row, event, outcome.payload, context)
+            if isinstance(decision, _Refusal) and not decision.fail:
+                return self._reject(tx, row, event, decision.reason, EventNotAllowed)
+        self._apply(tx, row, outcome, context)
+        refusal = self._route(tx, row, event, outcome.payload, key=f"task:{task.id}")
+        assert refusal is None, "the decision above found a transition"
+        if row.status == "paused":  # the event is held; the work is done
+            task.status, task.lease_until = "done", None
+            tx.append(row.token, "task_done", task=task.id)
+        return Fired(_token(row))
+
+    def _apply(
+        self, tx: Transaction, row: tables.Token, outcome: Outcome, context: dict[str, Any]
+    ) -> None:
+        """Save a report's context changes, and set its timers. The timers are set
+        before the outcome moves the token, so that leaving the state cancels them."""
+        if outcome.context:
+            row.context = context
+            tx.append(row.token, "context_changed", keys=sorted(outcome.context))
+        for schedule in outcome.schedules:
+            after = parse_duration(schedule.after)
+            self._set_timer(tx, row, schedule.event, schedule.payload, after, kind="timer")
+
+    def _schedule_problem(self, schedule: Schedule) -> str | None:
+        """Why a routine's timer cannot be set, or None."""
+        if problem := duration_problem(schedule.after):
+            return f"a timer for {schedule.event!r}: {problem}"
+        if schedule.event in OWN_EVENTS or not self.graph.declares(schedule.event):
+            name = self.graph.name
+            return f"a timer names {schedule.event!r}, which is not an event of {name!r}"
+        if errors := self.graph.payload_errors(schedule.event, schedule.payload):
+            return f"a timer for {schedule.event!r}: " + "; ".join(errors)
+        return None
+
+    def _task_failed(
+        self, tx: Transaction, row: tables.Token, task: tables.Task, error: str
+    ) -> None:
+        """One failed attempt. Queue the task again while the state's retries allow;
+        then the token gets `error`. With no way to go on `error`, the token fails."""
+        tx.append(row.token, "task_failed", task=task.id, error=error)
+        task.lease_until = None
+        if task.attempt <= self.graph.state(task.state).retries:
+            task.status, task.claimed_by = "queued", None
+            tx.append(row.token, "task_retrying", task=task.id, attempt=task.attempt + 1)
+            # The next attempt runs the routine again, and it sets its own timers.
+            # The state's timeout stays: it covers every attempt.
+            for timer in tx.pending_timers(row.token):
+                if timer.kind == "timer":
+                    timer.status = "cancelled"
+            return
+        task.status = "failed"
+        if not self.graph.candidates(row.state, ERROR):
+            self._fail(tx, row, f"{task.state!r} failed, and has no transition on 'error': {error}")
+        elif (refusal := self._route(tx, row, ERROR, None, key=None)) is not None:
+            self._fail(tx, row, f"{task.state!r} failed, and 'error' cannot move it: {refusal}")
+
+    def _grant(self, tx: Transaction, task: tables.Task) -> TaskGrant:
+        row = self._existing(tx, task.token)
+        last = tx.last_accepted(task.token)
+        entered_by = (
+            None if last is None else EventRecord(last.data["event"], last.data.get("payload"))
+        )
+        return TaskGrant(
+            task=task.id,
+            token=task.token,
+            state=task.state,
+            visit=task.visit,
+            attempt=task.attempt,
+            context=dict(row.context),
+            memory=tx.memory(task.token, task.state),
+            entered_by=entered_by,
+        )
 
     # ── entering, leaving, ending ───────────────────────────────────────
 
