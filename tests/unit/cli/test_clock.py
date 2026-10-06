@@ -101,6 +101,27 @@ def test_a_database_that_does_not_answer_does_not_stop_the_clock(
     assert not clock.lost
 
 
+def test_a_renewal_that_raises_skips_the_tick_for_that_step(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A renewal that raises every time is not a lost hold: the clock skips the
+    engine's tick for that step, and never sets `lost`."""
+    ticks = Ticks()
+    clock = Clock(ticks, Hold([OSError("unreachable")]), every=0.01)
+
+    async def main() -> None:
+        ticking = asyncio.create_task(clock.run())
+        await asyncio.sleep(0.1)
+        clock.stop()
+        await asyncio.wait_for(ticking, timeout=5)
+
+    asyncio.run(main())
+
+    assert ticks.count == 0
+    assert not clock.lost
+    assert "cannot renew" in caplog.text
+
+
 def test_after_a_lost_hold_each_request_is_503() -> None:
     clock = Clock(Ticks(), Hold([False]), every=0.01)
     run_until(clock, lambda: clock.lost)

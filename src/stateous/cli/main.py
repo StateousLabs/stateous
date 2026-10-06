@@ -7,6 +7,14 @@ from typing import Annotated
 
 import typer
 
+from stateous.cli.serving import (
+    DEFAULT_DB,
+    DEFAULT_LISTEN,
+    GracefulServer,
+    ServeRefused,
+    configure_logging,
+    prepare_serve,
+)
 from stateous.compiler.codegen import CodegenError, generate_contract
 from stateous.compiler.compile import compile_workflow
 from stateous.compiler.load import LoadError, load_workflow
@@ -51,3 +59,29 @@ def compile_command(
         typer.echo(f"error: cannot write {target}: {error.strerror}", err=True)
         raise typer.Exit(1) from None
     typer.echo(f"wrote {target}")
+
+
+@app.command()
+def serve(
+    graph: Annotated[
+        Path,
+        typer.Argument(help="The graph file that `stateous compile` wrote.", show_default=False),
+    ],
+    db: Annotated[str, typer.Option("--db", help="The database URL.")] = DEFAULT_DB,
+    listen: Annotated[
+        str, typer.Option("--listen", help="HOST:PORT to listen on.")
+    ] = DEFAULT_LISTEN,
+) -> None:
+    """Run the control plane: the HTTP API and the clock, over one database."""
+    configure_logging()
+    try:
+        serving = prepare_serve(graph, db, listen)
+    except ServeRefused as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"serving on {serving.url} (Ctrl-C stops)", err=True)
+    try:
+        GracefulServer(serving.config).run(sockets=[serving.listener])
+    finally:
+        serving.close()
+    typer.echo("stopped", err=True)

@@ -149,8 +149,12 @@ class Clock:
                 return
 
     async def step(self) -> None:
-        """One tick: renew the hold, then tick the engine."""
-        if not await self._kept():
+        """One tick: renew the hold, then tick the engine. A renewal that raises
+        skips the engine's tick for this step; it is not a lost hold."""
+        kept = await self._kept()
+        if kept is None:
+            return
+        if not kept:
             self.lost = True
             log.error(LOST)
             return
@@ -167,9 +171,11 @@ class Clock:
         """End `run` after the tick in progress, if there is one."""
         self._stopping.set()
 
-    async def _kept(self) -> bool:
-        """Whether this control plane still holds the database. A database that does
-        not answer is not a lost hold: the clock tries again on the next tick."""
+    async def _kept(self) -> bool | None:
+        """Whether this control plane still holds the database: True, False (the
+        hold is lost), or None when the renewal raised. A database that does not
+        answer is not a lost hold: the clock skips this step's tick and tries
+        again on the next one."""
         try:
             return await asyncio.to_thread(self.hold.keep_serving)
         except Exception as error:
@@ -179,7 +185,7 @@ class Clock:
                 _one_line(error),
                 self.every,
             )
-            return True
+            return None
 
 
 class ClockedApp:
@@ -246,21 +252,22 @@ def prepare_serve(graph: Path, db: str, listen: str) -> Serving:
     listener = _listen(host, port)
     try:
         store = _open(db)
-    except ServeRefused:
+    except BaseException:
         listener.close()
         raise
     try:
         engine = Engine(store, workflow)
         _check_structure(engine)
+        if (warning := listen_warning(host)) is not None:
+            typer.echo(warning, err=True)
+        app = ClockedApp(create_app(engine), Clock(engine, store))
+        config = uvicorn.Config(app, log_level="warning", timeout_graceful_shutdown=SHUTDOWN_WITHIN)
+        url = _url(host, listener)
     except BaseException:
         store.close()
         listener.close()
         raise
-    if (warning := listen_warning(host)) is not None:
-        typer.echo(warning, err=True)
-    app = ClockedApp(create_app(engine), Clock(engine, store))
-    config = uvicorn.Config(app, log_level="warning", timeout_graceful_shutdown=SHUTDOWN_WITHIN)
-    return Serving(config=config, listener=listener, url=_url(host, listener), store=store)
+    return Serving(config=config, listener=listener, url=url, store=store)
 
 
 class GracefulServer(uvicorn.Server):
@@ -275,7 +282,8 @@ class GracefulServer(uvicorn.Server):
 
 
 def configure_logging() -> None:
-    """Warnings and errors of Stateous go to stderr, one line each."""
+    """Set up logging for `serve`. The `stateous` logger stays at INFO: phase 4's
+    supervisor reads these lines. Each line goes to stderr, one line each."""
     if not logging.getLogger().handlers:
         logging.basicConfig(format="%(asctime)s %(name)s: %(message)s")
     logging.getLogger("stateous").setLevel(logging.INFO)

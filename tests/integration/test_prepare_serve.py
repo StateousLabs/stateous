@@ -199,6 +199,49 @@ def test_a_database_that_cannot_be_opened_is_one_sentence_and_frees_the_port(
         again.bind((host, int(port)))  # the refused control plane closed its port
 
 
+def test_a_failure_after_the_store_opens_closes_the_store_and_the_listener(
+    tmp_path: Path, sdlc: dict[str, Any], db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure anywhere between opening the store and returning `Serving` (here,
+    building the URL) gives up the hold and frees the port."""
+    graph = write(tmp_path / "sdlc.json", sdlc)
+    listen = free()
+
+    def broken(host: str, listener: socket.socket) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(serving_module, "_url", broken)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        prepare_serve(graph, db, listen)
+
+    Store(db, hold=True).close()  # the hold was given up
+    host, _, port = listen.rpartition(":")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as again:
+        again.bind((host, int(port)))  # the listener was closed
+
+
+def test_a_keyboard_interrupt_while_opening_the_store_closes_the_listener(
+    tmp_path: Path, sdlc: dict[str, Any], db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `KeyboardInterrupt` during `_open` (e.g. a slow migration) is not a
+    `ServeRefused`, but it still frees the port."""
+    graph = write(tmp_path / "sdlc.json", sdlc)
+    listen = free()
+
+    def interrupted(db: str) -> Store:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(serving_module, "_open", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        prepare_serve(graph, db, listen)
+
+    host, _, port = listen.rpartition(":")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as again:
+        again.bind((host, int(port)))  # the listener was closed
+
+
 def test_a_wide_listen_prints_one_warning_line(
     tmp_path: Path,
     sdlc: dict[str, Any],
