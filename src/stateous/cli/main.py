@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from types import FrameType
 from typing import Annotated, Any, NoReturn, cast
 
 import typer
+import uvicorn
 
 from stateous.cli.serving import (
     DEFAULT_DB,
     DEFAULT_LISTEN,
     GracefulServer,
     ServeRefused,
+    Serving,
     configure_logging,
     prepare_serve,
 )
@@ -27,7 +30,12 @@ from stateous.model.graph_file import dump_graph
 from stateous.model.workflow import DefinitionError
 from stateous.supervisor.folder import Folder, FolderError, load_folder, write_folder
 from stateous.supervisor.remote import ControlPlaneApi
-from stateous.supervisor.supervisor import SupervisorError, open_supervisor, stop_on_signals
+from stateous.supervisor.supervisor import (
+    Supervisor,
+    SupervisorError,
+    open_supervisor,
+    stop_on_signals,
+)
 
 log = logging.getLogger("stateous.cli")
 
@@ -85,31 +93,46 @@ def serve(
     listen: Annotated[
         str, typer.Option("--listen", help="HOST:PORT to listen on.")
     ] = DEFAULT_LISTEN,
+    supervise_folder: Annotated[
+        Path | None,
+        typer.Option(
+            "--supervise",
+            help="Also run the supervisor of this folder, in this process (for development).",
+        ),
+    ] = None,
 ) -> None:
     """Run the control plane: the HTTP API and the clock, over one database."""
     configure_logging()
+    folder: Folder | None = None
+    if supervise_folder is not None:
+        try:
+            folder = load_folder(supervise_folder)
+        except FolderError as error:
+            _exit_with(str(error))
     try:
         serving = prepare_serve(graph, db, listen)
     except ServeRefused as error:
-        typer.echo(f"error: {error}", err=True)
-        raise typer.Exit(1) from None
+        _exit_with(str(error))
     typer.echo(f"serving on {serving.url} (Ctrl-C stops)", err=True)
-    server = GracefulServer(serving.config)
-
-    def stop() -> None:
-        server.should_exit = True
-
-    serving.on_lost(stop)
+    code = 0
     try:
-        server.run(sockets=[serving.listener])
+        if folder is None:
+            server = GracefulServer(serving.config)
+
+            def stop() -> None:
+                server.should_exit = True
+
+            serving.on_lost(stop)
+            server.run(sockets=[serving.listener])
+        else:
+            _log_to_stderr()
+            code = _serve_with_supervisor(serving, folder)
     finally:
         serving.close()
     if serving.clock.lost:
-        typer.echo(
-            "error: another control plane took the database; this control plane stopped",
-            err=True,
-        )
-        raise typer.Exit(1)
+        _exit_with("another control plane took the database; this control plane stopped")
+    if code != 0:
+        raise typer.Exit(code)
     typer.echo("stopped", err=True)
 
 
@@ -145,10 +168,24 @@ def _run_bounded(main: Coroutine[Any, Any, int], *, leftover_wait: float = LEFTO
                 _, pending = loop.run_until_complete(asyncio.wait(left, timeout=leftover_wait))
                 if pending:
                     log.warning("%d task(s) did not stop; exiting without them", len(pending))
+                    loop.set_exception_handler(_quiet_about(pending))
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.run_until_complete(loop.shutdown_default_executor())
         finally:
             loop.close()
+
+
+def _quiet_about(abandoned: set[asyncio.Task[Any]]) -> Callable[..., None]:
+    """An exception handler for the loop that says nothing more about the tasks that
+    were left behind (the line above names them already). Each other report goes to
+    the default handler."""
+
+    def handle(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        if context.get("task") in abandoned:
+            return
+        loop.default_exception_handler(context)
+
+    return handle
 
 
 @app.command()
@@ -204,6 +241,79 @@ async def _supervise(folder: Folder) -> int:
             return await supervisor.run()
     finally:
         await api.aclose()
+
+
+class _SupervisedServer(GracefulServer):
+    """Uvicorn's server, but a stop signal goes to the supervisor. The server serves
+    on while the supervisor waits for its routines, so they can still report. It
+    stops when the supervisor's `run` ends. The signal is not recorded, so uvicorn
+    does not raise it again at the end."""
+
+    def __init__(self, config: uvicorn.Config) -> None:
+        super().__init__(config)
+        self.supervisor: Supervisor | None = None
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        if self.supervisor is None:
+            super().handle_exit(sig, frame)  # GracefulServer: graceful first, then at once
+        else:
+            self.supervisor.on_signal()
+
+    def stop_all(self) -> None:
+        """Stop the server, and stop the supervisor at once: its control plane does no
+        more work. It runs on the server's loop (`Serving.on_lost`): it does not block
+        and does not raise."""
+        self.should_exit = True
+        if self.supervisor is not None:
+            self.supervisor.on_signal()
+            self.supervisor.on_signal()
+
+
+def _serve_with_supervisor(serving: Serving, folder: Folder) -> int:
+    """Run `_serve_and_supervise`. Returns the exit code."""
+    try:
+        return _run_bounded(_serve_and_supervise(serving, folder))
+    except SupervisorError as error:
+        _exit_with(str(error))
+    except KeyboardInterrupt:  # a signal before the server took the signals
+        return 1
+
+
+async def _serve_and_supervise(serving: Serving, folder: Folder) -> int:
+    """The control plane and the supervisor of `folder` in one loop. The supervisor
+    speaks HTTP to the server's own address. Returns the supervisor's exit code:
+    1 also when the server stopped before the supervisor ran (a lost hold, or a
+    signal at the start)."""
+    server = _SupervisedServer(serving.config)
+    serving.on_lost(server.stop_all)
+    serving_task = asyncio.create_task(server.serve(sockets=[serving.listener]))
+    api = ControlPlaneApi(serving.url)
+    supervising = asyncio.create_task(_supervise_beside(server, folder, api))
+    try:
+        await asyncio.wait({serving_task, supervising}, return_when=asyncio.FIRST_COMPLETED)
+        if not supervising.done():  # the server stopped first
+            if server.supervisor is None:
+                supervising.cancel()
+            else:
+                server.stop_all()
+        await asyncio.wait({supervising})
+        code = 1 if supervising.cancelled() else supervising.result()
+        if code != 0:
+            server.force_exit = True
+        return code
+    finally:
+        await api.aclose()
+        server.should_exit = True
+        await serving_task
+
+
+async def _supervise_beside(server: _SupervisedServer, folder: Folder, api: ControlPlaneApi) -> int:
+    """Wait until the server serves, then open and run the supervisor of `folder`."""
+    while not server.started:
+        await asyncio.sleep(0.05)
+    supervisor = await open_supervisor(folder, api)
+    server.supervisor = supervisor
+    return await supervisor.run()
 
 
 app.add_typer(token_app, name="token")
