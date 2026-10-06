@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PydanticUserError
 
 from stateous.compiler.exclusive import Where, check
 from stateous.model.workflow import (
@@ -52,6 +52,7 @@ def _problems(flow: Workflow) -> Iterable[str]:
     yield from _context_keys(flow)
     yield from _counted_events(flow)
     yield from _model_names(flow)
+    yield from _json_schemas(flow)
 
 
 def _unreachable(flow: Workflow) -> Iterable[str]:
@@ -147,6 +148,20 @@ def _model_names(flow: Workflow) -> Iterable[str]:
         if first is not model and model.__name__ not in reported:
             reported.add(model.__name__)
             yield f"two different models are named {model.__name__!r}; give each its own name"
+
+
+def _json_schemas(flow: Workflow) -> Iterable[str]:
+    """The graph file holds each model as JSON Schema, so each must have one."""
+    models: list[type[BaseModel]] = []
+    for model in [flow.context, *(event.payload for event in flow.events.values())]:
+        if model is not None and model not in models:
+            models.append(model)
+    for model in models:
+        try:
+            model.model_json_schema()
+        except PydanticUserError as error:
+            reason = (error.message.strip().splitlines() or [type(error).__name__])[0]
+            yield f"the model {model.__name__} cannot be written as JSON Schema: {reason}"
 
 
 def _group(source: str, event: str) -> str:

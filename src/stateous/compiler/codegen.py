@@ -62,6 +62,7 @@ def generate_contract(document: dict[str, Any]) -> str:
     context = cast("str | None", document.get("context"))
     _unique("event", events)
     _unique("state", states)
+    _known_models(document, schemas)
     models = [_model(name, schemas[name]) for name in _ordered(schemas)]
     _model_names([model.name for model in models], context)
     seal = checksum(document)
@@ -174,6 +175,16 @@ def _unique(what: str, names: Iterable[str]) -> None:
                 "in Python; rename one"
             )
         seen[identifier] = name
+
+
+def _known_models(document: dict[str, Any], schemas: dict[str, Any]) -> None:
+    """Each model the document names, as context or payload, is a key in `schemas`."""
+    events = cast("dict[str, dict[str, Any]]", document["events"])
+    used = [("the context", document.get("context"))]
+    used += [(f"the event {name!r}", spec.get("payload")) for name, spec in events.items()]
+    for what, name in used:
+        if name is not None and name not in schemas:
+            raise CodegenError(f"{what} names the model {name!r}, which 'schemas' does not have")
 
 
 def _model_names(names: list[str], context: str | None) -> None:

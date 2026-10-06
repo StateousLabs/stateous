@@ -1,11 +1,14 @@
 """A workflow -> the graph document (contract section 6)."""
 
-from typing import Any
+from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel
+import pytest
+from pydantic import BaseModel, create_model
 
 from stateous import END, START, Workflow
+from stateous.compiler.codegen import generate_contract
 from stateous.compiler.compile import compile_workflow
+from stateous.model.workflow import DefinitionError
 
 SDLC: dict[str, Any] = {
     "stateous": 1,
@@ -122,3 +125,36 @@ def test_every_model_is_embedded_once_without_titles_and_refers_by_schemas() -> 
     assert schemas["Report"]["properties"]["failures"]["items"] == {"$ref": "#/schemas/Failure"}
     assert "title" not in schemas["Failure"]
     assert schemas["Failure"]["properties"]["title"] == {"default": "", "type": "string"}
+
+
+T = TypeVar("T")
+
+
+class Box(BaseModel, Generic[T]):
+    item: T
+
+
+def boxed(context: type[BaseModel], payload: type[BaseModel]) -> Workflow:
+    flow = Workflow("boxes", context=context)
+    a = flow.state("a")
+    flow.transition(START, a)
+    flow.transition(a, END, on=flow.event("done", payload=payload))
+    return flow
+
+
+def test_a_generic_model_is_named_by_its_key_in_schemas() -> None:
+    document = compile_workflow(boxed(Box[int], Box[str]))
+
+    assert document["context"] == "Box_int_"
+    assert document["events"]["done"] == {"payload": "Box_str_"}
+    assert sorted(document["schemas"]) == ["Box_int_", "Box_str_"]
+    source = generate_contract(document)
+    assert "Box_int_Context = Context[Box_int_]" in source
+    compile(source, "contract.py", "exec")  # it is valid Python
+
+
+def test_a_model_name_that_is_not_a_python_name_is_refused() -> None:
+    odd = create_model("odd-name", repo=(str, ...))
+
+    with pytest.raises(DefinitionError, match="the model name 'odd-name' cannot be a Python name"):
+        compile_workflow(boxed(odd, Box[str]))

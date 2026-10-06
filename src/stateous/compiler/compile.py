@@ -7,6 +7,7 @@ each model as JSON Schema. Nothing in it refers back to Python code.
 
 from __future__ import annotations
 
+import keyword
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -14,7 +15,14 @@ from pydantic.json_schema import models_json_schema
 
 from stateous.compiler.validate import validate
 from stateous.model.graph_file import FORMAT
-from stateous.model.workflow import RESERVED_EVENTS, START, State, Transition, Workflow
+from stateous.model.workflow import (
+    RESERVED_EVENTS,
+    START,
+    DefinitionError,
+    State,
+    Transition,
+    Workflow,
+)
 
 SCHEMA_REF = "#/schemas/{model}"
 
@@ -22,16 +30,18 @@ SCHEMA_REF = "#/schemas/{model}"
 def compile_workflow(flow: Workflow) -> dict[str, Any]:
     """Validate `flow` (`DefinitionError` lists every problem), then build its document."""
     validate(flow)
+    schemas, names = _schemas(flow)
+    _refuse_odd_names(flow, schemas)
     document: dict[str, Any] = {"stateous": FORMAT, "workflow": flow.name}
     if flow.context is not None:
-        document["context"] = flow.context.__name__
+        document["context"] = names[flow.context]
     document["states"] = {state.name: _state(flow, state) for state in flow.states.values()}
     document["events"] = {
-        event.name: {"payload": event.payload.__name__} if event.payload else {}
+        event.name: {"payload": names[event.payload]} if event.payload else {}
         for event in flow.events.values()
     }
     document["transitions"] = [_transition(edge) for edge in flow.transitions]
-    document["schemas"] = _schemas(flow)
+    document["schemas"] = schemas
     return document
 
 
@@ -66,18 +76,33 @@ def _transition(edge: Transition) -> dict[str, Any]:
     return out
 
 
-def _schemas(flow: Workflow) -> dict[str, Any]:
+def _schemas(flow: Workflow) -> tuple[dict[str, Any], dict[type[BaseModel], str]]:
+    """Each model's JSON Schema, by its key; and the key of each model the workflow
+    names. Pydantic chooses the keys: `Box[int]` is `Box_int_`."""
     models: list[type[BaseModel]] = []
     for model in [flow.context, *(event.payload for event in flow.events.values())]:
         if model is not None and model not in models:
             models.append(model)
     if not models:
-        return {}
-    _, top = models_json_schema(
+        return {}, {}
+    refs, top = models_json_schema(
         [(model, "validation") for model in models], ref_template=SCHEMA_REF
     )
+    prefix = SCHEMA_REF.removesuffix("{model}")
+    names = {m: str(refs[(m, "validation")]["$ref"]).removeprefix(prefix) for m in models}
     definitions = cast("dict[str, Any]", top.get("$defs", {}))
-    return {name: _without_titles(definitions[name]) for name in sorted(definitions)}
+    schemas = {name: _without_titles(definitions[name]) for name in sorted(definitions)}
+    return schemas, names
+
+
+def _refuse_odd_names(flow: Workflow, schemas: dict[str, Any]) -> None:
+    """contract.py names a class after each key in `schemas`."""
+    for name in schemas:
+        if not name.isidentifier() or keyword.iskeyword(name):
+            raise DefinitionError(
+                f"workflow {flow.name!r} is not valid:\n  - the model name {name!r} cannot "
+                "be a Python name in contract.py; rename the model"
+            )
 
 
 def _without_titles(schema: Any) -> Any:

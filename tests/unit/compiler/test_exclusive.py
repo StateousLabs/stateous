@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Literal
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from stateous import END, START, Workflow
 from stateous.compiler.validate import validate
@@ -217,3 +217,26 @@ def test_a_negative_literal_in_a_list_is_tried() -> None:
     problem = alarm_refused("ctx['delta'] in [-1, -2]", "ctx['delta'] < 0")
 
     assert "ctx['delta'] = -2" in problem or "ctx['delta'] = -1" in problem
+
+
+class Pipe:
+    pass
+
+
+class Piped(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    pipe: Pipe | None = None
+    score: int = 0
+
+
+def test_guards_on_a_model_without_a_json_schema_are_refused_not_crashed() -> None:
+    flow = Workflow("sdlc")
+    judge = flow.state("judge")
+    piped = flow.event("piped", payload=Piped)
+    flow.transition(START, judge)
+    flow.transition(judge, END, on=piped, when="payload.score > 1")
+    flow.transition(judge, END, on=piped, when="payload.score < 1")
+
+    with pytest.raises(DefinitionError, match="the model Piped cannot be written as JSON Schema"):
+        validate(flow)

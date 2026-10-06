@@ -2,8 +2,12 @@
 
 The file's folder is on the import path while it loads, so `flow.py` can import
 its sibling `schemas.py`. The modules it imports are forgotten afterwards, so two
-projects with a `flow.py` each can be compiled in one process. No bytecode is
-written: a cached `.pyc` can outlive an edit made in the same second.
+projects with a `flow.py` each can be compiled in one process. Before that, each
+model in them is completed: a model that names a model defined later in its file
+(`from __future__ import annotations`) needs its module to resolve the name.
+
+No bytecode is written: a cached `.pyc` can outlive an edit made in the same
+second.
 """
 
 from __future__ import annotations
@@ -12,6 +16,8 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+
+from pydantic import BaseModel
 
 from stateous.model.workflow import DefinitionError, Workflow
 
@@ -38,6 +44,7 @@ def load_workflow(path: Path) -> Workflow:
     sys.path.insert(0, folder)
     try:
         module = _run(file)
+        _complete_models([sys.modules[name] for name in set(sys.modules) - before])
     finally:
         sys.path.remove(folder)
         sys.path_importer_cache.pop(folder, None)
@@ -52,6 +59,16 @@ def load_workflow(path: Path) -> Workflow:
         names = ", ".join(repr(flow.name) for flow in found)
         raise LoadError(f"{path} defines {len(found)} workflows ({names}); keep one per file")
     return found[0]
+
+
+def _complete_models(modules: list[ModuleType]) -> None:
+    """Build each model that pydantic could not build yet, while its module can
+    still be found. A name that stays unknown is reported when compiling."""
+    for module in modules:
+        for value in list(vars(module).values()):
+            mine = isinstance(value, type) and value.__module__ == module.__name__
+            if mine and issubclass(value, BaseModel) and not value.__pydantic_complete__:
+                value.model_rebuild(raise_errors=False)
 
 
 def _run(file: Path) -> ModuleType:

@@ -462,3 +462,14 @@ def test_a_stub_for_a_state_that_does_not_exist_is_refused(
 ) -> None:
     with pytest.raises(CodegenError, match="the workflow 'sdlc' has no state 'review'"):
         generate_stub(sdlc_document, "review")
+
+
+def test_a_model_name_that_is_not_in_the_schemas_is_refused(
+    sdlc_document: dict[str, Any],
+) -> None:
+    document = {**sdlc_document, "context": "Box[int]"}
+
+    with pytest.raises(
+        CodegenError, match=r"names the model 'Box\[int\]', which 'schemas' does not"
+    ):
+        generate_contract(document)

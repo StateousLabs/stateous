@@ -48,10 +48,10 @@ flow.transition(testing, END, on=failed, otherwise=True)
 runner = CliRunner()
 
 
-def project(tmp_path: Path, flow: str = FLOW) -> Path:
+def project(tmp_path: Path, flow: str = FLOW, schemas: str = SCHEMAS) -> Path:
     folder = tmp_path / "sdlc"
     folder.mkdir()
-    (folder / "schemas.py").write_text(SCHEMAS, encoding="utf-8")
+    (folder / "schemas.py").write_text(schemas, encoding="utf-8")
     path = folder / "flow.py"
     path.write_text(flow, encoding="utf-8")
     return path
@@ -118,6 +118,82 @@ def test_a_name_that_cannot_be_python_is_refused_now(tmp_path: Path) -> None:
 def test_a_file_that_does_not_load_is_refused(tmp_path: Path) -> None:
     assert "defines no Workflow at module level" in refused(tmp_path, "x = 1\n")
     assert "no such file" in runner.invoke(app, ["compile", str(tmp_path / "none.py")]).output
+
+
+LATER = """\
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+
+class Ticket(BaseModel):
+    repo: str
+    tests: Tests | None = None
+
+
+class Tests(BaseModel):
+    passed: int
+    failed: int
+"""
+
+
+def test_a_model_that_names_a_later_model_compiles(tmp_path: Path) -> None:
+    flow = project(tmp_path, schemas=LATER)
+
+    result = runner.invoke(app, ["compile", str(flow)])
+
+    assert result.exit_code == 0, result.output
+    document = json.loads((flow.parent / "build" / "sdlc.json").read_text(encoding="utf-8"))
+    assert document["schemas"]["Ticket"]["properties"]["tests"]["anyOf"][0] == {
+        "$ref": "#/schemas/Tests"
+    }
+
+
+def one_problem(output: str, sentence: str) -> None:
+    """The output is the error's heading and one line: the problem."""
+    lines = output.strip().splitlines()
+    assert lines[0] == "error: workflow 'sdlc' is not valid:", output
+    assert len(lines) == 2, output
+    assert sentence in lines[1], output
+
+
+def test_a_model_that_names_a_model_that_does_not_exist_is_refused(tmp_path: Path) -> None:
+    schemas = LATER.replace("tests: Tests | None", "tests: Missing | None")
+
+    result = runner.invoke(app, ["compile", str(project(tmp_path, schemas=schemas))])
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    one_problem(result.output, "the model Ticket cannot be written as JSON Schema")
+
+
+NO_SCHEMA = """\
+from pydantic import BaseModel, ConfigDict
+
+
+class Pipe:
+    pass
+
+
+class Ticket(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    repo: str
+    pipe: Pipe | None = None
+
+
+class Tests(BaseModel):
+    passed: int
+    failed: int
+"""
+
+
+def test_a_model_without_a_json_schema_is_refused(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["compile", str(project(tmp_path, schemas=NO_SCHEMA))])
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    one_problem(result.output, "the model Ticket cannot be written as JSON Schema")
 
 
 def test_python_dash_m_stateous_runs_the_same_command(tmp_path: Path) -> None:
