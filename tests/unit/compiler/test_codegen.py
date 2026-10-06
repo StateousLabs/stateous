@@ -190,6 +190,13 @@ def test_strict_pyright_checks_what_a_routine_returns(
     assert errors[0].startswith("wrong.py:11: ")
     assert "failed" in errors[0]
 
+    # A list of an Enum made by `default_factory` is typed too (phase 1's final review).
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+    (shelf / "contract.py").write_text(generate_contract(shelf_document()), encoding="utf-8")
+
+    assert pyright_errors(shelf) == []
+
 
 class Ticket(BaseModel):
     repo: str
@@ -282,6 +289,19 @@ def alarm_document() -> dict[str, Any]:
     return compile_workflow(flow)
 
 
+class Shelf(BaseModel):
+    sevs: list[Sev] = Field(default_factory=list[Sev])
+    levels: dict[str, Sev] = Field(default_factory=dict[str, Sev])
+
+
+def shelf_document() -> dict[str, Any]:
+    flow = Workflow("shelves", context=Shelf)
+    a = flow.state("a")
+    flow.transition(START, a)
+    flow.transition(a, END, on=flow.event("done"))
+    return compile_workflow(flow)
+
+
 def test_an_enum_becomes_a_literal_alias_not_a_model(tmp_path: Path) -> None:
     source = generate_contract(alarm_document())
     contract = load(tmp_path, "contract", source)
@@ -326,8 +346,8 @@ def test_a_default_factory_gives_an_empty_list_or_dict(tmp_path: Path) -> None:
     contract = load(tmp_path, "contract", source)
 
     assert "from pydantic import BaseModel, Field\n" in source
-    assert "    tags: list[str] = Field(default_factory=list)\n" in source
-    assert "    meta: dict[str, int] = Field(default_factory=dict)\n" in source
+    assert "    tags: list[str] = Field(default_factory=list[str])\n" in source
+    assert "    meta: dict[str, int] = Field(default_factory=dict[str, int])\n" in source
     assert "    size: int\n" in source
     basket = contract.Basket(size=1)
     assert (basket.tags, basket.meta) == ([], {})

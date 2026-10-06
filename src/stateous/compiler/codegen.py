@@ -211,19 +211,22 @@ def _model(name: str, schema: dict[str, Any]) -> _Model:
             raise CodegenError(
                 f"the field {field_name!r} of {name} cannot be used as a Python name"
             )
-        default = None if field_name in required else _default(field_schema)
-        fields.append(_Field(field_name, _annotation(field_schema), default))
+        annotation = _annotation(field_schema)
+        default = None if field_name in required else _default(field_schema, annotation)
+        fields.append(_Field(field_name, annotation, default))
     return _Model(name, fields)
 
 
-def _default(schema: dict[str, Any]) -> str | None:
+def _default(schema: dict[str, Any], annotation: str) -> str | None:
     """The default of a field that is not required. Pydantic writes no `default`
-    for a `default_factory`: an empty list or dict is made again here; any other
-    field without a default becomes required."""
+    for a `default_factory`: an empty list or dict is made again here, by its full
+    type (`list[Sev]`, not `list`), so that strict pyright knows the type of its
+    items. Any other field without a default becomes required."""
     if "default" in schema:
         return _literal(schema["default"])
-    factory = {"array": "list", "object": "dict"}.get(str(schema.get("type")))
-    return None if factory is None else f"Field(default_factory={factory})"
+    if schema.get("type") not in ("array", "object"):
+        return None
+    return f"Field(default_factory={annotation})"
 
 
 def _annotation(schema: dict[str, Any]) -> str:

@@ -12,7 +12,8 @@ value also stays in what its schema allows: an `int` is never 3.5, a
 engine's own evaluator evaluates the guards, so an example found is a real one.
 
 A value read as true or false is also compared with 0, so a number on each side
-of 0 is tried. A list literal is one value, except where `in` searches it.
+of 0 is tried. A list and an object are each tried empty and not empty. A list
+literal is one value, except where `in` searches it.
 
 A guard that compares two values with each other, or orders a list, cannot be
 decided, and is refused: a guard that cannot be proven exclusive is not.
@@ -231,7 +232,7 @@ def _candidates(domain: Domain, compared: list[Any]) -> list[Any]:
         if kinds & {"bool", "any"}:
             tries += [False, True]
         if kinds & {"object", "any"}:
-            tries.append(_OBJECT)
+            tries += [_OBJECT, {}]
         if kinds & {"array", "any"}:
             tries += _lists(_distinct(v for group in containers for v in group), lists)
     if kinds & {"null", "any"}:
@@ -240,8 +241,9 @@ def _candidates(domain: Domain, compared: list[Any]) -> list[Any]:
 
 
 def _lists(members: list[Any], literals: list[list[Any]]) -> list[Any]:
-    """Lists that `in` and `==` tell apart: each list literal, and for each set of
-    the searched members, a list that holds just those and equals no literal."""
+    """Lists that `in` and `==` tell apart: each list literal, for each set of the
+    searched members a list that holds just those and equals no literal, and a list
+    that is not empty but holds no member and equals no literal."""
     known = [*members, *(v for literal in literals for v in literal)]
     filler = "~"
     while filler in known:
@@ -251,6 +253,7 @@ def _lists(members: list[Any], literals: list[list[Any]]) -> list[Any]:
         for chosen in itertools.combinations(members, r):
             value = list(chosen)
             tries.append(value if value not in literals else [*value, filler])
+    tries.append([filler])
     return tries
 
 

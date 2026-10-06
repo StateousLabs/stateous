@@ -141,6 +141,7 @@ class Counter(BaseModel):
     n: int = 0
     tags: list[str] = []
     delta: int = 0
+    meta: dict[str, int] = {}
 
 
 def alarm_checked(*guards: str) -> None:
@@ -217,6 +218,29 @@ def test_a_negative_literal_in_a_list_is_tried() -> None:
     problem = alarm_refused("ctx['delta'] in [-1, -2]", "ctx['delta'] < 0")
 
     assert "ctx['delta'] = -2" in problem or "ctx['delta'] = -1" in problem
+
+
+# ── what the final review of phase 1 found ────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "guards",
+    [
+        ("ctx['tags']", "'a' not in ctx['tags']"),
+        ("ctx['tags']", "ctx['tags'] != ['a']"),
+        ("not ctx['meta']", "ctx['meta'] != null"),
+    ],
+)
+def test_a_list_or_dict_read_as_true_or_false_is_tried_empty_and_not(
+    guards: tuple[str, str],
+) -> None:
+    problem = alarm_refused(*guards)
+
+    assert "can both be true" in problem
+
+
+def test_an_empty_and_a_not_empty_list_are_still_exclusive() -> None:
+    alarm_checked("ctx['tags'] == []", "ctx['tags'] != []")
 
 
 class Pipe:
