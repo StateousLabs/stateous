@@ -167,13 +167,15 @@ stateous init http://cp.internal:8080 sdlc-worker
 `init` never writes over a routine file or over `stateous.yaml`. A stub that would hide a Python module gets the name `<state>_routine.py`. For example, the state `queue` gets `queue_routine.py`. `init` prints one line for each file:
 
 ```text
-wrote    sdlc-worker\contract.py
-wrote    sdlc-worker\coding.py
+wrote    sdlc-worker/contract.py
+wrote    sdlc-worker/coding.py
 kept     the routine of 'testing'
-wrote    sdlc-worker\stateous.yaml
+wrote    sdlc-worker/stateous.yaml
 
 Write the routines, then run: stateous supervise sdlc-worker
 ```
+
+On Windows, the paths in these lines have `\` in place of `/`.
 
 Run `stateous init` again after each change to the workflow. `stateous supervise` does not start when `contract.py` does not agree with the control plane.
 
@@ -258,7 +260,7 @@ def test(ctx: TicketContext) -> events.passed | events.failed:
 | `ctx.task` | The task's id. |
 | `ctx.visit` | 1 the first time the token is in this state, 2 the next time, and so on. |
 | `ctx.attempt` | 1, then 2 after a retry. |
-| `ctx.entered_by` | The event that brought the token here: `.name` and `.payload`. |
+| `ctx.entered_by` | The event that brought the token here: `.name` and `.payload`. In the token's first state, `.name` is `__started__`. |
 | `ctx.schedule(event, after="10m")` | A timer. Later, the clock fires `event` on this token, if the token is still in this state. |
 
 A value that you read from `ctx` is a copy. So `ctx["items"].append(2)` changes nothing. Write the new value with `ctx["items"] = ...`. Values must be JSON.
@@ -299,7 +301,7 @@ stateous supervise sdlc-worker
 
 The supervisor runs at most `tasks` routines at once. An `async def` routine runs on the supervisor's event loop. A `def` routine runs in a thread. While a routine runs, the supervisor sends a heartbeat every 30 seconds.
 
-When the token leaves the state, the supervisor cancels an `async def` routine. It cannot stop a `def` routine, so it ignores the result of that routine.
+When the token leaves the state, or is cancelled, the supervisor cancels an `async def` routine. It does this at the next heartbeat, so up to 30 seconds later. It cannot stop a `def` routine, so it ignores the result of that routine.
 
 The supervisor logs to stderr:
 
@@ -355,6 +357,8 @@ TICKET-1: testing, completed
 23:43:51  #13  task 2 done
 23:43:51  #14  completed
 ```
+
+A token leaves `START` at once, on the event `__started__`. Stateous makes this event itself. Line `#2` records it, and the first state's `ctx.entered_by.name` is `__started__`.
 
 A token that ended keeps its last state in the first line. Here, `done` came from outside, so nobody took task 1. The history shows it as `cancelled`.
 
@@ -639,8 +643,10 @@ def verdict(ctx: ReviewContext) -> events.sent:
     try:
         with Client(PARENT) as parent:
             parent.fire(ctx["parent"], name, key=f"{ctx.token}-verdict")
-    except Refused:
-        pass  # the parent left `reviews` already: it needs no more verdicts
+    except Refused as error:
+        if error.status != 409:
+            raise  # no such parent, or a bad event: the attempt fails
+        # 409: the parent left `reviews` already: it needs no more verdicts
     return events.sent()
 ```
 

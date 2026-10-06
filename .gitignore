@@ -7,3 +7,5 @@ dist/
 *.egg-info/
 stateous.db
 .import_linter_cache/
+try/
+try.db

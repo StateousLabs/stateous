@@ -71,7 +71,7 @@ executionEnvironments = [
 testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
 markers = [
-    "e2e: the example as real processes, about two minutes; skip it with -m 'not e2e'",
+    "e2e: the example as real processes, about 90 seconds; skip it with -m 'not e2e'",
 ]
 
 # ── Architecture ─────────────────────────────────────────────────────────
