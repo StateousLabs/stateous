@@ -56,6 +56,9 @@ MAX_KEY = 256
 MAX_NAME = 128
 """The longest state name in a claim, or memory key."""
 
+MAX_ITEMS = 1000
+"""The most state names in a claim, and the most task ids in a heartbeat."""
+
 MAX_SUPERVISOR = 256
 """The longest supervisor name: the engine's own limit."""
 
@@ -286,6 +289,8 @@ def _names(value: Any, what: str) -> list[str]:
     items = cast("list[Any]", value) if isinstance(value, list) else None
     if items is None or not all(isinstance(i, str) and 1 <= len(i) <= MAX_NAME for i in items):
         raise Problem(422, f"'{what}' is a list of state names")
+    if len(items) > MAX_ITEMS:
+        raise Problem(422, f"'{what}' has at most {MAX_ITEMS} state names")
     return cast("list[str]", items)
 
 
@@ -295,6 +300,8 @@ def _task_ids(value: Any) -> list[int]:
         isinstance(i, int) and not isinstance(i, bool) and 0 < i <= MAX_TASK for i in items
     ):
         raise Problem(422, "'tasks' is a list of task ids")
+    if len(items) > MAX_ITEMS:
+        raise Problem(422, f"'tasks' has at most {MAX_ITEMS} task ids")
     return cast("list[int]", items)
 
 

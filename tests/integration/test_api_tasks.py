@@ -2,13 +2,18 @@
 calls to report a task that waits for it."""
 
 import json
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from sqlalchemy.exc import OperationalError
 from starlette.testclient import TestClient
 
-from stateous.control.engine import Engine
+from stateous.control.api import create_app
+from stateous.control.engine import DEFAULT_LEASE, Engine
+from stateous.control.graph import Graph
+from stateous.control.store import Store
 
 
 def claimed(http: TestClient, supervisor: str = "box-1") -> dict[str, Any]:
@@ -244,3 +249,87 @@ def test_a_database_outage_is_503_with_one_sentence(
 
     assert answer.status_code == 503
     assert answer.json() == {"error": "the database cannot take this request now; try again"}
+
+
+def test_a_claim_of_more_than_1000_states_is_422(http: TestClient) -> None:
+    body = {"supervisor": "box-1", "states": ["coding"] * 1001}
+
+    answer = http.post("/tasks/claim", json=body)
+
+    assert answer.status_code == 422
+    assert "1000" in answer.json()["error"]
+
+
+def test_a_claim_of_1000_states_is_accepted(http: TestClient) -> None:
+    body = {"supervisor": "box-1", "states": ["coding"] * 1000}
+
+    assert http.post("/tasks/claim", json=body).status_code == 204
+
+
+def test_a_heartbeat_of_more_than_1000_tasks_is_422(http: TestClient) -> None:
+    body = {"supervisor": "box-1", "tasks": list(range(1, 1002))}
+
+    answer = http.post("/tasks/heartbeat", json=body)
+
+    assert answer.status_code == 422
+    assert "1000" in answer.json()["error"]
+
+
+def test_a_heartbeat_of_1000_tasks_is_accepted(http: TestClient) -> None:
+    body = {"supervisor": "box-1", "tasks": list(range(1, 1001))}
+
+    assert http.post("/tasks/heartbeat", json=body).status_code == 200
+
+
+def test_a_note_or_memory_after_the_report_is_409(http: TestClient) -> None:
+    grant = claimed(http)
+    reported = http.post(f"/tasks/{grant['task']}/report", json={"kind": "event", "event": "done"})
+    assert reported.status_code == 200, reported.text
+
+    note = http.post(f"/tasks/{grant['task']}/note", json={"text": "late"})
+    memory = http.put(f"/tasks/{grant['task']}/memory", json={"key": "dev", "value": 1})
+
+    assert (note.status_code, memory.status_code) == (409, 409)
+    assert isinstance(note.json()["error"], str)
+    assert isinstance(memory.json()["error"], str)
+
+
+class MovedClock:
+    """A clock that a test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+@pytest.fixture
+def clock() -> MovedClock:
+    return MovedClock()
+
+
+@pytest.fixture
+def clocked(sdlc: dict[str, Any], clock: MovedClock) -> Iterator[tuple[TestClient, Engine]]:
+    """The API over an engine whose clock the test moves."""
+    store = Store("sqlite://")
+    engine = Engine(store, Graph(sdlc), clock=clock)
+    try:
+        with TestClient(create_app(engine)) as client:
+            yield client, engine
+    finally:
+        store.close()
+
+
+def test_a_note_or_memory_after_the_lease_ended_is_409(
+    clocked: tuple[TestClient, Engine], clock: MovedClock
+) -> None:
+    http, engine = clocked
+    grant = claimed(http)
+    clock.now += DEFAULT_LEASE + timedelta(seconds=1)
+    engine.tick()
+
+    note = http.post(f"/tasks/{grant['task']}/note", json={"text": "late"})
+    memory = http.put(f"/tasks/{grant['task']}/memory", json={"key": "dev", "value": 1})
+
+    assert (note.status_code, memory.status_code) == (409, 409)
