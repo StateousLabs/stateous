@@ -1,0 +1,1 @@
+"""The `stateous` command."""

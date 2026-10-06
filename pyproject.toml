@@ -1,0 +1,96 @@
+[project]
+name = "stateous"
+version = "0.1.0.dev0"
+description = "A process as a graph of states. A control plane keeps every token durable."
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6,<3",
+    "typer>=0.12",
+    "sqlalchemy>=2.0,<3",
+    "alembic>=1.13,<2",
+    "jsonschema>=4.21",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+    "httpx2>=2.13",
+    "psycopg[binary]>=3.2",
+    "pyyaml>=6,<7",
+]
+
+[project.scripts]
+stateous = "stateous.cli.main:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+    "import-linter>=2.0",
+    "types-pyyaml>=6",
+    "types-jsonschema",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stateous"]
+
+# ── Quality ──────────────────────────────────────────────────────────────
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF"]
+# Errors keep the names docs/design.md gives them, without an "Error" suffix.
+ignore = ["N818"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --import-mode=importlib"
+
+# ── Architecture ─────────────────────────────────────────────────────────
+# The control plane and the supervisor never import each other: the supervisor
+# speaks HTTP. `model` is shared and pure. The compiler needs neither side. The
+# client speaks only HTTP. Only `cli` may import everything.
+
+[tool.importlinter]
+root_package = "stateous"
+
+[[tool.importlinter.contracts]]
+name = "The control plane and the supervisor are independent"
+type = "independence"
+modules = ["stateous.control", "stateous.supervisor"]
+
+[[tool.importlinter.contracts]]
+name = "The model is shared and imports nothing else in the package"
+type = "forbidden"
+source_modules = ["stateous.model"]
+forbidden_modules = [
+    "stateous.compiler",
+    "stateous.control",
+    "stateous.supervisor",
+    "stateous.client",
+    "stateous.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "The compiler needs neither side"
+type = "forbidden"
+source_modules = ["stateous.compiler"]
+forbidden_modules = ["stateous.control", "stateous.supervisor", "stateous.client", "stateous.cli"]
+
+[[tool.importlinter.contracts]]
+name = "The client speaks only HTTP"
+type = "forbidden"
+source_modules = ["stateous.client"]
+forbidden_modules = ["stateous.control", "stateous.supervisor", "stateous.compiler", "stateous.cli"]
