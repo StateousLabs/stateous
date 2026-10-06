@@ -22,18 +22,29 @@ def test_a_token_line_names_the_id_the_state_and_the_status() -> None:
 @pytest.mark.parametrize(
     ("kind", "data", "text"),
     [
+        # Every shape below is the real one the engine writes (control/engine.py's
+        # `tx.append(...)` calls), not a shape from the plan.
         ("started", {"context": {"repo": "a"}}, "started"),
         ("entered", {"state": "coding", "visit": 2}, "entered coding (visit 2)"),
+        ("task_queued", {"task": 4, "state": "coding"}, "task 4 queued for coding"),
         (
             "task_claimed",
             {"task": 4, "supervisor": "box-1", "attempt": 1},
             "box-1 took task 4 (attempt 1)",
         ),
+        ("task_waiting", {"task": 4}, "task 4 waits: the work goes on outside"),
+        ("task_done", {"task": 4}, "task 4 done"),
         (
             "task_failed",
             {"task": 4, "error": "RuntimeError: no"},
             "task 4 failed: RuntimeError: no",
         ),
+        (
+            "task_retrying",
+            {"task": 4, "attempt": 2},
+            "task 4 is tried again (attempt 2)",
+        ),
+        ("task_cancelled", {"task": 4}, "task 4 cancelled"),
         (
             "event_accepted",
             {"event": "passed", "payload": {"passed": 3}, "state": "testing"},
@@ -44,10 +55,34 @@ def test_a_token_line_names_the_id_the_state_and_the_status() -> None:
             {"event": "passed", "reason": "not allowed"},
             "passed refused: not allowed",
         ),
-        ("memory_set", {"state": "coding", "key": "dev"}, "memory set: dev (in coding)"),
-        ("context_changed", {"keys": ["repo", "branch"]}, "context changed: repo, branch"),
+        ("timer_fired", {"event": "stuck"}, "timer fired: stuck"),
         ("note", {"task": 4, "text": "tests run"}, "tests run"),
-        ("event_deferred", {"event": "done"}, "done held while paused"),
+        (
+            "memory_set",
+            {"state": "coding", "memory_key": "dev"},
+            "memory set: dev (in coding)",
+        ),
+        (
+            "memory_deleted",
+            {"state": "coding", "memory_key": "dev"},
+            "memory deleted: dev (in coding)",
+        ),
+        ("context_changed", {"keys": ["repo", "branch"]}, "context changed: repo, branch"),
+        ("paused", {}, "paused"),
+        ("resumed", {}, "resumed"),
+        ("completed", {}, "completed"),
+        ("cancelled", {}, "cancelled"),
+        (
+            "event_deferred",
+            {"key": None, "event": "done", "payload": None},
+            "done held while paused",
+        ),
+        ("event_replayed", {"event": "done"}, "done applied on resume"),
+        (
+            "event_dropped",
+            {"event": "done", "reason": "the token left that state"},
+            "done dropped on resume: the token left that state",
+        ),
         ("failed", {"reason": "no transition on timeout"}, "failed: no transition on timeout"),
         ("something_new", {"a": 1}, 'something_new {"a": 1}'),
     ],
@@ -65,6 +100,23 @@ def test_an_entry_line_shows_local_time() -> None:
     line = entry_line({"seq": 1, "at": "2026-10-06T10:00:00Z", "kind": "paused", "data": {}})
 
     assert line == f"{local}  #1  paused"
+
+
+def test_a_timer_set_entry_shows_the_local_due_time() -> None:
+    """`timer_set`'s `due_at` (control/engine.py's `_set_timer`) is shown in local
+    time, with the date, since a timer can fire on a different day."""
+    due = datetime(2026, 10, 6, 16, 0, 0, tzinfo=UTC).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+    line = entry_line(
+        {
+            "seq": 2,
+            "at": "2026-10-06T10:00:00Z",
+            "kind": "timer_set",
+            "data": {"event": "stuck", "due_at": "2026-10-06T16:00:00Z"},
+        }
+    )
+
+    assert line.endswith(f"  #2  timer set: stuck at {due}")
 
 
 def test_an_entry_with_missing_data_does_not_fail() -> None:

@@ -181,6 +181,8 @@ def _what(kind: str, data: dict[str, Any]) -> str:
             return f"task {get('task')} failed: {get('error')}"
         case "task_retrying":
             return f"task {get('task')} is tried again (attempt {get('attempt')})"
+        case "task_cancelled":
+            return f"task {get('task')} cancelled"
         case "task_waiting":
             return f"task {get('task')} waits: the work goes on outside"
         case "event_accepted":
@@ -194,9 +196,9 @@ def _what(kind: str, data: dict[str, Any]) -> str:
         case "note":
             return get("text")
         case "memory_set":
-            return f"memory set: {get('key')} (in {get('state')})"
+            return f"memory set: {get('memory_key')} (in {get('state')})"
         case "memory_deleted":
-            return f"memory deleted: {get('key')} (in {get('state')})"
+            return f"memory deleted: {get('memory_key')} (in {get('state')})"
         case "context_changed":
             keys = data.get("keys")
             names = cast("list[Any]", keys) if isinstance(keys, list) else ["?"]
