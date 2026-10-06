@@ -5,6 +5,8 @@ supervisor, on any computer, does the work and reports what happened. Everything
 a user imports comes from here.
 """
 
+from stateous.model.contract import OutcomeError, StateRef, on_state
+from stateous.model.events import Occurrence
 from stateous.model.workflow import END, START, Workflow
 
-__all__ = ["END", "START", "Workflow"]
+__all__ = ["END", "START", "Occurrence", "OutcomeError", "StateRef", "Workflow", "on_state"]
