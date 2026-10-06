@@ -1,0 +1,141 @@
+"""The client: a program outside calls the control plane over HTTP
+(docs/design.md, section 5.3)."""
+
+import socket
+from collections.abc import Iterator
+from typing import Any
+
+import httpx2
+import pytest
+
+from stateous import Client
+from stateous.client import ClientError, NotFound, Refused, Unreachable
+from stateous.control.engine import Engine
+from stateous.model.wire import Outcome
+
+
+@pytest.fixture
+def client(served: str) -> Iterator[Client]:
+    with Client(served) as opened:
+        yield opened
+
+
+def nowhere() -> str:
+    """A URL that nothing listens on."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return f"http://127.0.0.1:{probe.getsockname()[1]}"
+
+
+def answering(status: int, text: str) -> Client:
+    """A client whose control plane answers every request with `status` and `text`."""
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(status, text=text)
+
+    client = Client("http://elsewhere.test")
+    client._http = httpx2.Client(  # pyright: ignore[reportPrivateUsage]
+        base_url="http://elsewhere.test", transport=httpx2.MockTransport(answer)
+    )
+    return client
+
+
+def test_start_get_list_and_history(client: Client) -> None:
+    token = client.start("T-1", {"repo": "acme/api"})
+
+    assert (token["state"], token["status"]) == ("coding", "active")
+    assert client.get("T-1")["token"] == "T-1"
+    assert [t["token"] for t in client.tokens()] == ["T-1"]
+    assert client.tokens(status="completed") == []
+    assert client.history("T-1")[0]["kind"] == "started"
+
+
+def test_starting_a_token_twice_returns_the_same_token(client: Client) -> None:
+    first = client.start("T-1", {"repo": "acme/api"})
+
+    assert client.start("T-1", {"repo": "acme/api"}) == first
+
+
+def test_fire_with_a_key_is_applied_once(client: Client) -> None:
+    client.start("T-1", {"repo": "acme/api"})
+
+    first = client.fire("T-1", "done", key="gh-delivery-81231")
+    second = client.fire("T-1", "done", key="gh-delivery-81231")
+
+    assert first["state"] == "testing"
+    assert second["duplicate"] is True
+    assert second["token"]["state"] == "testing"
+
+
+def test_fire_with_a_payload_ends_the_token(client: Client) -> None:
+    client.start("T-1", {"repo": "acme/api"})
+    client.fire("T-1", "done")
+
+    assert client.fire("T-1", "passed", {"passed": 3, "failed": 0})["status"] == "completed"
+
+
+def test_pause_resume_and_cancel(client: Client) -> None:
+    client.start("T-1", {"repo": "acme/api"})
+
+    assert client.pause("T-1")["status"] == "paused"
+    assert client.resume("T-1")["status"] == "active"
+    assert client.cancel("T-1")["status"] == "cancelled"
+
+
+def test_report_moves_a_task_that_waits_for_the_outside(client: Client, engine: Engine) -> None:
+    client.start("T-1", {"repo": "acme/api"})
+    grant = engine.claim("box-1", ["coding"])
+    assert grant is not None
+    engine.report(grant.task, Outcome(kind="waiting"), supervisor="box-1")
+
+    assert client.report(grant.task, "done")["state"] == "testing"
+
+
+def test_workflow_returns_the_graph(client: Client, sdlc: dict[str, Any]) -> None:
+    assert client.workflow() == sdlc
+
+
+def test_an_unknown_token_is_not_found(client: Client) -> None:
+    with pytest.raises(NotFound) as caught:
+        client.get("NOPE")
+
+    assert caught.value.status == 404
+    assert caught.value.message
+    assert "(404)" in str(caught.value)
+
+
+def test_an_id_with_a_slash_stays_one_segment_and_is_not_found(client: Client) -> None:
+    with pytest.raises(NotFound):
+        client.get("a/b")
+
+
+def test_a_refusal_carries_the_status_and_the_reason(client: Client) -> None:
+    client.start("T-1", {"repo": "acme/api"})
+
+    with pytest.raises(Refused) as caught:
+        client.fire("T-1", "passed", {"passed": 1, "failed": 0})
+
+    assert caught.value.status == 409
+    assert not isinstance(caught.value, NotFound)
+    assert caught.value.message in str(caught.value)
+
+
+def test_a_control_plane_that_does_not_answer_is_unreachable() -> None:
+    with Client(nowhere()) as client, pytest.raises(Unreachable) as caught:
+        client.tokens()
+
+    assert "cannot reach the control plane" in str(caught.value)
+
+
+def test_an_answer_that_is_not_json_is_a_client_error() -> None:
+    with answering(200, "<html>a proxy</html>") as client, pytest.raises(ClientError) as caught:
+        client.workflow()
+
+    assert "not JSON" in str(caught.value)
+
+
+def test_a_refusal_that_is_not_json_keeps_its_text() -> None:
+    with answering(502, "bad gateway") as client, pytest.raises(Refused) as caught:
+        client.get("T-1")
+
+    assert (caught.value.status, caught.value.message) == (502, "bad gateway")
