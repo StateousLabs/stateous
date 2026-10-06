@@ -1,19 +1,15 @@
 """One control plane for each database, on Postgres: the advisory lock."""
 
-import threading
 from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
 import stateous.control.store.store as store_module
-from stateous.control.engine import Engine, Token
-from stateous.control.graph import Graph
 from stateous.control.store import DatabaseHeld, Store
 from stateous.control.store.store import SERVING_LOCK, database_url
 
 from ..conftest import fresh_postgres_database, needs_postgres
-from ..unit.control.support import TICKET, sdlc
 
 pytestmark = needs_postgres
 
@@ -122,19 +118,3 @@ def test_two_databases_can_each_be_held_at_once() -> None:
     second = Store(fresh_postgres_database(), hold=True)
     first.close()
     second.close()
-
-
-def test_a_token_named_like_the_serving_lock_does_not_wait_for_it(url: str) -> None:
-    holder = Store(url, hold=True)
-    other = Engine(Store(url), Graph(sdlc()))
-    try:
-        started: list[Token] = []
-        thread = threading.Thread(target=lambda: started.append(other.start(SERVING_LOCK, TICKET)))
-        thread.start()
-        thread.join(timeout=5)
-
-        assert not thread.is_alive(), "the start waited for the serving lock"
-        assert started and started[0].token == SERVING_LOCK
-    finally:
-        holder.close()
-        other.store.close()

@@ -1,13 +1,19 @@
 """One control plane serves one database. These tests use SQLite files; the
 Postgres lock is tested in tests/postgres/test_serving.py."""
 
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select, update
 
+from stateous.control.engine import TOKEN_ID_PATTERN, Engine, InvalidTokenId
+from stateous.control.graph import Graph
 from stateous.control.store import DatabaseHeld, Store, tables
+from stateous.control.store.store import SERVING_LOCK
+
+from .support import TICKET, sdlc
 
 
 def sqlite_url(path: Path) -> str:
@@ -123,3 +129,13 @@ def test_keep_serving_takes_a_lapsed_hold_back_when_no_one_else_took_it(tmp_path
         assert holder_row(url)[0] == store.holder
     finally:
         store.close()
+
+
+def test_the_serving_lock_s_key_can_never_be_a_token_id() -> None:
+    """The token-id rule already keeps a token from colliding with the serving
+    lock's advisory-lock key. No real database is needed to show it."""
+    assert not re.fullmatch(TOKEN_ID_PATTERN, SERVING_LOCK)
+
+    engine = Engine(Store("sqlite://"), Graph(sdlc()))
+    with pytest.raises(InvalidTokenId):
+        engine.start(SERVING_LOCK, TICKET)
