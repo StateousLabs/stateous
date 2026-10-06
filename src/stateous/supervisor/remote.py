@@ -1,0 +1,150 @@
+"""The control plane's HTTP API (contract section 13), as the supervisor calls it:
+async, over httpx2.
+
+A call that does not reach the control plane is tried again after 1, 2, 4, 8, 16,
+then every 30 seconds, with one log line for each failure, until it gets an
+answer. An answer 502, 503 or 504 counts as "not reached" (a proxy, or a control
+plane that restarts). Any other answer of 400 or more is a refusal: `Refused`,
+and no new try."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable, Collection, Sequence
+from typing import Any, cast
+
+import httpx2
+
+from stateous.model.wire import Outcome, TaskGrant
+
+log = logging.getLogger("stateous.supervisor")
+
+BACKOFF: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+"""Seconds before each new try. The last value repeats."""
+
+UNAVAILABLE = frozenset({502, 503, 504})
+"""Answers that count as "the control plane is not reached"."""
+
+
+class Refused(Exception):
+    """The control plane answered with an error."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+class ControlPlaneApi:
+    """The control plane, reached over HTTP."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        client: httpx2.AsyncClient | None = None,
+        timeout: float = 30.0,
+        backoff: Sequence[float] = BACKOFF,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self.url = url.rstrip("/")
+        self._client = (
+            client if client is not None else httpx2.AsyncClient(base_url=self.url, timeout=timeout)
+        )
+        self._backoff = tuple(backoff) or BACKOFF
+        self._sleep = sleep
+
+    async def health(self) -> dict[str, Any]:
+        """`{"workflow", "checksum"}` of the graph the control plane serves."""
+        return _mapping(await self._call("GET", "/health"))
+
+    async def claim(self, supervisor: str, states: Collection[str]) -> TaskGrant | None:
+        """A task of one of `states`, or None when there is none now."""
+        response = await self._call(
+            "POST", "/tasks/claim", {"supervisor": supervisor, "states": list(states)}
+        )
+        if response.status_code == 204:
+            return None
+        try:
+            return TaskGrant.from_json(_body(response))
+        except ValueError as error:
+            raise Refused(response.status_code, f"the claimed task is not valid: {error}") from None
+
+    async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
+        body = {**outcome.to_json(), "supervisor": supervisor}
+        await self._call("POST", f"/tasks/{task}/report", body)
+
+    async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
+        """The ids among `tasks` that this supervisor no longer holds."""
+        answer = _mapping(
+            await self._call(
+                "POST", "/tasks/heartbeat", {"supervisor": supervisor, "tasks": list(tasks)}
+            )
+        )
+        lost = answer.get("lost")
+        if not isinstance(lost, list):
+            raise Refused(200, "the heartbeat answer has no list of lost tasks")
+        return [int(task) for task in cast("list[Any]", lost)]
+
+    async def note(self, task: int, text: str) -> None:
+        await self._call("POST", f"/tasks/{task}/note", {"text": text})
+
+    async def set_memory(self, task: int, key: str, value: Any) -> None:
+        """Save one key of the routine's memory. `None` deletes the key."""
+        await self._call("PUT", f"/tasks/{task}/memory", {"key": key, "value": value})
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def _call(self, method: str, path: str, body: Any = None) -> httpx2.Response:
+        failures = 0
+        while True:
+            try:
+                response = await self._client.request(method, path, json=body)
+            except httpx2.TransportError as error:
+                problem = str(error) or type(error).__name__
+            else:
+                if response.status_code in UNAVAILABLE:
+                    problem = f"it answered {response.status_code}"
+                elif response.status_code >= 400:
+                    raise Refused(response.status_code, _error_of(response))
+                else:
+                    return response
+            delay = self._backoff[min(failures, len(self._backoff) - 1)]
+            failures += 1
+            log.warning(
+                "cannot reach the control plane at %s (%s); trying again in %gs",
+                self.url,
+                problem,
+                delay,
+            )
+            await self._sleep(delay)
+
+
+def _error_of(response: httpx2.Response) -> str:
+    """The `error` sentence of an error answer, else its text, on one line."""
+    try:
+        data: Any = response.json()
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        error = cast("dict[str, Any]", data).get("error")
+        if isinstance(error, str) and error:
+            return error
+    text = " ".join(response.text.split())[:200]
+    return text or f"the control plane answered {response.status_code}"
+
+
+def _body(response: httpx2.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        raise Refused(response.status_code, "the control plane's answer is not JSON") from None
+
+
+def _mapping(response: httpx2.Response) -> dict[str, Any]:
+    data = _body(response)
+    if not isinstance(data, dict):
+        raise Refused(response.status_code, "the control plane's answer is not a JSON object")
+    return cast("dict[str, Any]", data)
