@@ -631,7 +631,7 @@ class Engine:
                 task = tx.task(task_id)
                 if task is None or task.status != "claimed":
                     continue  # it finished meanwhile
-                if task.lease_until is None or task.lease_until >= tx.now:
+                if not tx.end_lease(task_id):
                     continue  # a heartbeat renewed it meanwhile
                 row = self._existing(tx, task.token)
                 who, span = task.claimed_by, _span(self.lease)

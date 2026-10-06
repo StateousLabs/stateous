@@ -3,6 +3,7 @@
 import pytest
 
 from stateous.control.engine import Engine, InvalidPayload, TaskNotHeld
+from stateous.control.store import Transaction
 from stateous.model.wire import Outcome, Schedule, TaskGrant
 
 from .support import TICKET, Clock, kinds, new_engine
@@ -219,3 +220,28 @@ def test_a_lost_supervisors_late_report_is_refused() -> None:
         engine.report(grant.task, Outcome(kind="event", event="done"), supervisor="box-1")
 
     assert engine.get("T-1").state == "coding"
+
+
+def test_a_lease_renewed_after_the_sweep_found_it_is_not_ended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = Clock()
+    engine = started(clock)
+    grant = claimed(engine)
+    clock.advance(minutes=2, seconds=1)
+    with engine.store.transaction(clock()) as tx:
+        found = tx.expired_leases()  # what the sweep found, before the heartbeat
+    assert found == [grant.task]
+    clock.advance(seconds=-2)
+    assert engine.heartbeat("box-1", [grant.task]) == []  # renewed to 09:03:59
+    clock.advance(seconds=2)
+
+    def stale(_: Transaction) -> list[int]:
+        return found
+
+    monkeypatch.setattr(Transaction, "expired_leases", stale)
+
+    assert engine.tick() == 0
+
+    assert engine.heartbeat("box-1", [grant.task]) == []  # still held
+    assert "task_failed" not in kinds(engine, "T-1")

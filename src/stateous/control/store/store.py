@@ -444,6 +444,26 @@ class Transaction:
         )
         return set(renewed)
 
+    def end_lease(self, task_id: int) -> bool:
+        """End the lease of a claimed task, only if it is still over now. False if a
+        heartbeat renewed it meanwhile. One guarded statement: on Postgres it waits
+        for a heartbeat that changes the row, then checks the new lease. A heartbeat
+        that comes later waits for this transaction, and finds the task no longer
+        claimed."""
+        ended = self._session.scalars(
+            update(tables.Task)
+            .where(
+                tables.Task.id == task_id,
+                tables.Task.status == "claimed",
+                tables.Task.lease_until.is_not(None),
+                tables.Task.lease_until < self.now,
+            )
+            .values(lease_until=None)
+            .returning(tables.Task.id)
+            .execution_options(synchronize_session=False)
+        )
+        return ended.first() is not None
+
     def expired_leases(self) -> list[int]:
         """The ids of the claimed tasks whose leases ended."""
         return list(

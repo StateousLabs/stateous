@@ -209,3 +209,19 @@ def test_a_database_this_version_made_opens_again(tmp_path: Path) -> None:
     Store(url).close()
 
     Store(url).close()
+
+
+def test_a_lease_ends_only_if_it_is_still_over_when_it_is_ended() -> None:
+    store = Store("sqlite://")
+    add_token(store, "T-1")
+    with store.transaction(NOW) as tx:
+        lapsed, renewed = tx.queue_task("T-1", "coding", 1), tx.queue_task("T-1", "coding", 1)
+        for task, until in ((lapsed, NOW - timedelta(seconds=1)), (renewed, NOW)):
+            task.status, task.claimed_by, task.lease_until = "claimed", "box-1", utc(until)
+        ids = lapsed.id, renewed.id
+
+    with store.transaction(NOW) as tx:
+        assert (tx.end_lease(ids[0]), tx.end_lease(ids[1])) == (True, False)
+    with store.transaction(NOW) as tx:
+        leases = [task.lease_until for task in map(tx.task, ids) if task is not None]
+    assert leases == [None, utc(NOW)]
