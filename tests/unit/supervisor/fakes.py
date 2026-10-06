@@ -47,16 +47,32 @@ class FakeApi:
         self.refuse_notes = False
         self.note_delay = 0.0
         self.checksum = checksum
+        self.refusals: list[Refused] = []
+        """The next reports refuse with these, in order."""
+        self.claim_gate: asyncio.Event | None = None
+        """When set: each claim waits for this event before it answers."""
+        self.claim_waits = 0
+        """The claims that wait for `claim_gate` now."""
 
     async def health(self) -> dict[str, Any]:
         return {"workflow": "demo", "checksum": self.checksum}
 
-    async def claim(self, supervisor: str, states: Collection[str]) -> TaskGrant | None:
+    async def claim(
+        self, supervisor: str, states: Collection[str], *, stop: asyncio.Event | None = None
+    ) -> TaskGrant | None:
         self.calls.append(("claim", supervisor, tuple(states)))
+        if self.claim_gate is not None:
+            self.claim_waits += 1
+            try:
+                await self.claim_gate.wait()
+            finally:
+                self.claim_waits -= 1
         return self.grants.pop(0) if self.grants else None
 
     async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
         self.calls.append(("report", task, outcome.kind))
+        if self.refusals:
+            raise self.refusals.pop(0)
         if self.refuse_reports:
             raise Refused(409, f"task {task} is not this supervisor's")
         self.reports[task] = outcome

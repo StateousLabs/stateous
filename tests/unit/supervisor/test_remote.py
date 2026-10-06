@@ -193,3 +193,53 @@ def test_a_refusal_is_not_tried_again(status: int, answer: Any, message: str) ->
         asyncio.run(scenario())
 
     assert (refused.value.status, refused.value.message, delays) == (status, message, [])
+
+
+def test_a_claim_that_waits_to_try_again_gives_up_when_stop_is_set() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request.url.path)
+        raise httpx2.ConnectError("down")
+
+    async def never(seconds: float) -> None:
+        await asyncio.Event().wait()  # a backoff that does not end by itself
+
+    async def scenario() -> TaskGrant | None:
+        client = httpx2.AsyncClient(
+            base_url="http://cp.test", transport=httpx2.MockTransport(handler)
+        )
+        api = ControlPlaneApi("http://cp.test", client=client, sleep=never)
+        stop = asyncio.Event()
+        try:
+            claiming = asyncio.create_task(api.claim("box-1", ["coding"], stop=stop))
+            while not requests:
+                await asyncio.sleep(0)
+            stop.set()
+            return await asyncio.wait_for(claiming, 5.0)
+        finally:
+            await api.aclose()
+
+    assert asyncio.run(scenario()) is None
+    assert requests == ["/tasks/claim"]
+
+
+def test_a_claim_does_not_try_again_after_stop_is_set() -> None:
+    requests: list[str] = []
+    delays: list[float] = []
+    stop = asyncio.Event()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request.url.path)
+        stop.set()  # the stop comes while the request is in flight
+        return httpx2.Response(503)
+
+    async def scenario() -> TaskGrant | None:
+        api = api_with(handler, delays)
+        try:
+            return await api.claim("box-1", ["coding"], stop=stop)
+        finally:
+            await api.aclose()
+
+    assert asyncio.run(scenario()) is None
+    assert (requests, delays) == (["/tasks/claim"], [])

@@ -16,8 +16,15 @@ state, the token was cancelled, or the lease ended. The supervisor cancels their
 async routines. It cannot stop a thread routine, so it drops that routine's
 result.
 
-The first stop signal stops the claims and waits for the running routines. The
-second cancels them, and `run` returns 1.
+A report that the control plane refuses for a reason other than "the task is not
+yours" (for example, the context writes break the schema) is sent again once, as
+a failure that gives the refusal. So the task fails at once, not when its lease
+ends.
+
+The first stop signal stops the claims and waits for the running routines. A
+claim request in flight is not cut: when it gets a task, that routine runs too.
+A claim that waits to try again gives up. The second signal (or `stop_now`)
+cancels the routines and the claim, and `run` returns 1.
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Collection, Generator
+from collections.abc import Callable, Collection, Generator
 from dataclasses import dataclass
 from types import FrameType
 from typing import Any, Literal, Protocol, cast
@@ -68,7 +75,9 @@ class Api(Protocol):
 
     async def health(self) -> dict[str, Any]: ...
 
-    async def claim(self, supervisor: str, states: Collection[str]) -> TaskGrant | None: ...
+    async def claim(
+        self, supervisor: str, states: Collection[str], *, stop: asyncio.Event | None = None
+    ) -> TaskGrant | None: ...
 
     async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None: ...
 
@@ -152,10 +161,13 @@ class _Sends:
             self._queue.put_nowait(send)
 
 
-@dataclass
+@dataclass(eq=False)
 class _Running:
+    """One routine of one grant. The control plane can grant the same task id again
+    while an old routine of it still ends, so two of them can have the same id."""
+
     grant: TaskGrant
-    job: asyncio.Task[None]
+    job: asyncio.Task[None] | None = None
     lost: bool = False
     """The control plane took the task back."""
     reporting: bool = False
@@ -185,7 +197,7 @@ class Supervisor:
         self.heartbeat_every = heartbeat_every
         self.idle = idle
         self.cancel_wait = cancel_wait
-        self._running: dict[int, _Running] = {}
+        self._running: set[_Running] = set()
         self._stopping = asyncio.Event()
         self._forced = asyncio.Event()
         self._freed = asyncio.Event()
@@ -193,25 +205,24 @@ class Supervisor:
         self._idle.set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._signals = 0
-        self._early_signals = 0
+        self._early: list[Callable[[], None]] = []
 
     @property
     def running(self) -> list[int]:
         """The tasks whose routines run now, or whose reports are on their way."""
-        return list(self._running)
+        return sorted({running.grant.task for running in self._running})
 
     async def run(self) -> int:
         """Claim and run until a stop signal. Returns 0 after a graceful stop (the
         running routines ended and were reported), 1 after the second signal."""
         self._loop = asyncio.get_running_loop()
-        for _ in range(self._early_signals):
-            self._signalled()
+        for early in self._early:
+            early()
         beating = asyncio.create_task(self._beat_forever(), name="stateous-heartbeat")
         claiming = asyncio.create_task(self._claim_forever(), name="stateous-claim")
         try:
             await self._stopping.wait()
-            claiming.cancel()
-            await asyncio.gather(claiming, return_exceptions=True)
+            await self._end_claims(claiming)
             await self._wait_for_routines()
         finally:
             beating.cancel()
@@ -221,27 +232,55 @@ class Supervisor:
 
     def on_signal(self) -> None:
         """A stop signal. Safe to call from a signal handler or from another thread."""
+        self._soon(self._signalled)
+
+    def stop_now(self) -> None:
+        """Stop at once, as after a second signal: cancel the routines, and `run`
+        returns 1. Safe to call from a signal handler or from another thread."""
+        self._soon(self._force)
+
+    def _soon(self, call: Callable[[], None]) -> None:
         loop = self._loop
         if loop is None:
-            self._early_signals += 1
+            self._early.append(call)
             return
         with contextlib.suppress(RuntimeError):  # the loop has closed: nothing is left to stop
-            loop.call_soon_threadsafe(self._signalled)
+            loop.call_soon_threadsafe(call)
 
     def _signalled(self) -> None:
         self._signals += 1
-        if self._signals == 1:
+        if self._signals == 1 and not self._stopping.is_set():
             log.warning(
                 "stopping: no new tasks; waiting for %d routine(s) (signal again to stop now)",
                 len(self._running),
             )
             self._stopping.set()
-        elif self._signals == 2:
-            log.warning("stopping now: cancelling %d routine(s)", len(self._running))
-            self._forced.set()
-            self._stopping.set()
-            for running in self._running.values():
+            self._freed.set()  # a claim loop that rests sees the stop now
+        elif self._signals >= 2:
+            self._force()
+
+    def _force(self) -> None:
+        if self._forced.is_set():
+            return
+        log.warning("stopping now: cancelling %d routine(s)", len(self._running))
+        self._forced.set()
+        self._stopping.set()
+        self._freed.set()
+        for running in self._running:
+            if running.job is not None:
                 running.job.cancel()
+
+    async def _end_claims(self, claiming: asyncio.Task[None]) -> None:
+        """After the first signal: let a claim request in flight finish (its task
+        runs), unless the stop is forced first."""
+        forced = asyncio.ensure_future(self._forced.wait())
+        try:
+            await asyncio.wait({claiming, forced}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            forced.cancel()
+        if not claiming.done():
+            claiming.cancel()
+        await asyncio.gather(claiming, return_exceptions=True)
 
     async def _wait_for_routines(self) -> None:
         idle = asyncio.ensure_future(self._idle.wait())
@@ -257,13 +296,14 @@ class Supervisor:
             forced.cancel()
 
     async def _claim_forever(self) -> None:
+        """Claim tasks until the stop. The stop does not cut a claim request in flight."""
         served = self.registry.served
-        while True:
+        while not self._stopping.is_set():
             if len(self._running) >= self.tasks:
                 await self._rest(None)
                 continue
             try:
-                grant = await self.api.claim(self.name, served)
+                grant = await self.api.claim(self.name, served, stop=self._stopping)
             except Refused as error:
                 log.warning("the control plane refused a claim: %s", error.message)
                 grant = None
@@ -276,63 +316,84 @@ class Supervisor:
                 self._start(grant)
 
     async def _rest(self, seconds: float | None) -> None:
-        """Wait `seconds` (None: no limit), or less when a routine ends."""
+        """Wait `seconds` (None: no limit), or less when a routine ends or a stop comes."""
         self._freed.clear()
+        if self._stopping.is_set():
+            return
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._freed.wait(), seconds)
 
     async def _beat_forever(self) -> None:
         while True:
             await asyncio.sleep(self.heartbeat_every)
-            held = list(self._running)
+            held = [running for running in self._running if not running.lost]
             if not held:
                 continue
             try:
-                lost = await self.api.heartbeat(self.name, held)
+                lost = set(
+                    await self.api.heartbeat(self.name, sorted({r.grant.task for r in held}))
+                )
             except Refused as error:
                 log.warning("the control plane refused a heartbeat: %s", error.message)
                 continue
             except Exception:
                 log.exception("a heartbeat failed")
                 continue
-            for task in lost:
-                self._lose(task)
+            for running in held:  # a routine that started since then is not lost
+                if running.grant.task in lost:
+                    self._lose(running)
 
-    def _lose(self, task: int) -> None:
-        running = self._running.get(task)
-        if running is None or running.reporting:
+    def _lose(self, running: _Running) -> None:
+        if running.lost or running.reporting:
             return
         running.lost = True
         log.warning(
             "task %d of %s: the control plane took it back; cancelling its routine",
-            task,
+            running.grant.task,
             running.grant.token,
         )
-        running.job.cancel()
+        if running.job is not None:
+            running.job.cancel()
 
     def _start(self, grant: TaskGrant) -> None:
+        if self._forced.is_set():
+            log.warning(
+                "task %d of %s: stopping now, so its routine does not run",
+                grant.task,
+                grant.token,
+            )
+            return
+        for old in list(self._running):
+            if old.grant.task == grant.task:  # the control plane took it back already
+                self._lose(old)
         log.info(
             "task %d: %s of %s, attempt %d", grant.task, grant.state, grant.token, grant.attempt
         )
-        sends = _Sends(self.api, grant.task)
-        job = asyncio.create_task(self._do(grant, sends), name=f"stateous-task-{grant.task}")
-        self._running[grant.task] = _Running(grant, job)
+        running = _Running(grant)
+        running.job = asyncio.create_task(
+            self._do(running, _Sends(self.api, grant.task)), name=f"stateous-task-{grant.task}"
+        )
+        self._running.add(running)
         self._idle.clear()
 
-    async def _do(self, grant: TaskGrant, sends: _Sends) -> None:
+    async def _do(self, running: _Running, sends: _Sends) -> None:
+        grant = running.grant
         delivering = asyncio.create_task(sends.deliver())
         try:
             outcome = await self._call(grant, sends)
             await sends.flush()
-            running = self._running[grant.task]
             if running.lost or self._forced.is_set():
                 return
             running.reporting = True
             await self._report(grant, outcome)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # a fault of the supervisor; the task fails when its lease ends
+            log.exception("task %d of %s: could not finish", grant.task, grant.token)
         finally:
             sends.close()
             delivering.cancel()
-            self._running.pop(grant.task, None)
+            self._running.discard(running)
             self._freed.set()
             if not self._running:
                 self._idle.set()
@@ -344,15 +405,17 @@ class Supervisor:
             return Outcome(
                 kind="failed", error=f"this supervisor has no routine for {grant.state!r}"
             )
-        ctx = Context[Any](grant, save_memory=sends.memory, note=sends.note)
         try:
+            ctx = Context[Any](grant, save_memory=sends.memory, note=sends.note)
             if inspect.iscoroutinefunction(routine):
                 value = await routine(ctx)
             else:
                 value = await _in_thread(routine, ctx)
-        except Exception as error:
+            return outcome_of(state, value, ctx)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as error:  # also SystemExit and KeyboardInterrupt
             return Outcome(kind="failed", error=f"{type(error).__name__}: {error}")
-        return outcome_of(state, value, ctx)
 
     async def _report(self, grant: TaskGrant, outcome: Outcome) -> None:
         try:
@@ -364,12 +427,48 @@ class Supervisor:
                 grant.token,
                 error.message,
             )
+            if outcome.kind != "failed" and await self._still_held(grant, error):
+                await self._report_refusal(grant, error)
             return
         except Exception:
             log.exception("task %d of %s: could not report", grant.task, grant.token)
             return
         said = outcome.event if outcome.kind == "event" else outcome.kind
         log.info("task %d of %s: reported %s", grant.task, grant.token, said)
+
+    async def _still_held(self, grant: TaskGrant, refusal: Refused) -> bool:
+        """After a refused report: is the task still this supervisor's? 404: the task
+        is gone. 409: the task is not ours (TaskNotHeld), or the event is not
+        allowed. The answer has no code, so a heartbeat tells which."""
+        if refusal.status == 404:
+            return False
+        if refusal.status != 409:
+            return True
+        try:
+            return grant.task not in await self.api.heartbeat(self.name, [grant.task])
+        except Exception:
+            log.exception("task %d of %s: could not check the task", grant.task, grant.token)
+            return False
+
+    async def _report_refusal(self, grant: TaskGrant, refusal: Refused) -> None:
+        """Fail the task with the refusal, once, so it does not wait for its lease."""
+        failed = Outcome(
+            kind="failed", error=f"the control plane refused the report: {refusal.message}"
+        )
+        try:
+            await self.api.report(grant.task, failed, supervisor=self.name)
+        except Refused as error:
+            log.warning(
+                "task %d of %s: the control plane refused the failure report too: %s",
+                grant.task,
+                grant.token,
+                error.message,
+            )
+            return
+        except Exception:
+            log.exception("task %d of %s: could not report", grant.task, grant.token)
+            return
+        log.info("task %d of %s: reported failed", grant.task, grant.token)
 
 
 def outcome_of(state: StateRef[Any], value: object, ctx: Context[Any]) -> Outcome:

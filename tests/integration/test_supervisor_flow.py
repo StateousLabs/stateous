@@ -189,3 +189,52 @@ def test_a_supervisor_runs_a_workflow_against_a_real_control_plane(tmp_path: Pat
     assert not any(
         e["kind"] == "event_accepted" and e["data"].get("event") == "done" for e in other
     )
+
+
+COUNTING = """
+from pydantic import BaseModel
+
+from stateous import END, START, Workflow
+
+
+class Tally(BaseModel):
+    count: int = 0
+
+
+flow = Workflow("tally", context=Tally)
+work = flow.state("work")
+flow.transition(START, work)
+flow.transition(work, END, on=flow.event("done"))
+"""
+
+BREAKS_THE_SCHEMA = """
+from contract import events, states
+
+from stateous import Context, on_state
+
+
+@on_state(states.work)
+async def work(ctx: Context) -> events.done:
+    ctx["count"] = "many"
+    return events.done()
+"""
+
+
+def test_a_refused_report_fails_the_task_at_once_with_the_refusal(tmp_path: Path) -> None:
+    graph = compile_flow(tmp_path, COUNTING)
+    folder = tmp_path / "tally-worker"
+    with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
+        init_folder(url, folder)
+        (folder / "work.py").write_text(BREAKS_THE_SCHEMA, encoding="utf-8")
+        with supervising(folder):
+            client.start("T-1")
+            wait_for(has_kind, client, "T-1", "task_failed")  # long before the 2-minute lease
+        history = client.history("T-1")
+        context = client.get("T-1")["context"]
+
+    errors = [e["data"]["error"] for e in history if e["kind"] == "task_failed"]
+    assert len(errors) == 1
+    assert errors[0].startswith(
+        "the control plane refused the report: the context changes break the schema"
+    )
+    assert context["count"] == 0

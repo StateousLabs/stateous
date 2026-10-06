@@ -5,7 +5,11 @@ A call that does not reach the control plane is tried again after 1, 2, 4, 8, 16
 then every 30 seconds, with one log line for each failure, until it gets an
 answer. An answer 502, 503 or 504 counts as "not reached" (a proxy, or a control
 plane that restarts). Any other answer of 400 or more is a refusal: `Refused`,
-and no new try."""
+and no new try.
+
+A claim can get a `stop` event. When it is set, a claim that waits to try again
+gives up and returns None. A request in flight is not cut: the control plane can
+grant a task in it, and the supervisor must run that task."""
 
 from __future__ import annotations
 
@@ -59,11 +63,20 @@ class ControlPlaneApi:
         """`{"workflow", "checksum"}` of the graph the control plane serves."""
         return _mapping(await self._call("GET", "/health"))
 
-    async def claim(self, supervisor: str, states: Collection[str]) -> TaskGrant | None:
-        """A task of one of `states`, or None when there is none now."""
-        response = await self._call(
-            "POST", "/tasks/claim", {"supervisor": supervisor, "states": list(states)}
-        )
+    async def claim(
+        self, supervisor: str, states: Collection[str], *, stop: asyncio.Event | None = None
+    ) -> TaskGrant | None:
+        """A task of one of `states`, or None when there is none now. Also None when
+        `stop` is set while the claim waits to try again."""
+        try:
+            response = await self._call(
+                "POST",
+                "/tasks/claim",
+                {"supervisor": supervisor, "states": list(states)},
+                stop=stop,
+            )
+        except _GaveUp:
+            return None
         if response.status_code == 204:
             return None
         try:
@@ -97,7 +110,9 @@ class ControlPlaneApi:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def _call(self, method: str, path: str, body: Any = None) -> httpx2.Response:
+    async def _call(
+        self, method: str, path: str, body: Any = None, *, stop: asyncio.Event | None = None
+    ) -> httpx2.Response:
         failures = 0
         while True:
             try:
@@ -111,6 +126,8 @@ class ControlPlaneApi:
                     raise Refused(response.status_code, _error_of(response))
                 else:
                     return response
+            if stop is not None and stop.is_set():
+                raise _GaveUp
             delay = self._backoff[min(failures, len(self._backoff) - 1)]
             failures += 1
             log.warning(
@@ -119,7 +136,28 @@ class ControlPlaneApi:
                 problem,
                 delay,
             )
+            await self._wait(delay, stop)
+
+    async def _wait(self, delay: float, stop: asyncio.Event | None) -> None:
+        """Sleep `delay` seconds. Raise `_GaveUp` when `stop` is set first."""
+        if stop is None:
             await self._sleep(delay)
+            return
+        sleeping = asyncio.ensure_future(self._sleep(delay))
+        stopping = asyncio.ensure_future(stop.wait())
+        try:
+            await asyncio.wait({sleeping, stopping}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            stopping.cancel()
+            if not sleeping.done():
+                sleeping.cancel()
+        if stop.is_set():
+            raise _GaveUp
+        await sleeping
+
+
+class _GaveUp(Exception):
+    """A call stopped to wait for its next try: its `stop` event is set."""
 
 
 def _error_of(response: httpx2.Response) -> str:
