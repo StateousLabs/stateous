@@ -8,7 +8,9 @@ the notes, the outcome, and a failed run.
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import dataclasses
 import importlib
 import sys
 from collections.abc import Iterator
@@ -26,6 +28,9 @@ ROOT = Path(__file__).parents[2]
 FOLDER = ROOT / "examples" / "sdlc-worker"
 STUB = Path(__file__).parent / "phd_stub"
 MODULES = ("contract", "testing", "coding", "phd")
+PHD_SPEC = ROOT.parent / "poly-harness-dispatcher" / "src" / "phd" / "spec" / "spec.py"
+"""The real PHD `Spec`, when its source is next to this repository. The test reads it; it never
+imports PHD."""
 
 
 @dataclass
@@ -90,6 +95,8 @@ def test_coding_runs_the_agent_and_returns_its_outcome(on_path: None) -> None:
     assert call.session_id is None
     assert call.inputs.msg == "Implement acme/api"
     assert call.spec.cwd == "acme/api"
+    assert call.spec.stack == phd.Stack("stacks/dev")
+    assert call.spec.credentials == phd.Credentials("claude")
     assert call.spec.idle_timeout_s == 900
     assert call.spec.output_schema == contract.states.coding.outcome_schema()
 
@@ -123,3 +130,38 @@ def test_an_answer_with_an_event_the_state_cannot_emit_is_refused(on_path: None)
 
     with pytest.raises(OutcomeError):
         asyncio.run(coding.code(context(Sent())))
+
+
+def spec_fields(source: str) -> tuple[list[str], set[str]]:
+    """The fields of the class `Spec` in PHD's source: all, and the required ones."""
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.ClassDef) and node.name == "Spec":
+            fields = [
+                item
+                for item in node.body
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+            ]
+            names = [field.target.id for field in fields if isinstance(field.target, ast.Name)]
+            required = {
+                field.target.id
+                for field in fields
+                if isinstance(field.target, ast.Name) and field.value is None
+            }
+            return names, required
+    raise AssertionError("PHD's source has no class Spec")
+
+
+@pytest.mark.skipif(not PHD_SPEC.is_file(), reason="the PHD source is not next to this repository")
+def test_the_stand_in_spec_needs_the_fields_that_phd_needs(on_path: None) -> None:
+    phd, _, _ = modules()
+    names, required = spec_fields(PHD_SPEC.read_text(encoding="utf-8"))
+    stand_in = dataclasses.fields(phd.Spec)
+    no_default = dataclasses.MISSING
+
+    stand_in_required = {
+        field.name
+        for field in stand_in
+        if field.default is no_default and field.default_factory is no_default
+    }
+    assert stand_in_required == required
+    assert {field.name for field in stand_in} <= set(names)

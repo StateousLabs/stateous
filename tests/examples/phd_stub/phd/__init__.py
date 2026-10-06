@@ -4,7 +4,8 @@ PHD is not a dependency of Stateous. The PHD author accepted these features on
 2026-10-06, but they are not released yet: `Dispatcher.run()`, `handle.session_id`,
 `event.summary` and `Spec.idle_timeout_s` (docs/design.md, section 6 and N8). The
 names and shapes here follow that agreement. Pyright checks coding.py against this
-file, and tests/examples/test_coding.py runs coding.py with it.
+file, and tests/examples/test_coding.py runs coding.py with it. `Spec` needs the
+same fields as the real PHD `Spec`; a test compares them when the PHD source is there.
 
 A test sets `Dispatcher.script` to choose what the next run does. It reads
 `Dispatcher.calls` to see how the routine called PHD.
@@ -19,10 +20,34 @@ from typing import Any, ClassVar
 
 
 @dataclass(frozen=True)
+class Stack:
+    """The agent: a stack folder. The stand-in does not read the folder."""
+
+    root: str
+
+    @classmethod
+    def load(cls, root: str) -> Stack:
+        return cls(root)
+
+
+@dataclass(frozen=True)
+class Credentials:
+    """How a run authenticates. The stand-in only keeps the harness."""
+
+    harness: str
+
+    @classmethod
+    def from_host(cls, harness: str) -> Credentials:
+        return cls(harness)
+
+
+@dataclass(frozen=True)
 class Spec:
     harness: str
     model: str
+    stack: Stack
     cwd: str
+    credentials: Credentials
     output_schema: dict[str, Any] | None = None
     idle_timeout_s: float | None = None
 

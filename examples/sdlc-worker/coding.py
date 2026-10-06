@@ -11,7 +11,9 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
     spec = phd.Spec(
         harness="claude",
         model="sonnet",
+        stack=phd.Stack.load("stacks/dev"),  # the agent: a PHD stack folder
         cwd=ctx["repo"],
+        credentials=phd.Credentials.from_host("claude"),  # the login of this computer
         output_schema=states.coding.outcome_schema(),
         idle_timeout_s=900,  # no event for 15 minutes: stop (PHD request 7)
     )

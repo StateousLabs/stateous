@@ -430,7 +430,9 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
     spec = phd.Spec(
         harness="claude",
         model="sonnet",
+        stack=phd.Stack.load("stacks/dev"),  # the agent: a PHD stack folder
         cwd=ctx["repo"],
+        credentials=phd.Credentials.from_host("claude"),  # the login of this computer
         output_schema=states.coding.outcome_schema(),
         idle_timeout_s=900,  # no event for 15 minutes: stop (PHD request 7)
     )
@@ -448,6 +450,8 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
         raise RuntimeError(result.error)  # a failed attempt
     return states.coding.outcome(result.structured_output)
 ```
+
+PHD needs a stack and credentials for each run. `phd.Stack.load("stacks/dev")` loads the agent's stack folder: its identity, skills and tools. The path is relative to the folder where the supervisor runs. `phd.Credentials.from_host("claude")` uses the login of the supervisor's computer. The PHD documentation tells how to write a stack.
 
 | Need | Who does it |
 |---|---|
@@ -490,7 +494,9 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
     spec = phd.Spec(
         harness="claude",
         model="sonnet",
+        stack=phd.Stack.load("stacks/dev"),  # the agent: a PHD stack folder
         cwd=ctx["repo"],
+        credentials=phd.Credentials.from_host("claude"),  # the login of this computer
         output_schema=states.coding.outcome_schema(),
     )
     inputs = phd.Inputs(msg=f"Implement {ctx['repo']}")
