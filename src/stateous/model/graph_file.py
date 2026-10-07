@@ -18,6 +18,9 @@ FORMAT = 1
 
 REQUIRED = ("stateous", "workflow", "states", "events", "transitions", "schemas")
 
+CHILD_REQUIRED = ("states", "events", "transitions")
+"""The keys of each child workflow's body."""
+
 OPERATIONAL = ("timeout", "retries")
 """A state's settings that change how its work is done, not where a token can go.
 They are not part of `structure`."""
@@ -90,19 +93,21 @@ def _hash(document: dict[str, Any]) -> str:
 
 
 def _refuse_bad_settings(document: dict[str, Any]) -> None:
-    """Each state's `timeout`, `retries`, `parallel` and `join`, in the main workflow
-    and in each child workflow, checked with the rules the compiler uses. A file can
-    carry one that the engine cannot use, e.g. after a hand edit."""
+    """Each state's `timeout`, `retries`, `inputs`, `parallel` and `join`, in the main
+    workflow and in each child workflow, checked with the rules the compiler uses; and
+    the keys of each child workflow. A file can carry one that the engine cannot use,
+    e.g. after a hand edit."""
     children: Any = document.get("workflows", {})
     if not isinstance(children, dict):
         raise GraphFileError("the graph file's 'workflows' is not an object")
     workflows = cast("dict[str, Any]", children)
     _refuse_bad_states(document["states"], set(workflows))
     for name, body in workflows.items():
-        states = cast("dict[str, Any]", body).get("states") if isinstance(body, dict) else None
-        if states is None:
-            raise GraphFileError(f"the graph file's workflow {name!r} has no 'states'")
-        _refuse_bad_states(states, set(workflows))
+        found = cast("dict[str, Any]", body) if isinstance(body, dict) else {}
+        for key in CHILD_REQUIRED:
+            if key not in found:
+                raise GraphFileError(f"the graph file's workflow {name!r} has no {key!r}")
+        _refuse_bad_states(found["states"], set(workflows))
 
 
 def _refuse_bad_states(states: Any, workflows: set[str]) -> None:
@@ -121,6 +126,13 @@ def _refuse_bad_states(states: Any, workflows: set[str]) -> None:
             raise GraphFileError(
                 f"the graph file's state {name!r}: retries is a whole number of 0 or "
                 f"more, not {retries!r}"
+            )
+        inputs: Any = settings.get("inputs", [])
+        if not isinstance(inputs, list) or not all(
+            isinstance(field, str) for field in cast("list[Any]", inputs)
+        ):
+            raise GraphFileError(
+                f"the graph file's state {name!r}: 'inputs' is a list of context fields, by name"
             )
         parallel: Any = settings.get("parallel")
         if parallel is None:

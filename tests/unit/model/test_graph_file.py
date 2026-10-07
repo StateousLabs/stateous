@@ -172,3 +172,29 @@ def test_structure_ignores_the_timeouts_of_child_workflows_too() -> None:
 
     assert structure(changed) == structure(document)
     assert structure(moved) != structure(document)
+
+
+def test_a_parallel_state_names_its_workflows_with_strings() -> None:
+    document = parallel_document()
+    document["states"]["reviews"]["parallel"] = [["security"], "design"]
+
+    with pytest.raises(GraphFileError, match="'parallel' names a workflow that 'workflows'"):
+        load_graph(dump_graph(document))
+
+
+@pytest.mark.parametrize("key", ["events", "transitions"])
+def test_a_child_workflow_without_a_key_is_refused(key: str) -> None:
+    document = parallel_document()
+    del document["workflows"]["design"][key]
+
+    with pytest.raises(GraphFileError, match=f"^the graph file's workflow 'design' has no {key!r}"):
+        load_graph(dump_graph(document))
+
+
+@pytest.mark.parametrize("inputs", ["repo", [1], ["repo", None], {"repo": True}])
+def test_the_inputs_of_a_parallel_state_are_a_list_of_names(inputs: Any) -> None:
+    document = parallel_document()
+    document["states"]["reviews"]["inputs"] = inputs
+
+    with pytest.raises(GraphFileError, match="'inputs' is a list of context fields"):
+        load_graph(dump_graph(document))
