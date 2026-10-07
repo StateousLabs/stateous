@@ -227,3 +227,91 @@ def test_a_lease_ends_only_if_it_is_still_over_when_it_is_ended() -> None:
     with store.transaction(NOW) as tx:
         leases = [task.lease_until for task in map(tx.task, ids) if task is not None]
     assert leases == [None, utc(NOW)]
+
+
+# ── child tokens (design section 8) ───────────────────────────────────────
+
+
+def add_child(store: Store, token: str, parent: str, workflow: str, state: str) -> None:
+    with store.transaction(NOW) as tx:
+        tx.adopt(token, parent)
+        tx.add_token(
+            tables.Token(
+                token=token, state=state, status="active", visit=1, context={},
+                entered_at=utc(NOW), parent=parent, workflow=workflow,
+            )
+        )  # fmt: skip
+
+
+def family_store() -> Store:
+    """T-1, its child T-1.r.1.a in `a/triage`, and that child's child in `b/check`."""
+    store = Store("sqlite://")
+    add_token(store, "T-1")
+    add_child(store, "T-1.r.1.a", "T-1", "a", "triage")
+    add_child(store, "T-1.r.1.a.s.1.b", "T-1.r.1.a", "b", "check")
+    return store
+
+
+def test_a_child_is_in_the_family_of_its_top_token() -> None:
+    store = family_store()
+
+    with store.transaction(NOW) as tx:
+        assert tx.family("T-1.r.1.a.s.1.b") == "T-1"
+        assert tx.family("T-1.r.1.a") == "T-1"
+        assert tx.family("T-1") == "T-1"
+        assert tx.family("NEW-1") == "NEW-1"  # a token that is not there yet is its own top
+        tx.adopt("T-1.r.1.a.s.1.c", "T-1.r.1.a")
+        assert tx.family("T-1.r.1.a.s.1.c") == "T-1"
+
+
+def test_the_children_of_a_token_are_those_it_started() -> None:
+    store = family_store()
+
+    with store.transaction(NOW) as tx:
+        assert [child.token for child in tx.children("T-1")] == ["T-1.r.1.a"]
+        assert [child.token for child in tx.children("T-1.r.1.a")] == ["T-1.r.1.a.s.1.b"]
+        assert tx.children("T-1.r.1.a.s.1.b") == []
+        assert [t.token for t in tx.find_tokens(None, 10, parent="T-1")] == ["T-1.r.1.a"]
+        assert len(tx.find_tokens(None, 10)) == 3
+
+
+def test_a_token_id_is_taken_without_regard_to_case() -> None:
+    store = family_store()
+
+    with store.transaction(NOW) as tx:
+        assert tx.token_taken("t-1.R.1.A")
+        assert not tx.token_taken("T-2")
+
+
+def test_a_claim_names_a_child_workflows_state_as_workflow_slash_state() -> None:
+    store = family_store()
+    with store.transaction(NOW) as tx:
+        tx.queue_task("T-1", "triage", 1)
+        tx.queue_task("T-1.r.1.a", "triage", 1)
+        tx.queue_task("T-1.r.1.a.s.1.b", "check", 1)
+
+    def claimed(states: list[str]) -> str | None:
+        with store.transaction(NOW) as tx:
+            task = tx.claim_task("box", states)
+            return None if task is None else task.token
+
+    assert claimed(["a/check", "b/triage"]) is None
+    assert claimed(["a/triage"]) == "T-1.r.1.a"
+    assert claimed(["triage"]) == "T-1"
+    assert claimed(["b/check", "triage"]) == "T-1.r.1.a.s.1.b"
+
+
+def test_the_arrival_payload_is_that_of_the_event_that_entered_the_last_state() -> None:
+    store = Store("sqlite://")
+    with store.transaction(NOW) as tx:
+        tx.append("C-1", "started", context={})
+        tx.append("C-1", "event_accepted", event="__started__", payload=None, state="__start__")
+        tx.append("C-1", "entered", state="triage", visit=1)
+        tx.append("C-1", "event_accepted", event="deny", payload={"count": 2}, state="triage")
+        tx.append("C-1", "entered", state="rejected", visit=1)
+        tx.append("C-1", "event_accepted", event="recorded", payload=None, state="rejected")
+        tx.append("C-1", "completed")
+
+    with store.transaction(NOW) as tx:
+        assert tx.arrival_payload("C-1") == {"count": 2}
+        assert tx.arrival_payload("NONE") is None

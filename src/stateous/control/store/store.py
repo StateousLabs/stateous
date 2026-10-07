@@ -16,7 +16,20 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Connection, create_engine, delete, event, func, or_, select, text, update
+from sqlalchemy import (
+    ColumnElement,
+    Connection,
+    and_,
+    create_engine,
+    delete,
+    event,
+    false,
+    func,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -240,17 +253,20 @@ class Store:
 class Transaction:
     """Reads and writes inside one database transaction.
 
-    On Postgres, many writers work at once. A transaction takes the lock of a token
-    (`lock_token`) before it reads the token to change it, or appends to its ledger,
-    and holds the lock until it ends. So the changes to one token take turns: a token
-    moves one step at a time. A transaction waits for at most one token's lock, and
-    only while it holds no other, so two transactions never wait for each other in a
-    circle. A new claim never waits: it tries the lock, and skips a busy token. A
-    repeated claim waits for the lock of the task it got before, and holds no other
-    token's lock then. A claim with a request id also locks the supervisor's row in
-    `claims` (`last_claim`). It takes that lock only before any token lock, and no
-    transaction that holds a token lock waits for that row. So this order is safe
-    too. SQLite takes one writer at a time and needs no locks.
+    On Postgres, many writers work at once. A transaction takes the lock of a token's
+    family (`lock_token`) before it reads the token to change it, or appends to its
+    ledger, and holds the lock until it ends. A family is a top token and the child
+    tokens below it (design section 8). A parallel state changes a parent and its
+    children in one transaction, so they share one lock: the lock of the top token.
+    So the changes to one family take turns: a token moves one step at a time. A
+    transaction waits for at most one family's lock, and only while it holds no other,
+    so two transactions never wait for each other in a circle. A new claim never
+    waits: it tries the lock, and skips a busy family. A repeated claim waits for the
+    lock of the task it got before, and holds no other token's lock then. A claim
+    with a request id also locks the supervisor's row in `claims` (`last_claim`). It
+    takes that lock only before any token lock, and no transaction that holds a token
+    lock waits for that row. So this order is safe too. SQLite takes one writer at a
+    time and needs no locks.
     """
 
     def __init__(self, session: Session, now: datetime) -> None:
@@ -258,13 +274,17 @@ class Transaction:
         self.now = now
         self._locks = session.get_bind().dialect.name == "postgresql"
         self._locked: set[str] = set()
+        self._families: dict[str, str] = {}
+        """Token id -> the id of its top token, as `family` found it or `adopt` set it."""
 
     def lock_token(self, token: str, *, wait: bool = True) -> bool:
-        """Take the token's lock until this transaction ends. Without `wait`, only if
-        no one else holds it. True when it is held. The key ignores case, so `t-1`
-        waits for `T-1` and then finds it (`token_folded`)."""
-        key = TOKEN_LOCK + token.lower()
-        if not self._locks or key in self._locked:
+        """Take the lock of the token's family until this transaction ends. Without
+        `wait`, only if no one else holds it. True when it is held. The key ignores
+        case, so `t-1` waits for `T-1` and then finds it (`token_folded`)."""
+        if not self._locks:
+            return True
+        key = TOKEN_LOCK + self.family(token).lower()
+        if key in self._locked:
             return True
         if wait and self._locked:
             raise RuntimeError("a transaction waits for a token's lock only when it holds none")
@@ -276,6 +296,29 @@ class Transaction:
             self._locked.add(key)
             return True
         return False
+
+    def family(self, token: str) -> str:
+        """The id of the top token of `token`'s family: `token` itself, or the first
+        token above it that has no parent. A token's `parent` never changes after the
+        token is made, so this reads it without a lock. A token that is not there
+        yet is its own top, unless `adopt` named its parent."""
+        if token in self._families:
+            return self._families[token]
+        top = token
+        while (
+            above := self._session.scalar(
+                select(tables.Token.parent).where(tables.Token.token == top)
+            )
+        ) is not None:
+            top = above
+        self._families[token] = top
+        return top
+
+    def adopt(self, child: str, parent: str) -> None:
+        """Count the new token `child` in the family of `parent`. Call it before the
+        child's first ledger entry: then the child's entries take the family's lock,
+        which this transaction holds already."""
+        self._families[child] = self.family(parent)
 
     # ── ledger ──────────────────────────────────────────────────────────
 
@@ -331,6 +374,17 @@ class Transaction:
                 return entry
         return None
 
+    def arrival_payload(self, token: str) -> dict[str, Any] | None:
+        """The payload of the event that brought the token into the last state it
+        entered. For a completed token, that is the state it ended from."""
+        entries = self.entries(token)
+        entered = max((i for i, e in enumerate(entries) if e.kind == "entered"), default=0)
+        for entry in reversed(entries[:entered]):
+            if entry.kind == "event_accepted":
+                payload: dict[str, Any] | None = entry.data.get("payload")
+                return payload
+        return None
+
     # ── tokens ──────────────────────────────────────────────────────────
 
     def token(self, token: str) -> tables.Token | None:
@@ -351,11 +405,16 @@ class Transaction:
         self._session.add(row)
         self._session.flush()
 
-    def find_tokens(self, status: str | None, limit: int) -> list[tables.Token]:
-        """Tokens, the most recently moved first; only those of `status`, if given."""
+    def find_tokens(
+        self, status: str | None, limit: int, *, parent: str | None = None
+    ) -> list[tables.Token]:
+        """Tokens, the most recently moved first; only those of `status`, if given; only
+        the children of `parent`, if given."""
         query = select(tables.Token)
         if status is not None:
             query = query.where(tables.Token.status == status)
+        if parent is not None:
+            query = query.where(tables.Token.parent == parent)
         query = query.order_by(tables.Token.entered_at.desc(), tables.Token.token).limit(limit)
         return list(self._session.scalars(query))
 
@@ -367,6 +426,27 @@ class Transaction:
             .where(tables.Token.status.in_(("active", "paused")))
         )
         return self._session.scalar(query) or 0
+
+    def children(self, parent: str) -> list[tables.Token]:
+        """The tokens that `parent` started, in the order of their ids. Call it under
+        the parent's lock: it is the children's lock too."""
+        return list(
+            self._session.scalars(
+                select(tables.Token)
+                .where(tables.Token.parent == parent)
+                .order_by(tables.Token.token)
+            )
+        )
+
+    def token_taken(self, token: str) -> bool:
+        """Whether a token has this id, compared without regard to case. No lock: the
+        engine asks it before it makes a child, under the parent's lock."""
+        found = self._session.scalar(
+            select(tables.Token.token)
+            .where(func.lower(tables.Token.token) == token.lower())
+            .limit(1)
+        )
+        return found is not None
 
     # ── tasks ───────────────────────────────────────────────────────────
 
@@ -403,13 +483,14 @@ class Transaction:
 
     def claim_task(self, supervisor: str, states: Collection[str]) -> tables.Task | None:
         """Claim the oldest queued task of one of `states` whose token is active and
-        not busy. Two supervisors never take the same task."""
+        not busy. `<state>` names a state of the main workflow; `<workflow>/<state>`
+        names a state of a child workflow. Two supervisors never take the same task."""
         candidates = self._session.execute(
             select(tables.Task.id, tables.Task.token)
             .join(tables.Token, tables.Token.token == tables.Task.token)
             .where(
                 tables.Task.status == "queued",
-                tables.Task.state.in_(sorted(states)),
+                _served(states),
                 tables.Token.status == "active",  # a paused token's task waits
             )
             .order_by(tables.Task.id)
@@ -617,3 +698,17 @@ def _free(row: tables.ControlPlane, holder: str, now: datetime) -> bool:
     if row.serving is None or row.serving == holder or row.since is None:
         return True
     return row.since + SERVING_LEASE < now
+
+
+def _served(states: Collection[str]) -> ColumnElement[bool]:
+    """The tasks of `states`: `<state>` for the main workflow, whose tokens have no
+    workflow; `<workflow>/<state>` for a child workflow."""
+    by_workflow: dict[str, set[str]] = {}
+    for name in states:
+        workflow, _, state = name.rpartition("/")
+        by_workflow.setdefault(workflow, set()).add(state)
+    found: list[ColumnElement[bool]] = []
+    for workflow, names in sorted(by_workflow.items()):
+        own = tables.Token.workflow.is_(None) if not workflow else tables.Token.workflow == workflow
+        found.append(and_(own, tables.Task.state.in_(sorted(names))))
+    return or_(*found) if found else false()

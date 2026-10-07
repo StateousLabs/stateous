@@ -133,7 +133,7 @@ def insert_a_token(url: str) -> None:
 
 def test_the_baseline_is_the_first_revision_kept_in_its_own_table() -> None:
     assert (BASELINE, VERSION_TABLE) == ("0001", "stateous_version")
-    assert head() == "0002"
+    assert head() == "0003"
 
 
 def test_a_new_database_is_made_at_the_newest_revision(tmp_path: Path) -> None:
@@ -372,3 +372,22 @@ def test_opening_a_database_twice_changes_nothing(tmp_path: Path) -> None:
 
     assert table_names(url) == before
     assert version_of(url) == head()
+
+
+def test_a_database_at_0002_gets_the_parent_and_workflow_of_each_token(tmp_path: Path) -> None:
+    url = sqlite_url(tmp_path / "claims.db")
+    engine = create_engine(url)
+    upgrade_from_empty(engine, revision="0002")
+    engine.dispose()
+    insert_a_token(url)
+    assert "parent" not in token_columns(url)
+
+    Store(url).close()
+
+    assert version_of(url) == head()
+    assert {"parent", "workflow"} <= token_columns(url)
+    engine = create_engine(url)
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT token, parent, workflow FROM tokens")).all()
+    engine.dispose()
+    assert [tuple(row) for row in rows] == [("T-1", None, None)]

@@ -43,9 +43,12 @@ class Token(Base):
     """Where each token is now, and its context."""
 
     __tablename__ = "tokens"
-    __table_args__ = (Index("tokens_folded", func.lower(text("token"))),)
+    __table_args__ = (
+        Index("tokens_folded", func.lower(text("token"))),
+        Index("tokens_parent", "parent"),
+    )
     """A new token whose id differs from another only in case is refused. The engine
-    finds such a token by this index."""
+    finds such a token by this index. `tokens_parent` finds the children of a token."""
 
     token: Mapped[str] = mapped_column(String(256), primary_key=True)
     state: Mapped[str] = mapped_column(String(64))
@@ -55,6 +58,10 @@ class Token(Base):
     """How many times the token has entered its current state."""
     context: Mapped[dict[str, Any]]
     entered_at: Mapped[datetime]
+    parent: Mapped[str | None] = mapped_column(String(256), default=None)
+    """The token whose parallel state started this one; None for a top token."""
+    workflow: Mapped[str | None] = mapped_column(String(64), default=None)
+    """The child workflow of a child token; None for a token of the main workflow."""
 
 
 class Task(Base):
