@@ -284,3 +284,31 @@ def test_init_writes_a_stub_for_each_state_of_each_workflow(tmp_path: Path) -> N
     ]  # fmt: skip
     assert "kept     the routine of 'design/triage'" in lines
     assert not (folder / "reviews.py").exists()  # a parallel state has no routine
+
+
+def test_two_states_with_one_file_name_each_get_a_stub(tmp_path: Path) -> None:
+    folder = tmp_path / "worker"
+
+    lines = write_folder(
+        folder, url="http://a.test", contract=CONTRACT_TEXT, states=["a_b", "a/b"], stub=stub
+    )
+
+    assert (folder / "a_b.py").read_text(encoding="utf-8") == stub("a_b")
+    assert (folder / "a_b_2.py").read_text(encoding="utf-8") == stub("a/b")
+    assert f"wrote    {folder / 'a_b.py'}" in lines
+    assert f"wrote    {folder / 'a_b_2.py'} (a_b.py is the stub of 'a_b')" in lines
+
+
+def test_a_numbered_stub_never_takes_the_name_of_another_state(tmp_path: Path) -> None:
+    folder = tmp_path / "worker"
+
+    write_folder(
+        folder,
+        url="http://a.test",
+        contract=CONTRACT_TEXT,
+        states=["a_b", "a/b", "a_b_2"],
+        stub=stub,
+    )
+
+    assert (folder / "a_b_2.py").read_text(encoding="utf-8") == stub("a_b_2")
+    assert (folder / "a_b_3.py").read_text(encoding="utf-8") == stub("a/b")

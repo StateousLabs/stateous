@@ -136,6 +136,27 @@ def stub_name(state: str) -> str:
     return f"{name}.py"
 
 
+def stub_names(states: Sequence[str]) -> dict[str, str]:
+    """The stub file of each state: `stub_name`, unless an earlier state has that
+    name. Then `<stem>_2.py`, `<stem>_3.py` …, never the name of another state's
+    file. The main state `a_b` and the child state `a/b` both map to `a_b.py`."""
+    natural = {state: stub_name(state) for state in states}
+    used = set(natural.values())
+    names: dict[str, str] = {}
+    taken: set[str] = set()
+    for state in states:
+        name = natural[state]
+        if name in taken:
+            stem, number = name.removesuffix(".py"), 2
+            while f"{stem}_{number}.py" in used:
+                number += 1
+            name = f"{stem}_{number}.py"
+            used.add(name)
+        taken.add(name)
+        names[state] = name
+    return names
+
+
 def implemented_states(folder: Path) -> set[str]:
     """The states that a file in `folder` marks with `@on_state(states.<state>)`, as
     Python names: `in_progress`, or `security.triage` for `states.security.triage`.
@@ -166,16 +187,19 @@ def write_folder(
     stub: Callable[[str], str],
 ) -> list[str]:
     """Write `contract.py` (always), a stub for each state that no file implements
-    (never over an existing file), and `stateous.yaml` (only when absent). Returns
-    one line for each file: `wrote`, `kept` or `skipped`."""
+    (never over an existing file), and `stateous.yaml` (only when absent). Two states
+    never share a stub file (`stub_names`). Returns one line for each file: `wrote`,
+    `kept` or `skipped`."""
     folder.mkdir(parents=True, exist_ok=True)
     done: list[str] = []
     target = folder / CONTRACT
     target.write_text(contract, encoding="utf-8", newline="\n")
     done.append(f"wrote    {target}")
     implemented = implemented_states(folder)
+    names = stub_names(states)
+    owners = {stub_name(state): state for state in reversed(states)}
     for state in states:
-        path = folder / stub_name(state)
+        path = folder / names[state]
         if _identifier(state) in implemented:
             done.append(f"kept     the routine of {state!r}")
         elif path.exists():
@@ -183,7 +207,9 @@ def write_folder(
         else:
             path.write_text(stub(state), encoding="utf-8", newline="\n")
             why = ""
-            if _stem(state) in TAKEN_NAMES:
+            if names[state] != stub_name(state):
+                why = f" ({stub_name(state)} is the stub of {owners[stub_name(state)]!r})"
+            elif _stem(state) in TAKEN_NAMES:
                 why = f" ({_stem(state)}.py would hide a Python module)"
             done.append(f"wrote    {path}{why}")
     config = folder / CONFIG

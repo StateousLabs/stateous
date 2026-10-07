@@ -642,7 +642,7 @@ When the parent enters the state, the control plane starts the children in the s
 
 A child is a normal token. It has tasks, timers, memory and history. Supervisors claim its tasks as they claim other tasks.
 
-A claim names a child's state as `<workflow>/<state>`, for example `design-review/triage`. In `contract.py`, this state is `states.design_review.triage`. Its events are in `events.design_review`. `stateous init` writes a stub for each state of each workflow, in a file such as `design_review_triage.py`. A parallel state has no stub.
+A claim names a child's state as `<workflow>/<state>`, for example `design-review/triage`. In `contract.py`, this state is `states.design_review.triage`. Its events are in `events.design_review`. `stateous init` writes a stub for each state of each workflow, in a file such as `design_review_triage.py`. When two states get the same file name, the second stub goes in `<name>_2.py`, and `init` tells you. A parallel state has no stub.
 
 When a child ends, the control plane checks the join in the same transaction. The parent can leave the state on `joined`, on `timeout` or on an event that you fire. When the parent leaves the state, or when you cancel it, the control plane cancels each child that has not ended.
 
