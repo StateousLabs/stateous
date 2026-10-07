@@ -118,6 +118,11 @@ class TaskNotHeld(EngineError, ValueError):
     request is for an attempt of it that is over."""
 
 
+class ChildToken(EngineError, ValueError):
+    """The token is a child of a parallel state: it is part of its parent's work. It
+    cannot be paused, resumed or cancelled on its own; steer its top token."""
+
+
 @dataclass(frozen=True)
 class Token:
     token: str
@@ -224,43 +229,76 @@ class Engine:
 
     def pause(self, token: str) -> Token:
         """Stop a token: it does not move, its queued task is not handed out, its
-        timers stand still. Events that arrive meanwhile are held, not lost."""
+        timers stand still. Events that arrive meanwhile are held, not lost. Its
+        children are paused too."""
         with self._transaction() as tx:
             row = self._existing(tx, token)
+            self._refuse_child(tx, row, "pause")
             if row.status != "active":
                 raise TokenNotActive(
                     f"token {token!r} is {row.status}; only an active token can be paused"
                 )
-            row.status = "paused"
-            tx.append(token, "paused")
+            self._pause(tx, row)
             return _token(row)
 
+    def _pause(self, tx: Transaction, row: tables.Token) -> None:
+        row.status = "paused"
+        tx.append(row.token, "paused")
+        for child in self._children(tx, row):
+            if child.status == "active":
+                self._pause(tx, child)
+
     def resume(self, token: str) -> Token:
-        """Let a paused token move again. Its timers get the paused time back. The
-        held events apply in the order they arrived; those that no longer fit are
-        dropped and recorded."""
+        """Let a paused token move again. Its timers get the paused time back. Its
+        children resume first, and apply what they held; a join can be met then. Then
+        the token's held events apply in the order they arrived; those that no longer
+        fit are dropped and recorded."""
         with self._transaction() as tx:
             row = self._existing(tx, token)
+            self._refuse_child(tx, row, "resume")
             if row.status != "paused":
                 raise TokenNotActive(
                     f"token {token!r} is {row.status}; only a paused token can be resumed"
                 )
-            entries = tx.entries(token)
-            paused_at = max((e.at for e in entries if e.kind == "paused"), default=tx.now)
-            for timer in tx.pending_timers(token):
-                # Only the part of the pause after the timer was set.
-                timer.due_at += tx.now - max(paused_at, timer.set_at)
-            row.status = "active"
-            tx.append(token, "resumed")
-            for held in _held_events(entries):
-                self._replay(tx, row, held)
+            self._resume(tx, row)
             return _token(row)
+
+    def _resume(self, tx: Transaction, row: tables.Token) -> None:
+        entries = tx.entries(row.token)
+        paused_at = max((e.at for e in entries if e.kind == "paused"), default=tx.now)
+        for timer in tx.pending_timers(row.token):
+            # Only the part of the pause after the timer was set.
+            timer.due_at += tx.now - max(paused_at, timer.set_at)
+        row.status = "active"
+        tx.append(row.token, "resumed")
+        for child in self._children(tx, row):
+            if child.status == "paused":  # a join can have cancelled it meanwhile
+                self._resume(tx, child)
+        for held in _held_events(entries):
+            self._replay(tx, row, held)
+
+    def _refuse_child(
+        self, tx: Transaction, row: tables.Token, verb: Literal["pause", "resume", "cancel"]
+    ) -> None:
+        """A child is part of its parent's work (design section 8): steer the top
+        token instead. `ChildToken` names it."""
+        if row.parent is None:
+            return
+        top = row
+        while top.parent is not None and (above := tx.token(top.parent)) is not None:
+            top = above
+        done = {"pause": "paused", "resume": "resumed", "cancel": "cancelled"}[verb]
+        raise ChildToken(
+            f"token {row.token!r} is a child of {row.parent!r}: it is part of its parent's "
+            f"work, and cannot be {done} on its own; {verb} {top.token!r} instead"
+        )
 
     def cancel(self, token: str) -> Token:
         """Stop a token for good: its tasks and timers are cancelled, its children too,
         its memory is deleted, and anything it held is dropped."""
         with self._transaction() as tx:
             row = self._existing(tx, token)
+            self._refuse_child(tx, row, "cancel")
             if row.status not in ("active", "paused"):
                 raise TokenNotActive(
                     f"token {token!r} is {row.status}; only an active or paused token "
