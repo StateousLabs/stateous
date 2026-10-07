@@ -8,6 +8,8 @@ from stateous import END, START, Workflow
 from stateous.compiler.compile import compile_workflow
 from stateous.compiler.plot import mermaid, state_id
 
+from ...parallel import ALL_APPROVED, parallel_document
+
 
 def test_it_is_a_mermaid_state_diagram_from_start_to_end(sdlc_document: dict[str, Any]) -> None:
     picture = mermaid(sdlc_document)
@@ -87,3 +89,28 @@ def test_a_finished_tokens_last_state_is_drawn_as_finished(
 
 def test_state_id_turns_hyphens_into_underscores() -> None:
     assert state_id("awaiting-review") == "awaiting_review"
+
+
+# ── parallel states (design section 8) ────────────────────────────────────
+
+
+def test_a_parallel_state_holds_its_workflows_as_regions() -> None:
+    picture = mermaid(parallel_document())
+
+    assert "    state reviews {\n" in picture
+    assert '        state "security" as reviews__security {\n' in picture
+    assert '            state "triage" as reviews__security__triage\n' in picture
+    assert "            [*] --> reviews__security__triage\n" in picture
+    assert (
+        "            reviews__security__triage --> reviews__security__approved: lgtm\n"
+    ) in picture
+    region_break = picture.index("        --\n", picture.index("    state reviews {"))
+    assert picture.index("reviews__security") < region_break < picture.index("reviews__design")
+
+
+def test_joined_is_named_plainly() -> None:
+    picture = mermaid(parallel_document())
+
+    assert f"    reviews --> merging: (joined) [{ALL_APPROVED}]\n" in picture
+    assert "    reviews --> coding: (joined) [otherwise]\n" in picture
+    assert "    reviews --> blocked: (timeout)\n" in picture

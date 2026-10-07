@@ -33,17 +33,25 @@ def checksum(document: dict[str, Any]) -> str:
 
 
 def structure(document: dict[str, Any]) -> str:
-    """The same hash, of the document without each state's timeout and retries.
-    Two graph files with equal structure differ only in operational settings."""
-    states = cast("dict[str, dict[str, Any]]", document.get("states", {}))
-    shape = {
-        **document,
-        "states": {
-            name: {key: value for key, value in options.items() if key not in OPERATIONAL}
-            for name, options in states.items()
-        },
-    }
+    """The same hash, of the document without each state's timeout and retries, in
+    the main workflow and in each child workflow. Two graph files with equal
+    structure differ only in operational settings."""
+    shape = {**document, "states": _shape(document.get("states", {}))}
+    children = cast("dict[str, dict[str, Any]]", document.get("workflows", {}))
+    if children:
+        shape["workflows"] = {
+            name: {**body, "states": _shape(body.get("states", {}))}
+            for name, body in children.items()
+        }
     return _hash(shape)
+
+
+def _shape(states: Any) -> dict[str, Any]:
+    """States without their operational settings."""
+    return {
+        name: {key: value for key, value in options.items() if key not in OPERATIONAL}
+        for name, options in cast("dict[str, dict[str, Any]]", states).items()
+    }
 
 
 def dump_graph(document: dict[str, Any]) -> str:
@@ -82,9 +90,23 @@ def _hash(document: dict[str, Any]) -> str:
 
 
 def _refuse_bad_settings(document: dict[str, Any]) -> None:
-    """Each state's `timeout` and `retries`, checked with the rules the compiler
-    uses. A file can carry one that the engine cannot use, e.g. after a hand edit."""
-    states: Any = document["states"]
+    """Each state's `timeout`, `retries`, `parallel` and `join`, in the main workflow
+    and in each child workflow, checked with the rules the compiler uses. A file can
+    carry one that the engine cannot use, e.g. after a hand edit."""
+    children: Any = document.get("workflows", {})
+    if not isinstance(children, dict):
+        raise GraphFileError("the graph file's 'workflows' is not an object")
+    workflows = cast("dict[str, Any]", children)
+    _refuse_bad_states(document["states"], set(workflows))
+    for name, body in workflows.items():
+        states = cast("dict[str, Any]", body).get("states") if isinstance(body, dict) else None
+        if states is None:
+            raise GraphFileError(f"the graph file's workflow {name!r} has no 'states'")
+        _refuse_bad_states(states, set(workflows))
+
+
+def _refuse_bad_states(states: Any, workflows: set[str]) -> None:
+    """The checks of `_refuse_bad_settings` for one workflow's states."""
     if not isinstance(states, dict):
         raise GraphFileError("the graph file's 'states' is not an object")
     for name, options in cast("dict[str, Any]", states).items():
@@ -100,3 +122,14 @@ def _refuse_bad_settings(document: dict[str, Any]) -> None:
                 f"the graph file's state {name!r}: retries is a whole number of 0 or "
                 f"more, not {retries!r}"
             )
+        parallel: Any = settings.get("parallel")
+        if parallel is None:
+            continue
+        named = cast("list[Any]", parallel) if isinstance(parallel, list) else []
+        if not named or any(not isinstance(c, str) or c not in workflows for c in named):
+            raise GraphFileError(
+                f"the graph file's state {name!r}: 'parallel' names a workflow that "
+                "'workflows' does not have"
+            )
+        if settings.get("join", "all") not in ("all", "any"):
+            raise GraphFileError(f"the graph file's state {name!r}: 'join' is 'all' or 'any'")

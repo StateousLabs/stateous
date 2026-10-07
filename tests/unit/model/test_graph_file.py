@@ -9,6 +9,8 @@ import pytest
 
 from stateous.model.graph_file import GraphFileError, checksum, dump_graph, load_graph, structure
 
+from ...parallel import parallel_document
+
 
 def test_the_file_is_indented_json_with_a_last_newline(sdlc_document: dict[str, Any]) -> None:
     text = dump_graph(sdlc_document)
@@ -126,3 +128,47 @@ def test_retries_of_zero_or_more_are_read(sdlc_document: dict[str, Any]) -> None
     sdlc_document["states"]["testing"]["retries"] = 0
 
     assert load_graph(json.dumps(sdlc_document))["states"]["testing"]["retries"] == 0
+
+
+# ── child workflows (design section 8) ────────────────────────────────────
+
+
+def test_a_graph_file_with_child_workflows_round_trips() -> None:
+    document = parallel_document()
+
+    assert load_graph(dump_graph(document)) == document
+
+
+def test_an_overlong_timeout_is_refused_in_a_child_workflow() -> None:
+    document = parallel_document()
+    document["workflows"]["design"]["states"]["triage"]["timeout"] = "3000000d"
+
+    with pytest.raises(GraphFileError, match=r"the graph file's state 'triage': "):
+        load_graph(dump_graph(document))
+
+
+def test_a_parallel_state_must_name_workflows_the_file_has() -> None:
+    document = parallel_document()
+    document["states"]["reviews"]["parallel"] = ["security", "legal"]
+
+    with pytest.raises(GraphFileError, match="'parallel' names a workflow that 'workflows'"):
+        load_graph(dump_graph(document))
+
+
+def test_a_join_is_all_or_any_in_the_file_too() -> None:
+    document = parallel_document()
+    document["states"]["reviews"]["join"] = "most"
+
+    with pytest.raises(GraphFileError, match="'join' is 'all' or 'any'"):
+        load_graph(dump_graph(document))
+
+
+def test_structure_ignores_the_timeouts_of_child_workflows_too() -> None:
+    document = parallel_document()
+    changed = copy.deepcopy(document)
+    changed["workflows"]["design"]["states"]["triage"]["timeout"] = "1h"
+    moved = copy.deepcopy(document)
+    moved["workflows"]["design"]["transitions"][1]["to"] = "rejected"
+
+    assert structure(changed) == structure(document)
+    assert structure(moved) != structure(document)

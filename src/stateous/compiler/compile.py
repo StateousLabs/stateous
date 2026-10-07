@@ -2,7 +2,8 @@
 
 The document holds all that the control plane and `stateous init` need: each
 state's settings and the events it may emit, the events, the transitions, and
-each model as JSON Schema. Nothing in it refers back to Python code.
+each model as JSON Schema. The child workflows of parallel states are in it too,
+under `workflows`. Nothing in it refers back to Python code.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 from pydantic.json_schema import models_json_schema
 
-from stateous.compiler.validate import validate
+from stateous.compiler.validate import nested_workflows, validate
 from stateous.model.graph_file import FORMAT
 from stateous.model.workflow import (
     RESERVED_EVENTS,
@@ -28,21 +29,31 @@ SCHEMA_REF = "#/schemas/{model}"
 
 
 def compile_workflow(flow: Workflow) -> dict[str, Any]:
-    """Validate `flow` (`DefinitionError` lists every problem), then build its document."""
+    """Validate `flow` (`DefinitionError` lists every problem), then build its document.
+    The child workflows of its parallel states go under `workflows` (design section 8)."""
     validate(flow)
-    schemas, names = _schemas(flow)
+    children = nested_workflows(flow)
+    schemas, names = _schemas([flow, *children])
     _refuse_odd_names(flow, schemas)
-    document: dict[str, Any] = {"stateous": FORMAT, "workflow": flow.name}
+    document: dict[str, Any] = {"stateous": FORMAT, "workflow": flow.name, **_body(flow, names)}
+    if children:
+        document["workflows"] = {child.name: _body(child, names) for child in children}
+    document["schemas"] = schemas
+    return document
+
+
+def _body(flow: Workflow, names: dict[type[BaseModel], str]) -> dict[str, Any]:
+    """One workflow: its context, states, events and transitions."""
+    body: dict[str, Any] = {}
     if flow.context is not None:
-        document["context"] = names[flow.context]
-    document["states"] = {state.name: _state(flow, state) for state in flow.states.values()}
-    document["events"] = {
+        body["context"] = names[flow.context]
+    body["states"] = {state.name: _state(flow, state) for state in flow.states.values()}
+    body["events"] = {
         event.name: {"payload": names[event.payload]} if event.payload else {}
         for event in flow.events.values()
     }
-    document["transitions"] = [_transition(edge) for edge in flow.transitions]
-    document["schemas"] = schemas
-    return document
+    body["transitions"] = [_transition(edge) for edge in flow.transitions]
+    return body
 
 
 def _state(flow: Workflow, state: State) -> dict[str, Any]:
@@ -51,7 +62,13 @@ def _state(flow: Workflow, state: State) -> dict[str, Any]:
         out["timeout"] = state.timeout
     if state.retries:
         out["retries"] = state.retries
-    out["emits"] = _emits(flow, state)
+    if state.parallel:  # its work is its children: no task, so no events to emit
+        out["parallel"] = [child.name for child in state.parallel]
+        out["join"] = state.join
+        if state.inputs:
+            out["inputs"] = list(state.inputs)
+    else:
+        out["emits"] = _emits(flow, state)
     return out
 
 
@@ -76,13 +93,14 @@ def _transition(edge: Transition) -> dict[str, Any]:
     return out
 
 
-def _schemas(flow: Workflow) -> tuple[dict[str, Any], dict[type[BaseModel], str]]:
-    """Each model's JSON Schema, by its key; and the key of each model the workflow
-    names. Pydantic chooses the keys: `Box[int]` is `Box_int_`."""
+def _schemas(flows: list[Workflow]) -> tuple[dict[str, Any], dict[type[BaseModel], str]]:
+    """Each model's JSON Schema, by its key; and the key of each model the workflows
+    name. Pydantic chooses the keys: `Box[int]` is `Box_int_`."""
     models: list[type[BaseModel]] = []
-    for model in [flow.context, *(event.payload for event in flow.events.values())]:
-        if model is not None and model not in models:
-            models.append(model)
+    for flow in flows:
+        for model in [flow.context, *(event.payload for event in flow.events.values())]:
+            if model is not None and model not in models:
+                models.append(model)
     if not models:
         return {}, {}
     refs, top = models_json_schema(

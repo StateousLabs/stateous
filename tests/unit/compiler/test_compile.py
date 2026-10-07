@@ -10,6 +10,8 @@ from stateous.compiler.codegen import generate_contract
 from stateous.compiler.compile import compile_workflow
 from stateous.model.workflow import DefinitionError
 
+from ...parallel import ALL_APPROVED, parallel_document
+
 SDLC: dict[str, Any] = {
     "stateous": 1,
     "workflow": "sdlc",
@@ -158,3 +160,54 @@ def test_a_model_name_that_is_not_a_python_name_is_refused() -> None:
 
     with pytest.raises(DefinitionError, match="the model name 'odd-name' cannot be a Python name"):
         compile_workflow(boxed(odd, Box[str]))
+
+
+# ── parallel states (design section 8) ────────────────────────────────────
+
+
+def test_a_parallel_state_names_its_workflows_join_and_inputs_in_place_of_emits() -> None:
+    document = parallel_document("any")
+
+    assert document["states"]["reviews"] == {
+        "timeout": "2d",
+        "parallel": ["security", "design"],
+        "join": "any",
+        "inputs": ["repo", "branch"],
+    }
+    assert document["states"]["coding"] == {"emits": ["done"]}
+    assert {"from": "reviews", "to": "merging", "on": "joined", "when": ALL_APPROVED} in (
+        document["transitions"]
+    )
+
+
+def test_the_child_workflows_are_compiled_inside_the_document() -> None:
+    document = parallel_document()
+
+    assert list(document) == [
+        "stateous", "workflow", "context", "states", "events", "transitions", "workflows",
+        "schemas",
+    ]  # fmt: skip
+    assert list(document["workflows"]) == ["security", "design"]
+    assert document["workflows"]["security"] == {
+        "context": "Review",
+        "states": {
+            "triage": {"emits": ["lgtm", "deny"]},
+            "approved": {"emits": ["recorded"]},
+            "rejected": {"emits": ["recorded"]},
+        },
+        "events": {"recorded": {}, "lgtm": {}, "deny": {"payload": "Findings"}},
+        "transitions": [
+            {"from": "__start__", "to": "triage"},
+            {"from": "triage", "to": "approved", "on": "lgtm"},
+            {"from": "triage", "to": "rejected", "on": "deny"},
+            {"from": "approved", "to": "__end__", "on": "recorded"},
+            {"from": "rejected", "to": "__end__", "on": "recorded"},
+        ],
+    }
+    assert sorted(document["schemas"]) == ["Findings", "Review", "Ticket"]
+
+
+def test_a_workflow_without_parallel_states_has_no_workflows_key(
+    sdlc_document: dict[str, Any],
+) -> None:
+    assert "workflows" not in sdlc_document
