@@ -4,8 +4,10 @@ import pytest
 from pydantic import BaseModel, create_model
 
 from stateous import END, START, Workflow
-from stateous.compiler.validate import validate
+from stateous.compiler.validate import TOP_ID_ROOM, nested_workflows, validate
 from stateous.model.workflow import DefinitionError
+
+from ...parallel import Review, parallel_workflow, review
 
 
 class Ticket(BaseModel):
@@ -181,3 +183,164 @@ def test_all_problems_are_reported_together() -> None:
     assert "cannot be reached" in problem
     assert "no transition from START" in problem
     assert "no transition into END" in problem
+
+
+# ── child workflows (design section 8) ────────────────────────────────────
+
+
+def with_child(child: Workflow, *, inputs: tuple[str, ...] = ("repo",)) -> Workflow:
+    """`sdlc`, whose one state runs `child` and ends on `joined`."""
+    flow = Workflow("sdlc", context=Ticket)
+    reviews = flow.state("reviews", parallel=[child], inputs=inputs)
+    flow.transition(START, reviews)
+    flow.transition(reviews, END, on="joined")
+    return flow
+
+
+def test_the_design_example_is_valid() -> None:
+    flow = parallel_workflow()
+
+    validate(flow)
+
+    assert [child.name for child in nested_workflows(flow)] == ["security", "design"]
+
+
+def test_a_child_workflow_gets_the_same_checks() -> None:
+    child = Workflow("review")
+    child.state("waiting")
+
+    problem = refused(with_child(child, inputs=()))
+
+    assert "in child workflow 'review': workflow 'review' has no transition from START" in problem
+
+
+def test_a_child_workflows_start_needs_a_fallback() -> None:
+    child = Workflow("review", context=Ticket)
+    urgent, calm = child.state("urgent"), child.state("calm")
+    child.transition(START, urgent, when="ctx['priority'] == 'high'")
+    child.transition(START, calm, when="ctx['priority'] == 'low'")
+    done = child.event("done")
+    child.transition(urgent, END, on=done)
+    child.transition(calm, END, on=done)
+
+    problem = refused(with_child(child))
+
+    assert (
+        "in child workflow 'review': START has no fallback: a child workflow is started by "
+        "the state that runs it"
+    ) in problem
+
+
+def test_a_child_workflows_start_with_a_fallback_is_valid() -> None:
+    child = Workflow("review", context=Ticket)
+    urgent, calm = child.state("urgent"), child.state("calm")
+    child.transition(START, urgent, when="ctx['priority'] == 'high'")
+    child.transition(START, calm, otherwise=True)
+    done = child.event("done")
+    child.transition(urgent, END, on=done)
+    child.transition(calm, END, on=done)
+
+    validate(with_child(child))
+
+
+def test_guards_in_a_child_workflow_are_checked_too() -> None:
+    child = Workflow("review", context=Ticket)
+    waiting = child.state("waiting")
+    child.transition(START, waiting)
+    child.transition(waiting, END, on=child.event("done"), when="ctx['points'] > 5")
+    child.transition(waiting, END, on="done", when="ctx['points'] > 3")
+
+    assert "in child workflow 'review': 'done' from 'waiting': the guards" in refused(
+        with_child(child)
+    )
+
+
+def test_inputs_must_give_each_required_field_of_a_childs_context() -> None:
+    problem = refused(with_child(review("security"), inputs=("repo",)))
+
+    assert (
+        "state 'reviews' does not hand on 'branch', which 'security' requires; add it to inputs"
+    ) in problem
+
+
+def test_inputs_must_be_keys_of_the_parents_context() -> None:
+    problem = refused(with_child(review("security"), inputs=("repo", "branch", "nothing")))
+
+    assert "state 'reviews' hands on 'branch', which Ticket does not have" in problem
+    assert "state 'reviews' hands on 'nothing', which Ticket does not have" in problem
+
+
+def test_a_workflow_cannot_run_itself_further_down() -> None:
+    top, middle = Workflow("top"), Workflow("middle")
+    outer = top.state("outer", parallel=[middle])
+    top.transition(START, outer)
+    top.transition(outer, END, on="joined")
+    inner = middle.state("inner", parallel=[top])
+    middle.transition(START, inner)
+    middle.transition(inner, END, on="joined")
+
+    problem = refused(top)
+
+    assert "state 'inner' of 'middle' runs 'top', which runs 'middle' in turn" in problem
+
+
+def test_two_different_workflows_with_one_name_are_refused() -> None:
+    flow = Workflow("sdlc", context=Review)
+    first = flow.state("first", parallel=[review("check")], inputs=("repo", "branch"))
+    second = flow.state("second", parallel=[review("check")], inputs=("repo", "branch"))
+    flow.transition(START, first)
+    flow.transition(first, second, on="joined")
+    flow.transition(second, END, on="joined")
+
+    assert "two different workflows are named 'check'" in refused(flow)
+
+
+def test_one_child_workflow_in_two_states_is_valid() -> None:
+    check = review("check")
+    flow = Workflow("sdlc", context=Review)
+    first = flow.state("first", parallel=[check], inputs=("repo", "branch"))
+    second = flow.state("second", parallel=[check], inputs=("repo", "branch"))
+    flow.transition(START, first)
+    flow.transition(first, second, on="joined")
+    flow.transition(second, END, on="joined")
+
+    validate(flow)
+
+    assert nested_workflows(flow) == [check]
+
+
+def test_a_nesting_that_leaves_too_little_room_for_the_top_id_is_refused() -> None:
+    child = Workflow("c" * 40, context=Review)
+    waiting = child.state("waiting")
+    child.transition(START, waiting)
+    child.transition(waiting, END, on=child.event("done"))
+    flow = Workflow("sdlc", context=Review)
+    long_state = flow.state("s" * 30, parallel=[child], inputs=("repo", "branch"))
+    flow.transition(START, long_state)
+    flow.transition(long_state, END, on="joined")
+
+    problem = refused(flow)
+
+    # "." + 30 + "." + 3 (the visit) + "." + 40 = 76, more than 128 - 64.
+    assert "the child token ids can be 76 characters longer than the top token's id" in problem
+    assert f"a top id of {TOP_ID_ROOM} characters" in problem
+
+
+def test_two_models_with_one_name_in_a_parent_and_a_child_are_refused() -> None:
+    other = create_model("Ticket", repo=(str, ...))
+    child = Workflow("review", context=other)
+    waiting = child.state("waiting")
+    child.transition(START, waiting)
+    child.transition(waiting, END, on=child.event("done"))
+
+    assert "two different models are named 'Ticket'" in refused(with_child(child))
+
+
+def test_a_guard_on_joined_may_count_joined() -> None:
+    flow = Workflow("sdlc", context=Review)
+    reviews = flow.state("reviews", parallel=[review("security")], inputs=("repo", "branch"))
+    flow.transition(START, reviews)
+    flow.transition(reviews, END, on="joined", when="count('joined') >= 2")
+    flow.transition(reviews, reviews, on="joined", otherwise=True)
+
+    validate(flow)

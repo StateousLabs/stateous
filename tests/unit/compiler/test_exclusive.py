@@ -264,3 +264,40 @@ def test_guards_on_a_model_without_a_json_schema_are_refused_not_crashed() -> No
 
     with pytest.raises(DefinitionError, match="the model Piped cannot be written as JSON Schema"):
         validate(flow)
+
+
+# ── branches (design section 8) ───────────────────────────────────────────
+
+
+def joined_checked(*guards: str) -> None:
+    """A parallel state that leaves on `joined` along one transition per guard, and a
+    fallback."""
+    child = Workflow("review")
+    waiting = child.state("waiting")
+    child.transition(START, waiting)
+    child.transition(waiting, END, on=child.event("lgtm"))
+    flow = Workflow("sdlc", context=Ticket)
+    reviews = flow.state("reviews", parallel=[child])
+    flow.transition(START, reviews)
+    for guard in guards:
+        flow.transition(reviews, END, on="joined", when=guard)
+    flow.transition(reviews, END, on="joined", otherwise=True)
+    validate(flow)
+
+
+def test_two_guards_with_branches_cannot_be_proven_and_are_refused() -> None:
+    with pytest.raises(DefinitionError) as caught:
+        joined_checked("branches.all(final == 'waiting')", "branches.any(final == 'x')")
+
+    problem = str(caught.value)
+    assert "cannot prove the guards" in problem
+    assert "a guard with branches.all or branches.any cannot be proven exclusive" in problem
+
+
+def test_a_guard_with_branches_beside_another_guard_is_refused() -> None:
+    with pytest.raises(DefinitionError, match="cannot be proven exclusive"):
+        joined_checked("branches.all(final == 'waiting') == true", "ctx['a'] == 1")
+
+
+def test_one_guard_with_branches_and_a_fallback_is_valid() -> None:
+    joined_checked("branches.all(status == 'completed' and final == 'waiting')")

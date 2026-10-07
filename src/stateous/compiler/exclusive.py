@@ -15,8 +15,9 @@ A value read as true or false is also compared with 0, so a number on each side
 of 0 is tried. A list and an object are each tried empty and not empty. A list
 literal is one value, except where `in` searches it.
 
-A guard that compares two values with each other, or orders a list, cannot be
-decided, and is refused: a guard that cannot be proven exclusive is not.
+A guard that compares two values with each other, orders a list, or reads
+`branches.all` or `branches.any` cannot be decided, and is refused: a guard that
+cannot be proven exclusive is not.
 """
 
 from __future__ import annotations
@@ -40,6 +41,10 @@ Atom = tuple[str, ...]
 
 _OBJECT: dict[str, Any] = {"__object__": True}
 """Stands for any object value: equal to no literal, ordered with none."""
+
+_BRANCHES = "a guard with branches.all or branches.any cannot be proven exclusive"
+"""Why a pair with a branch quantifier cannot be decided: it reads a list of children
+of any length. stateous-flow refused it the same way."""
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,8 @@ def _collect(node: ast.expr, reads: dict[Atom, list[Any]]) -> str | None:
                 if problem is not None:
                     return problem
             return None
+        case ast.Call(func=ast.Attribute(value=ast.Name(id="branches"))):
+            return _BRANCHES
         case _:
             atom = _atom(node)
             if atom is not None:  # a value used as a truth value, e.g. `ctx['flag']`
@@ -138,6 +145,8 @@ def _collect(node: ast.expr, reads: dict[Atom, list[Any]]) -> str | None:
 def _pair(
     left: ast.expr, op: ast.cmpop, right: ast.expr, reads: dict[Atom, list[Any]]
 ) -> str | None:
+    if _is_branch(left) or _is_branch(right):
+        return _BRANCHES
     left_atom, right_atom = _atom(left), _atom(right)
     if left_atom is not None and right_atom is not None:
         return "a guard compares two values with each other"
@@ -161,6 +170,15 @@ def _pair(
             else:
                 reads.setdefault(atom, []).extend(literals)
     return None
+
+
+def _is_branch(node: ast.expr) -> bool:
+    """Whether `node` is `branches.all(...)` or `branches.any(...)`."""
+    match node:
+        case ast.Call(func=ast.Attribute(value=ast.Name(id="branches"))):
+            return True
+        case _:
+            return False
 
 
 def _atom(node: ast.expr) -> Atom | None:
