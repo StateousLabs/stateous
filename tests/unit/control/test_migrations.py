@@ -180,6 +180,7 @@ def test_the_migrations_build_the_index_that_compares_token_ids_without_case(
 
     assert sql is not None
     assert "lower(token)" in sql.replace('"', "")
+    assert sql.startswith("CREATE UNIQUE INDEX")  # two ids that differ only in case: refused
 
 
 def test_both_ways_to_make_a_database_give_it_one_control_plane_row(tmp_path: Path) -> None:
@@ -391,3 +392,10 @@ def test_a_database_at_0002_gets_the_parent_and_workflow_of_each_token(tmp_path:
         rows = connection.execute(text("SELECT token, parent, workflow FROM tokens")).all()
     engine.dispose()
     assert [tuple(row) for row in rows] == [("T-1", None, None)]
+    engine = create_engine(url)
+    with engine.connect() as connection:
+        sql = connection.scalar(
+            text("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'tokens_folded'")
+        )
+    engine.dispose()
+    assert sql is not None and sql.startswith("CREATE UNIQUE INDEX")

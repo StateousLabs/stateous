@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from stateous.control.graph import (
     END,
@@ -1178,8 +1178,19 @@ class Engine:
 
     @contextmanager
     def _transaction(self) -> Generator[Transaction]:
-        with self.store.transaction(self.clock()) as tx:
-            yield tx
+        """One transaction, at the clock's time. Two calls under different family locks
+        (a top token's start and a child's entry) can make ids that differ only in
+        case at the same time. The database refuses the second: `InvalidTokenId`."""
+        try:
+            with self.store.transaction(self.clock()) as tx:
+                yield tx
+        except IntegrityError as error:
+            if "tokens_folded" not in str(error.orig):
+                raise
+            raise InvalidTokenId(
+                "a token id differs only in case from one that another call made at the "
+                "same time; token ids are compared without regard to case"
+            ) from None
 
 
 def _token(row: tables.Token) -> Token:

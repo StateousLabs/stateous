@@ -44,11 +44,13 @@ class Token(Base):
 
     __tablename__ = "tokens"
     __table_args__ = (
-        Index("tokens_folded", func.lower(text("token"))),
+        Index("tokens_folded", func.lower(text("token")), unique=True),
         Index("tokens_parent", "parent"),
     )
     """A new token whose id differs from another only in case is refused. The engine
-    finds such a token by this index. `tokens_parent` finds the children of a token."""
+    finds such a token by this index; the index is unique, so the database refuses
+    one that the engine did not find in time. `tokens_parent` finds the children of a
+    token."""
 
     token: Mapped[str] = mapped_column(String(256), primary_key=True)
     state: Mapped[str] = mapped_column(String(64))
