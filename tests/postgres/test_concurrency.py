@@ -10,12 +10,13 @@ from typing import Any
 
 import pytest
 
-from stateous.control.engine import Engine, InvalidTokenId, TaskNotHeld, Token
+from stateous.control.engine import Engine, InvalidTokenId, TaskNotHeld, Token, child_id
 from stateous.control.graph import Graph
 from stateous.control.store import Store
 from stateous.model.wire import Outcome
 
 from ..conftest import fresh_postgres_database, needs_postgres
+from ..parallel import parallel_document
 from ..unit.control.support import TICKET, sdlc
 
 pytestmark = needs_postgres
@@ -152,3 +153,53 @@ def test_a_first_claim_and_its_repeat_at_once_get_the_same_grant(engine: Engine)
         assert [r for r in results if isinstance(r, Exception)] == []
         assert results[0] is not None
         assert results[0] == results[1]
+
+
+# ── a family: a parent and its children (design section 8) ──────────────
+
+
+def parallel_engine() -> tuple[Engine, Store]:
+    store = Store(fresh_postgres_database())
+    return Engine(store, Graph(parallel_document())), store
+
+
+def test_children_that_end_at_once_join_their_parent_once() -> None:
+    engine, store = parallel_engine()
+    try:
+        for n in range(4):
+            engine.start(f"T-{n}", TICKET)
+            engine.fire(f"T-{n}", "done", None)
+
+        def finish(i: int) -> None:
+            child = child_id(f"T-{i // 2}", "reviews", 1, ("security", "design")[i % 2])
+            engine.fire(child, "lgtm", None)
+            engine.fire(child, "recorded", None)
+
+        results = at_once(8, finish)
+
+        assert [r for r in results if isinstance(r, Exception)] == []
+        for n in range(4):
+            assert engine.get(f"T-{n}").state == "merging"
+            entries = engine.history(f"T-{n}")
+            accepted = [e.data["event"] for e in entries if e.kind == "event_accepted"]
+            assert accepted.count("joined") == 1
+    finally:
+        store.close()
+
+
+def test_a_childs_event_and_its_parents_pause_at_once_take_turns() -> None:
+    engine, store = parallel_engine()
+    try:
+        engine.start("T-1", TICKET)
+        engine.fire("T-1", "done", None)
+        security = child_id("T-1", "reviews", 1, "security")
+
+        def act(i: int) -> Token:
+            return engine.pause("T-1") if i == 0 else engine.fire(security, "lgtm", None).token
+
+        results = at_once(2, act)
+
+        assert [r for r in results if isinstance(r, Exception)] == []
+        assert (engine.get("T-1").status, engine.get(security).status) == ("paused", "paused")
+    finally:
+        store.close()
