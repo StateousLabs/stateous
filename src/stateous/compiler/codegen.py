@@ -3,6 +3,9 @@
 Generated from the document, never from Python objects: `stateous init` has only
 the graph that the control plane serves. The output follows ruff's format for
 lines of up to 100 characters.
+
+Each child workflow of a parallel state is a class in `events` and in `states` (design
+section 8). A parallel state has no routine, so it has no `StateRef` and no stub.
 """
 
 from __future__ import annotations
@@ -53,18 +56,26 @@ class _Model:
     """For an Enum or a constant: the `Literal[...]` it is written as, not a class."""
 
 
+Body = tuple[str | None, dict[str, Any]]
+"""A workflow of the document: None for the main one, else the child's name; and its
+body (`context`, `states`, `events`, `transitions`)."""
+
+
 def generate_contract(document: dict[str, Any]) -> str:
     """The text of `contract.py`: the models, `events`, `states` (contract section 7)."""
     workflow = cast("str", document["workflow"])
     schemas = cast("dict[str, dict[str, Any]]", document.get("schemas", {}))
-    events = cast("dict[str, dict[str, Any]]", document["events"])
-    states = cast("dict[str, dict[str, Any]]", document["states"])
-    context = cast("str | None", document.get("context"))
-    _unique("event", events)
-    _unique("state", states)
-    _known_models(document, schemas)
+    bodies = _bodies(document)
+    for _, body in bodies:
+        _unique("event", _events_of(body))
+        _unique("state", _states_of(body))
+    _namespaces(document)
+    _known_models(bodies, schemas)
     models = [_model(name, schemas[name]) for name in _ordered(schemas)]
-    _model_names([model.name for model in models], context)
+    contexts = list(
+        dict.fromkeys(str(body["context"]) for _, body in bodies if body.get("context"))
+    )
+    _model_names([model.name for model in models], contexts)
     seal = checksum(document)
 
     annotations = " ".join(
@@ -72,9 +83,11 @@ def generate_contract(document: dict[str, Any]) -> str:
         + [f.annotation for model in models for f in model.fields]
     )
     typing = [name for name in ("Any", "Literal") if re.search(rf"\b{name}\b", annotations)]
-    if any(not spec.get("emits") for spec in states.values()):
+    states = [spec for _, body in bodies for spec in _states_of(body).values()]
+    if any(not spec.get("emits") and "parallel" not in spec for spec in states):
         typing.append("Never")  # for `StateRef[Never]`, a state with no events
-    used = [("Context", context is not None), ("Occurrence", bool(events)), ("StateRef", True)]
+    has_events = any(_events_of(body) for _, body in bodies)
+    used = [("Context", bool(contexts)), ("Occurrence", has_events), ("StateRef", True)]
     imported = [name for name, needed in used if needed]
 
     lines = [
@@ -106,41 +119,30 @@ def generate_contract(document: dict[str, Any]) -> str:
         for f in model.fields:
             default = "" if f.default is None else f" = {f.default}"
             lines.append(f"    {f.name}: {f.annotation}{default}")
-    if context is not None:
-        lines += ["", "", f"{context}Context = Context[{context}]"]
-    lines += ["", "", "class events:"]
-    if not events:
-        lines.append("    pass")
-    for i, (name, spec) in enumerate(events.items()):
-        if i:
-            lines.append("")
-        payload = spec.get("payload", "None")
-        lines += [
-            f"    class {_identifier(name)}(Occurrence[{payload}]):",
-            f"        name = {json.dumps(name)}",
-        ]
-    lines += ["", "", "class states:"]
-    if not states:
-        lines.append("    pass")
-    for name, spec in states.items():
-        emits = [f"events.{_identifier(event)}" for event in spec.get("emits", [])]
-        listed = "(" + ", ".join(emits) + ("," if len(emits) == 1 else "") + ")"
-        # Pyright gets `StateRef[events.a | events.b]` from `emits`. An empty tuple
-        # gives it nothing, so a state with no events says `Never` itself.
-        ref = "StateRef" if emits else "StateRef[Never]"
-        lines.append(f"    {_identifier(name)} = {ref}({json.dumps(name)}, emits={listed})")
+    if contexts:
+        lines += ["", "", *(f"{context}Context = Context[{context}]" for context in contexts)]
+    lines += ["", "", "class events:", *_event_lines(bodies)]
+    lines += ["", "", "class states:", *_state_lines(bodies)]
     return "\n".join(lines) + "\n"
 
 
 def generate_stub(document: dict[str, Any], state: str) -> str:
-    """A routine file for one state: typed, labelled, and not yet doing anything."""
-    states = cast("dict[str, dict[str, Any]]", document["states"])
-    spec = states.get(state)
-    if spec is None:
+    """A routine file for one state: typed, labelled, and not yet doing anything. A
+    state of a child workflow is named `<workflow>/<state>`, as a claim names it."""
+    workflow, _, own = state.rpartition("/")
+    children = cast("dict[str, dict[str, Any]]", document.get("workflows", {}))
+    body = children.get(workflow) if workflow else document
+    spec = None if body is None else _states_of(body).get(own)
+    if body is None or spec is None:
         raise CodegenError(f"the workflow {document['workflow']!r} has no state {state!r}")
-    function = _identifier(state)
-    outcomes = [f"events.{_identifier(event)}" for event in spec.get("emits", [])]
-    context = cast("str | None", document.get("context"))
+    if "parallel" in spec:
+        raise CodegenError(
+            f"{state!r} is a parallel state: its work is its child workflows, so it has no routine"
+        )
+    namespace = f"{_identifier(workflow)}." if workflow else ""
+    function = _identifier(own)
+    outcomes = [f"events.{namespace}{_identifier(event)}" for event in spec.get("emits", [])]
+    context = cast("str | None", body.get("context"))
     ctx_type = f"{context}Context" if context is not None else "Context"
     from_stateous = "on_state" if context is not None else "Context, on_state"
     from_contract = [
@@ -150,18 +152,128 @@ def generate_stub(document: dict[str, Any], state: str) -> str:
     ]
     message = json.dumps(f"do the work of {state!r} here")
     lines = [
-        f'"""The `{state}` state of the `{document["workflow"]}` workflow."""',
+        f'"""The `{own}` state of the `{workflow or document["workflow"]}` workflow."""',
         "",
         f"from stateous import {from_stateous}",
         "",
         f"from contract import {', '.join(from_contract)}",
         "",
         "",
-        f"@on_state(states.{function})",
+        f"@on_state(states.{namespace}{function})",
         f"def {function}(ctx: {ctx_type}) -> {' | '.join(outcomes) or 'None'}:",
         f"    raise NotImplementedError({message})",
     ]
     return "\n".join(lines) + "\n"
+
+
+def routine_states(document: dict[str, Any]) -> list[str]:
+    """The states that have a routine, as a supervisor names them in a claim: the main
+    workflow's as `<state>`, then each child workflow's as `<workflow>/<state>`. A
+    parallel state has no routine."""
+    found = [name for name, spec in _states_of(document).items() if "parallel" not in spec]
+    children = cast("dict[str, dict[str, Any]]", document.get("workflows", {}))
+    for workflow, body in children.items():
+        found += [
+            f"{workflow}/{name}"
+            for name, spec in _states_of(body).items()
+            if "parallel" not in spec
+        ]
+    return found
+
+
+def _bodies(document: dict[str, Any]) -> list[Body]:
+    """The main workflow (None) and each child workflow (its name), with its body."""
+    children = cast("dict[str, dict[str, Any]]", document.get("workflows", {}))
+    found: list[Body] = [(None, document)]
+    found += list(children.items())
+    return found
+
+
+def _states_of(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return cast("dict[str, dict[str, Any]]", body["states"])
+
+
+def _events_of(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return cast("dict[str, dict[str, Any]]", body["events"])
+
+
+def _namespaces(document: dict[str, Any]) -> None:
+    """Each child workflow is a class in `events` and in `states`. Its Python name may
+    not be the name of another child, or of an event or a state of the main workflow."""
+    children = list(cast("dict[str, Any]", document.get("workflows", {})))
+    _unique("child workflow", children)
+    main = [*_events_of(document)]
+    main += [name for name, spec in _states_of(document).items() if "parallel" not in spec]
+    taken = {_identifier(name): name for name in main}
+    for child in children:
+        identifier = _identifier(child)
+        if identifier in taken:
+            raise CodegenError(
+                f"the child workflow {child!r} and {taken[identifier]!r} of the workflow "
+                f"{document['workflow']!r} are both {identifier!r} in Python; rename one"
+            )
+
+
+def _event_lines(bodies: list[Body]) -> list[str]:
+    """The body of `class events:`: the main workflow's events, then a class for each
+    child workflow that has events. Blank lines as ruff puts them."""
+    blocks: list[list[str]] = []
+    for prefix, body in bodies:
+        pad = "    " if prefix is None else "        "
+        classes = [
+            [
+                f"{pad}class {_identifier(name)}(Occurrence[{spec.get('payload', 'None')}]):",
+                f"{pad}    name = {json.dumps(name)}",
+            ]
+            for name, spec in _events_of(body).items()
+        ]
+        if prefix is None:
+            blocks += classes
+        elif classes:
+            blocks.append([f"    class {_identifier(prefix)}:", *_joined(classes)])
+    return _joined(blocks) or ["    pass"]
+
+
+def _state_lines(bodies: list[Body]) -> list[str]:
+    """The body of `class states:`: a `StateRef` for each state with a routine, the
+    main workflow's first, then a class for each child workflow. A child's state is
+    named `<workflow>/<state>`, as a claim names it."""
+    main: list[str] = []
+    blocks: list[list[str]] = []
+    for prefix, body in bodies:
+        pad = "    " if prefix is None else "        "
+        namespace = "events." if prefix is None else f"events.{_identifier(prefix)}."
+        refs: list[str] = []
+        for name, spec in _states_of(body).items():
+            if "parallel" in spec:
+                continue  # its work is its child workflows: no routine
+            emits = [f"{namespace}{_identifier(event)}" for event in spec.get("emits", [])]
+            listed = "(" + ", ".join(emits) + ("," if len(emits) == 1 else "") + ")"
+            # Pyright gets `StateRef[events.a | events.b]` from `emits`. An empty tuple
+            # gives it nothing, so a state with no events says `Never` itself.
+            ref = "StateRef" if emits else "StateRef[Never]"
+            qualified = json.dumps(name if prefix is None else f"{prefix}/{name}")
+            refs.append(f"{pad}{_identifier(name)} = {ref}({qualified}, emits={listed})")
+        if prefix is None:
+            main = refs
+        elif refs:
+            blocks.append([f"    class {_identifier(prefix)}:", *refs])
+    lines = list(main)
+    for block in blocks:
+        if lines:
+            lines.append("")
+        lines += block
+    return lines or ["    pass"]
+
+
+def _joined(blocks: list[list[str]]) -> list[str]:
+    """The blocks, with one blank line between each two."""
+    lines: list[str] = []
+    for block in blocks:
+        if lines:
+            lines.append("")
+        lines += block
+    return lines
 
 
 def _unique(what: str, names: Iterable[str]) -> None:
@@ -177,27 +289,34 @@ def _unique(what: str, names: Iterable[str]) -> None:
         seen[identifier] = name
 
 
-def _known_models(document: dict[str, Any], schemas: dict[str, Any]) -> None:
-    """Each model the document names, as context or payload, is a key in `schemas`."""
-    events = cast("dict[str, dict[str, Any]]", document["events"])
-    used = [("the context", document.get("context"))]
-    used += [(f"the event {name!r}", spec.get("payload")) for name, spec in events.items()]
-    for what, name in used:
-        if name is not None and name not in schemas:
-            raise CodegenError(f"{what} names the model {name!r}, which 'schemas' does not have")
+def _known_models(bodies: list[Body], schemas: dict[str, Any]) -> None:
+    """Each model the document names, as a context or a payload, is a key in `schemas`."""
+    for prefix, body in bodies:
+        where = "" if prefix is None else f" of the child workflow {prefix!r}"
+        used = [(f"the context{where}", body.get("context"))]
+        used += [
+            (f"the event {name!r}{where}", spec.get("payload"))
+            for name, spec in _events_of(body).items()
+        ]
+        for what, name in used:
+            if name is not None and name not in schemas:
+                raise CodegenError(
+                    f"{what} names the model {name!r}, which 'schemas' does not have"
+                )
 
 
-def _model_names(names: list[str], context: str | None) -> None:
+def _model_names(names: list[str], contexts: list[str]) -> None:
     for name in names:
         if name in _TAKEN:
             raise CodegenError(
                 f"a model is named {name!r}, which contract.py uses itself; rename the model"
             )
-    if context is not None and f"{context}Context" in names:
-        raise CodegenError(
-            f"a model is named {context + 'Context'!r}, which contract.py uses for the "
-            f"context of {context}; rename the model"
-        )
+    for context in contexts:
+        if f"{context}Context" in names:
+            raise CodegenError(
+                f"a model is named {context + 'Context'!r}, which contract.py uses for the "
+                f"context of {context}; rename the model"
+            )
 
 
 def _model(name: str, schema: dict[str, Any]) -> _Model:

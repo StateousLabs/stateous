@@ -14,10 +14,17 @@ import pytest
 from pydantic import BaseModel, Field
 
 from stateous import END, START, OutcomeError, StateRef, Workflow
-from stateous.compiler.codegen import CodegenError, generate_contract, generate_stub
+from stateous.compiler.codegen import (
+    CodegenError,
+    generate_contract,
+    generate_stub,
+    routine_states,
+)
 from stateous.compiler.compile import compile_workflow
 from stateous.model.contract import implementation_of
 from stateous.model.graph_file import checksum
+
+from ...parallel import parallel_document
 
 EXPECTED = """\
 # GENERATED from the `sdlc` workflow — do not edit.
@@ -493,3 +500,130 @@ def test_a_model_name_that_is_not_in_the_schemas_is_refused(
         CodegenError, match=r"names the model 'Box\[int\]', which 'schemas' does not"
     ):
         generate_contract(document)
+
+
+# ── child workflows (design section 8) ────────────────────────────────────
+
+
+def test_each_child_workflow_is_a_class_in_events_and_states(tmp_path: Path) -> None:
+    source = generate_contract(parallel_document())
+    contract = load(tmp_path, "contract", source)
+
+    assert "TicketContext = Context[Ticket]\nReviewContext = Context[Review]\n" in source
+    triage = contract.states.security.triage
+    assert triage.name == "security/triage"
+    assert triage.emits == (contract.events.security.lgtm, contract.events.security.deny)
+    assert contract.events.security.deny.name == "deny"
+    assert contract.states.design.approved.emits == (contract.events.design.recorded,)
+    assert contract.states.coding.name == "coding"
+    assert contract.ReviewContext.__args__ == (contract.Review,)
+    happened: Any = triage.outcome({"event": "deny", "payload": {"count": 2}})
+    assert happened.payload.count == 2
+
+
+def test_a_parallel_state_has_no_state_ref(tmp_path: Path) -> None:
+    contract = load(tmp_path, "contract", generate_contract(parallel_document()))
+
+    assert not hasattr(contract.states, "reviews")  # its work is its children: no routine
+    assert "reviews" not in generate_contract(parallel_document())
+
+
+def test_a_contract_with_child_workflows_is_formatted_as_ruff_formats_it(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "contract.py"
+    path.write_text(generate_contract(parallel_document()), encoding="utf-8")
+
+    result = ruff_formatted(path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+CHILD_ROUTINE = """\
+from typing import Any
+
+from stateous import on_state
+
+from contract import ReviewContext, events, states
+
+
+@on_state(states.security.triage)
+def triage(ctx: ReviewContext) -> events.security.lgtm | events.security.deny:
+    answer: Any = {"event": "lgtm"}
+    return states.security.triage.outcome(answer)
+"""
+
+WRONG_CHILD_ROUTINE = """\
+from typing import Any
+
+from stateous import on_state
+
+from contract import ReviewContext, events, states
+
+
+@on_state(states.design.triage)
+def triage(ctx: ReviewContext) -> events.design.lgtm:
+    answer: Any = {"event": "lgtm"}
+    return states.design.triage.outcome(answer)
+"""
+
+
+def test_strict_pyright_checks_what_a_child_routine_returns(tmp_path: Path) -> None:
+    (tmp_path / "contract.py").write_text(generate_contract(parallel_document()), encoding="utf-8")
+    (tmp_path / "triage.py").write_text(CHILD_ROUTINE, encoding="utf-8")
+    (tmp_path / "wrong.py").write_text(WRONG_CHILD_ROUTINE, encoding="utf-8")
+
+    errors = pyright_errors(tmp_path)
+
+    assert len(errors) == 1, errors
+    assert errors[0].startswith("wrong.py:11: ")
+    assert "deny" in errors[0]
+
+
+def test_a_child_workflow_may_not_share_a_python_name_with_a_main_event() -> None:
+    document = parallel_document()
+    document["events"]["security"] = {}
+
+    with pytest.raises(CodegenError, match="the child workflow 'security' and 'security'"):
+        generate_contract(document)
+
+
+def test_the_states_with_a_routine_are_named_as_a_claim_names_them() -> None:
+    assert routine_states(parallel_document()) == [
+        "coding", "merging", "blocked",
+        "security/triage", "security/approved", "security/rejected",
+        "design/triage", "design/approved", "design/rejected",
+    ]  # fmt: skip
+
+
+def test_a_stub_for_a_child_state_uses_the_childs_names(tmp_path: Path) -> None:
+    document = parallel_document()
+    load(tmp_path, "contract", generate_contract(document))
+
+    source = generate_stub(document, "security/triage")
+    stub = load(tmp_path, "stub", source)
+
+    assert source == (
+        '"""The `triage` state of the `security` workflow."""\n'
+        "\n"
+        "from stateous import on_state\n"
+        "\n"
+        "from contract import ReviewContext, events, states\n"
+        "\n"
+        "\n"
+        "@on_state(states.security.triage)\n"
+        "def triage(ctx: ReviewContext) -> events.security.lgtm | events.security.deny:\n"
+        "    raise NotImplementedError(\"do the work of 'security/triage' here\")\n"
+    )
+    state = implementation_of(stub.triage)
+    assert state is not None and state.name == "security/triage"
+
+
+def test_a_parallel_state_gets_no_stub() -> None:
+    with pytest.raises(CodegenError, match="'reviews' is a parallel state"):
+        generate_stub(parallel_document(), "reviews")
+
+
+def test_a_stub_for_a_child_state_that_does_not_exist_is_refused() -> None:
+    with pytest.raises(CodegenError, match="has no state 'legal/triage'"):
+        generate_stub(parallel_document(), "legal/triage")
