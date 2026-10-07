@@ -22,9 +22,11 @@ STARTED = "__started__"
 """The event on which a token leaves START. Only the engine fires it."""
 TIMEOUT = "timeout"
 ERROR = "error"
-OWN_EVENTS = frozenset({STARTED, TIMEOUT, ERROR})
-"""Stateous's own events. Only the engine fires them. Transitions name `timeout`
-and `error`; no one outside may fire them."""
+JOINED = "joined"
+"""Fired on a token in a parallel state when the state's join is met."""
+OWN_EVENTS = frozenset({STARTED, TIMEOUT, ERROR, JOINED})
+"""Stateous's own events. Only the engine fires them. Transitions name `timeout`,
+`error` and `joined`; no one outside may fire them."""
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,10 @@ class StateSpec:
     emits: tuple[str, ...] = ()
     timeout: str | None = None
     retries: int = 0
+    parallel: tuple[str, ...] = ()
+    """A parallel state's child workflows, by name. Empty for a state with a task."""
+    join: str = "all"
+    inputs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -45,24 +51,35 @@ class TransitionSpec:
 
 
 class Graph:
-    """One compiled workflow, ready to route events."""
+    """One workflow of a compiled graph document, ready to route events."""
 
-    def __init__(self, document: dict[str, Any]) -> None:
+    def __init__(self, document: dict[str, Any], *, workflow: str | None = None) -> None:
+        """The main workflow of `document`; with `workflow`, that child workflow."""
+        body = document if workflow is None else document["workflows"][workflow]
         self.document = document
-        """The graph document, as the graph file holds it."""
-        self.name: str = document["workflow"]
+        """The whole graph document, as the graph file holds it."""
+        self.name: str = workflow or document["workflow"]
         self.checksum: str = checksum(document)
         self.structure: str = structure(document)
         self._schemas: dict[str, Any] = document.get("schemas", {})
-        self._context: str | None = document.get("context")
-        self._events: dict[str, dict[str, Any]] = document["events"]
+        self._context: str | None = body.get("context")
+        self._events: dict[str, dict[str, Any]] = body["events"]
         self._states = {
             name: _state(name, spec)
-            for name, spec in cast("dict[str, dict[str, Any]]", document["states"]).items()
+            for name, spec in cast("dict[str, dict[str, Any]]", body["states"]).items()
         }
         self._transitions = [
-            _transition(spec) for spec in cast("list[dict[str, Any]]", document["transitions"])
+            _transition(spec) for spec in cast("list[dict[str, Any]]", body["transitions"])
         ]
+
+    @property
+    def workflows(self) -> list[str]:
+        """The child workflows of the document, by name: those that parallel states run."""
+        return list(cast("dict[str, Any]", self.document.get("workflows", {})))
+
+    def child(self, workflow: str) -> Graph:
+        """The graph of the child workflow `workflow` of the same document."""
+        return Graph(self.document, workflow=workflow)
 
     @property
     def starts(self) -> list[TransitionSpec]:
@@ -115,6 +132,9 @@ def _state(name: str, spec: dict[str, Any]) -> StateSpec:
         emits=tuple(spec.get("emits", ())),
         timeout=spec.get("timeout"),
         retries=spec.get("retries", 0),
+        parallel=tuple(spec.get("parallel", ())),
+        join=spec.get("join", "all"),
+        inputs=tuple(spec.get("inputs", ())),
     )
 
 

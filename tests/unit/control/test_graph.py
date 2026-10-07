@@ -1,8 +1,9 @@
 """The graph: the control plane's view of the compiled workflow."""
 
-from stateous.control.graph import END, STARTED, Graph
+from stateous.control.graph import END, JOINED, OWN_EVENTS, STARTED, Graph
 from stateous.model.graph_file import checksum, structure
 
+from ...parallel import parallel_document
 from .support import sdlc
 
 
@@ -91,3 +92,44 @@ def test_the_graph_knows_its_document_checksum_and_structure() -> None:
         checksum(document),
         structure(document),
     )
+
+
+# ── child workflows (design section 8) ────────────────────────────────────
+
+
+def test_a_parallel_state_keeps_its_workflows_join_and_inputs() -> None:
+    graph = Graph(parallel_document("any"))
+
+    reviews = graph.state("reviews")
+
+    assert (reviews.parallel, reviews.join, reviews.inputs) == (
+        ("security", "design"), "any", ("repo", "branch"),
+    )  # fmt: skip
+    assert (reviews.emits, reviews.timeout) == ((), "2d")
+    assert graph.state("coding").parallel == ()
+    assert graph.workflows == ["security", "design"]
+
+
+def test_a_child_graph_routes_its_own_workflow() -> None:
+    graph = Graph(parallel_document())
+
+    security = graph.child("security")
+
+    assert security.name == "security"
+    assert (security.checksum, security.structure) == (graph.checksum, graph.structure)
+    assert security.document is graph.document
+    assert security.state("triage").emits == ("lgtm", "deny")
+    assert [t.target for t in security.starts] == ["triage"]
+    assert security.declares("lgtm") and not security.declares("done")
+    assert security.payload_errors("deny", {"count": "two"}) != []
+    assert security.context_errors({"repo": "acme/api"}) != []  # Review needs a branch
+    assert security.with_defaults({"repo": "a", "branch": "b"}) == {"repo": "a", "branch": "b"}
+    assert security.workflows == ["security", "design"]
+
+
+def test_joined_is_stateous_own_event() -> None:
+    graph = Graph(parallel_document())
+
+    assert JOINED in OWN_EVENTS
+    assert not graph.declares(JOINED)
+    assert [t.target for t in graph.candidates("reviews", JOINED)] == ["merging", "coding"]
