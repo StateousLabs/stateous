@@ -58,8 +58,15 @@ class Client:
     def get(self, token: str) -> dict[str, Any]:
         return self._object("GET", f"/tokens/{_segment(token)}")
 
-    def tokens(self, *, status: str | None = None) -> list[dict[str, Any]]:
-        params = {} if status is None else {"status": status}
+    def tokens(
+        self, *, status: str | None = None, parent: str | None = None
+    ) -> list[dict[str, Any]]:
+        """The tokens, the most recently moved first. With `parent`: its children only."""
+        params: dict[str, str] = {}
+        if status is not None:
+            params["status"] = status
+        if parent is not None:
+            params["parent"] = parent
         return self._list("GET", "/tokens", params=params)
 
     def history(self, token: str) -> list[dict[str, Any]]:

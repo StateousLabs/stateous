@@ -78,8 +78,8 @@ def show(
     ] = False,
     url: Url = DEFAULT_URL,
 ) -> None:
-    """Show a token and its history. With no ID, list the tokens. With --graph, draw
-    the workflow."""
+    """Show a token, its children and its history. With no ID, list the tokens. With
+    --graph, draw the workflow."""
     if graph and token is not None:
         raise CommandError("give a token ID or --graph, not both")
     with Client(url) as client:
@@ -94,6 +94,8 @@ def show(
                 typer.echo("no tokens")
             return
         typer.echo(token_line(client.get(token)))
+        for child in client.tokens(parent=token):
+            typer.echo("  child " + token_line(child))
         for entry in client.history(token):
             typer.echo(entry_line(entry))
 
@@ -165,8 +167,12 @@ def _what(kind: str, data: dict[str, Any]) -> str:
         return str(data.get(key, "?"))
 
     match kind:
+        case "started" if "parent" in data:
+            return f"started by {get('parent')}"
         case "started":
             return "started"
+        case "branch_started":
+            return f"started the child {get('token')}"
         case "entered":
             visit = data.get("visit", 1)
             again = f" (visit {visit})" if isinstance(visit, int) and visit > 1 else ""
@@ -203,6 +209,8 @@ def _what(kind: str, data: dict[str, Any]) -> str:
             keys = data.get("keys")
             names = cast("list[Any]", keys) if isinstance(keys, list) else ["?"]
             return "context changed: " + ", ".join(str(k) for k in names)
+        case "cancelled" if "reason" in data:
+            return f"cancelled: {get('reason')}"
         case "paused" | "resumed" | "completed" | "cancelled":
             return kind
         case "event_deferred":

@@ -25,6 +25,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from stateous.control.engine import (
     REQUEST_PATTERN,
+    ChildToken,
     Engine,
     Entry,
     EventNotAllowed,
@@ -56,7 +57,13 @@ MAX_KEY = 256
 """The longest idempotency key: the size of the ledger's `key` column."""
 
 MAX_NAME = 128
-"""The longest state name in a claim, or memory key."""
+"""The longest memory key."""
+
+MAX_STATE = 129
+"""The longest state name in a claim: `<workflow>/<state>`, 64 + 1 + 64 characters."""
+
+MAX_TOKEN = 128
+"""The longest token id that a listing's `parent` names."""
 
 MAX_ITEMS = 1000
 """The most state names in a claim, and the most task ids in a heartbeat."""
@@ -101,7 +108,10 @@ def create_app(engine: Engine) -> Starlette:
         if status is not None and status not in STATUSES:
             raise Problem(422, f"'status' is one of: {', '.join(STATUSES)}")
         limit = _limit(request.query_params.get("limit"))
-        found = await run_in_threadpool(lambda: engine.tokens(status=status, limit=limit))
+        parent = _parent(request.query_params.get("parent"))
+        found = await run_in_threadpool(
+            lambda: engine.tokens(status=status, limit=limit, parent=parent)
+        )
         return JSONResponse([token_json(token) for token in found])
 
     async def get_token(request: Request) -> Response:
@@ -210,7 +220,8 @@ def create_app(engine: Engine) -> Starlette:
 
 
 def token_json(token: Token) -> dict[str, Any]:
-    return {
+    """A token as the API sends it. A child has `parent`; a top token has no such key."""
+    out: dict[str, Any] = {
         "token": token.token,
         "state": token.state,
         "status": token.status,
@@ -218,6 +229,9 @@ def token_json(token: Token) -> dict[str, Any]:
         "context": token.context,
         "entered_at": iso(token.entered_at),
     }
+    if token.parent is not None:
+        out["parent"] = token.parent
+    return out
 
 
 def entry_json(entry: Entry) -> dict[str, Any]:
@@ -270,6 +284,13 @@ def _limit(value: str | None) -> int:
     return limit
 
 
+def _parent(value: str | None) -> str | None:
+    """The `parent` of a listing: a token id; None when the query names none."""
+    if value is not None and not 1 <= len(value) <= MAX_TOKEN:
+        raise Problem(422, f"'parent' is a token id of 1 to {MAX_TOKEN} characters")
+    return value
+
+
 def _check_key(key: str) -> None:
     if not 1 <= len(key) <= MAX_KEY:
         raise Problem(422, f"an idempotency key has 1 to {MAX_KEY} characters")
@@ -293,7 +314,7 @@ def _name(value: Any, what: str, limit: int = MAX_NAME) -> str:
 
 def _names(value: Any, what: str) -> list[str]:
     items = cast("list[Any]", value) if isinstance(value, list) else None
-    if items is None or not all(isinstance(i, str) and 1 <= len(i) <= MAX_NAME for i in items):
+    if items is None or not all(isinstance(i, str) and 1 <= len(i) <= MAX_STATE for i in items):
         raise Problem(422, f"'{what}' is a list of state names")
     if len(items) > MAX_ITEMS:
         raise Problem(422, f"'{what}' has at most {MAX_ITEMS} state names")
@@ -500,6 +521,7 @@ _HANDLERS: dict[Any, Handler] = {
     InvalidTokenId: _answer(422),
     EventNotAllowed: _answer(409),
     TokenNotActive: _answer(409),
+    ChildToken: _answer(409),
     TaskNotFound: _answer(404),
     TaskNotHeld: _answer(409),
     WireError: _answer(422),

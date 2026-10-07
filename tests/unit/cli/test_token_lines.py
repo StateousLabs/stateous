@@ -25,6 +25,18 @@ def test_a_token_line_names_the_id_the_state_and_the_status() -> None:
         # Every shape below is the real one the engine writes (control/engine.py's
         # `tx.append(...)` calls), not a shape from the plan.
         ("started", {"context": {"repo": "a"}}, "started"),
+        ("started", {"context": {"repo": "a"}, "parent": "T-1"}, "started by T-1"),
+        (
+            "branch_started",
+            {"workflow": "security", "token": "T-1.reviews.1.security"},
+            "started the child T-1.reviews.1.security",
+        ),
+        (
+            "cancelled",
+            {"reason": "the parent left 'reviews'"},
+            "cancelled: the parent left 'reviews'",
+        ),
+        ("cancelled", {}, "cancelled"),
         ("entered", {"state": "coding", "visit": 2}, "entered coding (visit 2)"),
         ("task_queued", {"task": 4, "state": "coding"}, "task 4 queued for coding"),
         (
