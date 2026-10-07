@@ -351,3 +351,76 @@ def test_a_held_outcome_records_the_state_and_task_it_came_from() -> None:
     assert deferred.data == {
         "event": "done", "payload": None, "state": "coding", "visit": 1, "task": grant.task,
     }  # fmt: skip
+
+
+# ── a held outcome keeps its context changes and timers with it ──────────
+
+
+def test_a_held_outcome_applies_its_context_changes_and_timers_only_on_resume() -> None:
+    clock = Clock()
+    engine = started(clock)
+    grant = claimed(engine)
+    engine.pause("T-1")
+    timer = Schedule(event="stuck", payload=None, after="10m")
+    outcome = Outcome(kind="event", event="done", context={"rejected": 1}, schedules=(timer,))
+
+    engine.report(grant.task, outcome, supervisor="box-1")
+
+    token = engine.get("T-1")
+    assert (token.state, token.context["rejected"]) == ("coding", 0)
+    assert "context_changed" not in kinds(engine, "T-1")
+    assert [e.data["event"] for e in engine.history("T-1") if e.kind == "timer_set"] == ["timeout"]
+
+    clock.advance(hours=1)
+    token = engine.resume("T-1")
+
+    assert (token.state, token.context["rejected"]) == ("testing", 1)
+    after = kinds(engine, "T-1")[kinds(engine, "T-1").index("resumed") :]
+    assert after[:3] == ["resumed", "event_replayed", "context_changed"]
+    stuck = [
+        e for e in engine.history("T-1") if e.kind == "timer_set" and e.data["event"] == "stuck"
+    ]
+    assert [e.data["due_at"] for e in stuck] == ["2026-10-06T10:10:00Z"]  # from the resume
+
+
+def test_a_dropped_held_outcome_applies_no_context_changes_and_sets_no_timers() -> None:
+    engine = started()
+    grant = claimed(engine)
+    engine.pause("T-1")
+    engine.fire("T-1", "done", None)  # held first: it moves the token on resume
+    timer = Schedule(event="stuck", payload=None, after="10m")
+    outcome = Outcome(kind="event", event="stuck", context={"rejected": 1}, schedules=(timer,))
+    engine.report(grant.task, outcome, supervisor="box-1")
+
+    token = engine.resume("T-1")
+
+    assert (token.state, token.status, token.context["rejected"]) == ("testing", "active", 0)
+    assert "context_changed" not in kinds(engine, "T-1")
+    assert not [
+        e for e in engine.history("T-1") if e.kind == "timer_set" and e.data["event"] == "stuck"
+    ]
+    dropped = [e.data for e in engine.history("T-1") if e.kind == "event_dropped"]
+    assert dropped == [{"event": "stuck", "reason": "the token left the state it came from"}]
+
+
+def test_the_history_shows_a_held_outcome_once() -> None:
+    engine = started()
+    grant = claimed(engine)
+    engine.pause("T-1")
+    timer = Schedule(event="stuck", payload=None, after="10m")
+    outcome = Outcome(kind="event", event="done", context={"rejected": 1}, schedules=(timer,))
+    engine.report(grant.task, outcome, supervisor="box-1")
+
+    engine.resume("T-1")
+
+    history = engine.history("T-1")
+    deferred = [e.data for e in history if e.kind == "event_deferred"]
+    assert deferred == [
+        {
+            "event": "done", "payload": None, "state": "coding", "visit": 1, "task": grant.task,
+            "context": {"rejected": 1},
+            "schedules": [{"event": "stuck", "after": "10m"}],
+        }
+    ]  # fmt: skip
+    assert [e.kind for e in history].count("event_replayed") == 1
+    assert [e.kind for e in history].count("context_changed") == 1

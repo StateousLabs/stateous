@@ -256,8 +256,10 @@ class Engine:
 
     def _replay(self, tx: Transaction, row: tables.Token, held: _Held) -> None:
         """Apply one held event, or drop it and say why. An event from a task applies
-        only in the state and visit of that task. An own event (`error`) that cannot
-        apply there fails the token: it has no task left to move it."""
+        only in the state and visit of that task, with its context changes and timers,
+        in this transaction. A dropped event applies none of them. An own event
+        (`error`) that cannot apply there fails the token: it has no task left to
+        move it."""
         event, payload = held.event, held.payload
         if row.status != "active":
             reason = f"token {row.token!r} is {row.status}; it takes no events"
@@ -267,13 +269,19 @@ class Engine:
             reason = "the token left the state it came from"
             tx.append(row.token, "event_dropped", event=event, reason=reason)
             return
-        decision = self._decide(tx, row, event, payload, row.context)
+        context = {**row.context, **held.context}
+        if held.context and (errors := self.graph.context_errors(context)):
+            reason = "the context changes break the schema: " + "; ".join(errors)
+            tx.append(row.token, "event_dropped", event=event, reason=reason)
+            return
+        decision = self._decide(tx, row, event, payload, context)
         if isinstance(decision, _Refusal):
             tx.append(row.token, "event_dropped", event=event, reason=decision.reason)
             if decision.fail or event in OWN_EVENTS:
                 self._fail(tx, row, decision.reason)
             return
         tx.append(row.token, "event_replayed", event=event)
+        self._apply(tx, row, held.context, held.schedules, context)
         self._take(tx, row, decision, event, payload, key=None)
 
     # ── the graph on record, for serve ──────────────────────────────────
@@ -377,16 +385,25 @@ class Engine:
         *,
         key: str | None,
         task: tables.Task | None,
+        changes: dict[str, Any] | None = None,
+        schedules: tuple[Schedule, ...] = (),
     ) -> None:
         """Hold an event for a paused token. An event from a task is bound to the
-        task's state and visit: resume drops it if the token left them."""
+        task's state and visit: resume drops it if the token left them. A report's
+        context changes and timers are held with its event. Until resume applies or
+        drops them, this ledger entry is their only record."""
         if task is None:
             tx.append(row.token, "event_deferred", key=key, event=event, payload=payload)
-        else:
-            tx.append(
-                row.token, "event_deferred", key=key, event=event, payload=payload,
-                state=task.state, visit=task.visit, task=task.id,
-            )  # fmt: skip
+            return
+        held: dict[str, Any] = {}
+        if changes:
+            held["context"] = changes
+        if schedules:
+            held["schedules"] = [schedule.to_json() for schedule in schedules]
+        tx.append(
+            row.token, "event_deferred", key=key, event=event, payload=payload,
+            state=task.state, visit=task.visit, task=task.id, **held,
+        )  # fmt: skip
 
     def _decide(
         self,
@@ -537,7 +554,7 @@ class Engine:
             if problem := self._schedule_problem(schedule):
                 raise InvalidPayload(problem)
         if outcome.kind == "waiting":
-            self._apply(tx, row, outcome, context)
+            self._apply(tx, row, outcome.context, outcome.schedules, context)
             task.status, task.lease_until = "waiting", None
             tx.append(row.token, "task_waiting", task=task.id)
             return Fired(_token(row))
@@ -555,26 +572,39 @@ class Engine:
         decision = self._decide(tx, row, event, outcome.payload, context)
         if isinstance(decision, _Refusal) and not decision.fail:
             return self._reject(tx, row, event, decision.reason, EventNotAllowed)
-        self._apply(tx, row, outcome, context)
         # No idempotency key here: that key space is for a caller's `fire`. A task
         # is reported once, since `_worked_task` refuses a second report on it.
+        if row.status == "paused":
+            # Hold the whole outcome: resume saves its changes with its event, or
+            # saves none of them. The work is done.
+            self._hold(
+                tx, row, event, outcome.payload, key=None, task=task,
+                changes=outcome.context, schedules=outcome.schedules,
+            )  # fmt: skip
+            task.status, task.lease_until = "done", None
+            tx.append(row.token, "task_done", task=task.id)
+            return Fired(_token(row))
+        self._apply(tx, row, outcome.context, outcome.schedules, context)
         refusal = self._route(tx, row, event, outcome.payload, key=None, task=task)
         if refusal is not None:
             raise RuntimeError(f"the decision found a transition, but routing refused: {refusal}")
-        if row.status == "paused":  # the event is held; the work is done
-            task.status, task.lease_until = "done", None
-            tx.append(row.token, "task_done", task=task.id)
         return Fired(_token(row))
 
     def _apply(
-        self, tx: Transaction, row: tables.Token, outcome: Outcome, context: dict[str, Any]
+        self,
+        tx: Transaction,
+        row: tables.Token,
+        changes: dict[str, Any],
+        schedules: tuple[Schedule, ...],
+        context: dict[str, Any],
     ) -> None:
-        """Save a report's context changes, and set its timers. The timers are set
-        before the outcome moves the token, so that leaving the state cancels them."""
-        if outcome.context:
+        """Save a report's context changes (`context` is the context with them), and
+        set its timers. The timers are set before the outcome moves the token, so
+        that leaving the state cancels them."""
+        if changes:
             row.context = context
-            tx.append(row.token, "context_changed", keys=sorted(outcome.context))
-        for schedule in outcome.schedules:
+            tx.append(row.token, "context_changed", keys=sorted(changes))
+        for schedule in schedules:
             after = parse_duration(schedule.after)
             self._set_timer(tx, row, schedule.event, schedule.payload, after, kind="timer")
 
@@ -882,6 +912,15 @@ class _Held:
     origin: tuple[str, int] | None
     """The state and visit of the task the event came from; None for an event from
     outside, which applies in any state."""
+    context: dict[str, Any]
+    """The context changes of a held outcome; empty for an event from outside."""
+    schedules: tuple[Schedule, ...]
+    """The timers of a held outcome. Resume sets them: `after` counts from then."""
+
+
+def _schedules(data: list[Any] | None) -> tuple[Schedule, ...]:
+    """The timers of a held outcome, as its ledger entry records them."""
+    return tuple(Schedule.from_json(item) for item in data or [])
 
 
 def _held_events(entries: list[tables.LedgerEntry]) -> list[_Held]:
@@ -893,6 +932,8 @@ def _held_events(entries: list[tables.LedgerEntry]) -> list[_Held]:
             event=e.data["event"],
             payload=e.data.get("payload"),
             origin=(e.data["state"], e.data["visit"]) if "state" in e.data else None,
+            context=dict(e.data.get("context") or {}),
+            schedules=_schedules(e.data.get("schedules")),
         )
         for e in entries
         if e.kind == "event_deferred" and e.seq > since
