@@ -9,3 +9,6 @@ stateous.db
 .import_linter_cache/
 try/
 try.db
+
+# Planning documents (kept locally, not versioned)
+docs/superpowers/
