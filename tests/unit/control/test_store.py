@@ -23,9 +23,11 @@ def add_token(store: Store, token: str, status: str = "active") -> None:
 
 def test_ledger_entries_are_numbered_per_token() -> None:
     store = Store("sqlite://")
+    # One transaction for each token: a transaction waits for one token lock only.
     with store.transaction(NOW) as tx:
         first = tx.append("T-1", "started", context={})
         second = tx.append("T-1", "entered", state="coding", visit=1)
+    with store.transaction(NOW) as tx:
         other = tx.append("T-2", "started", context={})
 
     assert (first, second, other) == (1, 2, 1)
