@@ -60,6 +60,32 @@ def test_a_claim_with_no_task_is_none_and_a_claim_with_a_task_is_its_grant() -> 
     assert seen[0] == ("POST", "/tasks/claim", {"supervisor": "box-1", "states": ["coding"]})
 
 
+def test_a_claim_whose_answer_is_lost_is_tried_again_with_the_same_request_id() -> None:
+    seen: list[Any] = []
+    answers: list[httpx2.Response | Exception] = [
+        httpx2.ReadTimeout("no answer"),
+        httpx2.Response(502),
+        httpx2.Response(200, json=GRANT.to_json()),
+    ]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(body(request))
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    async def scenario() -> TaskGrant | None:
+        api = api_with(handler, delays=[])
+        try:
+            return await api.claim("box-1", ["coding"], request="r-1")
+        finally:
+            await api.aclose()
+
+    assert asyncio.run(scenario()) == GRANT
+    assert seen == [{"supervisor": "box-1", "states": ["coding"], "request": "r-1"}] * 3
+
+
 def test_report_heartbeat_note_and_memory_use_the_contracts_paths_and_bodies() -> None:
     seen: list[tuple[str, str, Any]] = []
 

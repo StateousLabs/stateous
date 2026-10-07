@@ -38,6 +38,7 @@ import logging
 import signal
 import sys
 import threading
+import uuid
 from collections.abc import Callable, Collection, Generator
 from dataclasses import dataclass, replace
 from types import FrameType
@@ -78,7 +79,12 @@ class Api(Protocol):
     async def health(self) -> dict[str, Any]: ...
 
     async def claim(
-        self, supervisor: str, states: Collection[str], *, stop: asyncio.Event | None = None
+        self,
+        supervisor: str,
+        states: Collection[str],
+        *,
+        stop: asyncio.Event | None = None,
+        request: str | None = None,
     ) -> TaskGrant | None: ...
 
     async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None: ...
@@ -301,20 +307,31 @@ class Supervisor:
             forced.cancel()
 
     async def _claim_forever(self) -> None:
-        """Claim tasks until the stop. The stop does not cut a claim request in flight."""
+        """Claim tasks until the stop. The stop does not cut a claim request in flight.
+
+        Each claim has a random request id. A claim that failed with no answer is
+        sent again with the same id: if the control plane granted a task but its
+        answer was lost, the claim gets that task again. After an answer (a task,
+        no task, or a refusal), the next claim gets a new id."""
         served = self.registry.served
+        request = uuid.uuid4().hex
         while not self._stopping.is_set():
             if len(self._running) >= self.tasks:
                 await self._rest(None)
                 continue
             try:
-                grant = await self.api.claim(self.name, served, stop=self._stopping)
+                grant = await self.api.claim(
+                    self.name, served, stop=self._stopping, request=request
+                )
             except Refused as error:
                 log.warning("the control plane refused a claim: %s", error.message)
                 grant = None
+                request = uuid.uuid4().hex
             except Exception:
                 log.exception("a claim failed")
                 grant = None
+            else:
+                request = uuid.uuid4().hex
             if grant is None:
                 await self._rest(self.idle)
             else:

@@ -69,6 +69,43 @@ def test_a_claim_accepts_a_supervisor_name_up_to_256_characters(http: TestClient
     assert grant["token"] == "T-1"
 
 
+def test_a_repeated_claim_with_the_same_request_id_gets_the_same_body(http: TestClient) -> None:
+    started = http.post("/tokens", json={"token": "T-1", "context": {"repo": "acme/api"}})
+    assert started.status_code == 201
+    http.post("/tokens", json={"token": "T-2", "context": {"repo": "acme/api"}})
+    body = {"supervisor": "box-1", "states": ["coding"], "request": "r-1"}
+
+    first = http.post("/tasks/claim", json=body)
+    again = http.post("/tasks/claim", json=body)
+    other = http.post("/tasks/claim", json={**body, "request": "r-2"})
+
+    assert (first.status_code, again.status_code, other.status_code) == (200, 200, 200)
+    assert again.json() == first.json()
+    assert (first.json()["token"], other.json()["token"]) == ("T-1", "T-2")
+
+
+def test_a_claim_with_a_null_request_id_is_a_claim_without_one(http: TestClient) -> None:
+    claimed(http)
+
+    answer = http.post(
+        "/tasks/claim", json={"supervisor": "box-1", "states": ["coding"], "request": None}
+    )
+
+    assert answer.status_code == 204
+
+
+@pytest.mark.parametrize("request_id", ["", "x" * 65, "a b", "a/b", 7, ["r-1"]])
+def test_a_claim_request_id_is_1_to_64_letters_digits_dots_underscores_or_dashes(
+    http: TestClient, request_id: object
+) -> None:
+    body = {"supervisor": "box-1", "states": ["coding"], "request": request_id}
+
+    answer = http.post("/tasks/claim", json=body)
+
+    assert answer.status_code == 422
+    assert "'request'" in answer.json()["error"]
+
+
 def test_a_report_moves_the_token(http: TestClient) -> None:
     grant = claimed(http)
 

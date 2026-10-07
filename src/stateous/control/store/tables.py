@@ -122,3 +122,18 @@ class ControlPlane(Base):
     """The control plane that holds the database: `host:pid:id`."""
     since: Mapped[datetime | None] = mapped_column(default=None)
     """When that control plane last said that it still serves."""
+
+
+class Claim(Base):
+    """The last claim of each supervisor that named a request id, and what it got. A
+    repeat of that claim, after its answer was lost, gets the same task again."""
+
+    __tablename__ = "claims"
+
+    supervisor: Mapped[str] = mapped_column(String(256), primary_key=True)
+    request: Mapped[str] = mapped_column(String(64))
+    """The request id that the supervisor sent with the claim."""
+    task_id: Mapped[int | None] = mapped_column(default=None)
+    """The task the claim got; None when there was no task."""
+    attempt: Mapped[int | None] = mapped_column(default=None)
+    """The attempt of that task that the claim started."""

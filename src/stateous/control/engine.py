@@ -52,6 +52,8 @@ KEY_LENGTH = 256
 NOTE_LENGTH = 500
 MEMORY_KEY_LENGTH = 128
 SUPERVISOR_LENGTH = 256
+REQUEST_PATTERN = r"[A-Za-z0-9._-]{1,64}"
+"""A claim's request id: 1 to 64 letters, digits, `.`, `_` or `-`."""
 MOST_TOKENS = 1000
 """The most tokens that one listing returns."""
 WORKED_ON = ("claimed", "waiting")
@@ -85,8 +87,8 @@ class InvalidPayload(EngineError, ValueError):
 
 
 class InvalidArgument(EngineError, ValueError):
-    """A supervisor name or a listing limit is out of its range; or a report's
-    `attempt` argument and its outcome's `attempt` differ."""
+    """A supervisor name, a claim's request id or a listing limit is out of its range;
+    or a report's `attempt` argument and its outcome's `attempt` differ."""
 
 
 class InvalidTokenId(EngineError, ValueError):
@@ -460,14 +462,28 @@ class Engine:
 
     # ── tasks: the control plane's side of the supervisor ───────────────
 
-    def claim(self, supervisor: str, states: Collection[str]) -> TaskGrant | None:
+    def claim(
+        self, supervisor: str, states: Collection[str], *, request: str | None = None
+    ) -> TaskGrant | None:
         """The oldest queued task of `states` whose token is active, now claimed by
-        `supervisor` with a lease; None if there is none."""
+        `supervisor` with a lease; None if there is none.
+
+        With `request`: the control plane keeps this id, and what the claim got, as
+        the supervisor's last claim. A repeat of that claim (the same id) gets the
+        same grant again, while the supervisor still holds that attempt of the task:
+        the lease is renewed, and no new task is claimed. So a claim whose answer
+        was lost loses no task. Else the repeat is a new claim."""
         _check_supervisor(supervisor)
-        if not states:
+        if request is not None:
+            _check_request(request)
+        if not states and request is None:
             return None
         with self._transaction() as tx:
-            task = tx.claim_task(supervisor, states)
+            if request is not None and (grant := self._repeat(tx, supervisor, request)):
+                return grant
+            task = tx.claim_task(supervisor, states) if states else None
+            if request is not None:
+                tx.remember_claim(supervisor, request, task)
             if task is None:
                 return None
             task.lease_until = tx.now + self.lease
@@ -476,6 +492,25 @@ class Engine:
                 task=task.id, supervisor=supervisor, attempt=task.attempt,
             )  # fmt: skip
             return self._grant(tx, task)
+
+    def _repeat(self, tx: Transaction, supervisor: str, request: str) -> TaskGrant | None:
+        """The grant of the supervisor's last claim, again, if `request` repeats it and
+        the supervisor still holds that attempt of the task, with a lease that has
+        not ended. The lease is renewed. None: the claim is a new one."""
+        last = tx.last_claim(supervisor)
+        if last is None or last.request != request or last.task_id is None:
+            return None
+        task = tx.task(last.task_id)
+        if (
+            task is None
+            or task.status != "claimed"
+            or task.claimed_by != supervisor
+            or task.attempt != last.attempt
+            or (task.lease_until is not None and task.lease_until < tx.now)
+        ):
+            return None
+        task.lease_until = tx.now + self.lease
+        return self._grant(tx, task)
 
     def report(
         self,
@@ -916,6 +951,11 @@ def _check_outcome(outcome: Outcome) -> None:
 def _check_supervisor(supervisor: str) -> None:
     if not 0 < len(supervisor) <= SUPERVISOR_LENGTH:
         raise InvalidArgument(f"a supervisor name is 1 to {SUPERVISOR_LENGTH} characters")
+
+
+def _check_request(request: str) -> None:
+    if not re.fullmatch(REQUEST_PATTERN, request):
+        raise InvalidArgument("a claim's request id is 1 to 64 letters, digits, '.', '_' or '-'")
 
 
 def _iso(moment: datetime) -> str:

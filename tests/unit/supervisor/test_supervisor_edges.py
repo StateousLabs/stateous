@@ -1,6 +1,6 @@
 """The supervisor's loop at its edges: a task granted again while its old routine
-cleans up, a refused report, a claim in flight at a stop signal, a routine that
-raises a BaseException, and `stop_now`."""
+cleans up, a refused report, a claim in flight at a stop signal, a claim's request
+id, a routine that raises a BaseException, and `stop_now`."""
 
 from __future__ import annotations
 
@@ -294,6 +294,61 @@ def test_the_second_signal_cancels_a_claim_in_flight() -> None:
     assert asyncio.run(scenario()) == 1
     assert api.claim_waits == 0
     assert api.reports == {}
+
+
+# ── a claim's request id ────────────────────────────────────────────────────
+
+
+def claimed_times(api: FakeApi, times: int) -> bool:
+    return api.claims() >= times
+
+
+def test_a_claim_whose_answer_is_lost_is_sent_again_with_the_same_request_id() -> None:
+    @on_state(CODING)
+    async def coding(ctx: Context[Any]) -> done:
+        return done()
+
+    api = FakeApi(grant(1, "coding"))
+    api.claim_errors = [RuntimeError("the answer was lost"), RuntimeError("lost again")]
+    supervisor = make(api, coding)
+
+    assert asyncio.run(run_until(supervisor, claimed_times, api, 4)) == 0
+    first, second, third, fourth = api.claim_requests[:4]
+    assert first is not None and fourth is not None
+    assert first == second == third  # no answer yet: the same claim, sent again
+    assert fourth != third  # the answer came (task 1): a new claim
+    assert api.reports[1] == Outcome(kind="event", event="done")
+
+
+def test_each_claim_after_an_answer_gets_a_new_request_id() -> None:
+    api = FakeApi()  # each claim gets "no task"
+    supervisor = make(api)
+
+    assert asyncio.run(run_until(supervisor, claimed_times, api, 3)) == 0
+    first, second, third = api.claim_requests[:3]
+    assert None not in (first, second, third)
+    assert len({first, second, third}) == 3
+
+
+def test_a_refused_claim_is_an_answer_and_the_next_claim_gets_a_new_request_id() -> None:
+    class RefusingApi(FakeApi):
+        async def claim(
+            self,
+            supervisor: str,
+            states: Collection[str],
+            *,
+            stop: asyncio.Event | None = None,
+            request: str | None = None,
+        ) -> None:
+            await super().claim(supervisor, states, stop=stop, request=request)
+            raise Refused(422, "'states' is a list of state names")
+
+    api = RefusingApi()
+    supervisor = make(api)
+
+    assert asyncio.run(run_until(supervisor, claimed_times, api, 2)) == 0
+    first, second = api.claim_requests[:2]
+    assert first != second
 
 
 # ── errors that are not plain exceptions ────────────────────────────────────

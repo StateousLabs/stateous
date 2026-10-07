@@ -57,14 +57,26 @@ class FakeApi:
         """When set: each claim waits for this event before it answers."""
         self.claim_waits = 0
         """The claims that wait for `claim_gate` now."""
+        self.claim_requests: list[str | None] = []
+        """The request id of each claim, in order."""
+        self.claim_errors: list[Exception] = []
+        """The next claims raise these, in order, as if their answers were lost."""
 
     async def health(self) -> dict[str, Any]:
         return {"workflow": "demo", "checksum": self.checksum}
 
     async def claim(
-        self, supervisor: str, states: Collection[str], *, stop: asyncio.Event | None = None
+        self,
+        supervisor: str,
+        states: Collection[str],
+        *,
+        stop: asyncio.Event | None = None,
+        request: str | None = None,
     ) -> TaskGrant | None:
         self.calls.append(("claim", supervisor, tuple(states)))
+        self.claim_requests.append(request)
+        if self.claim_errors:
+            raise self.claim_errors.pop(0)
         if self.claim_gate is not None:
             self.claim_waits += 1
             try:

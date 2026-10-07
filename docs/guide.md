@@ -564,6 +564,8 @@ Also, one token moves one step at a time, because each change locks the token. O
 
 An ended lease counts as a failed attempt. The history tells why, for example `task 2 failed: build-box-1 stopped answering: no heartbeat for 2 minutes`.
 
+A lost claim answer loses nothing. Each claim has a request id. If the answer does not come, the supervisor sends the claim again with the same id. The control plane then gives the same task again, with the same attempt, and renews its lease. It does not claim a second task.
+
 ### Pause and resume
 
 ```text
@@ -725,7 +727,7 @@ The API has no prefix. Bodies are JSON. An error is `{"error": "<one sentence>"}
 | `POST /tokens/{id}/pause` | Pause the token. |
 | `POST /tokens/{id}/resume` | Resume the token. |
 | `POST /tokens/{id}/cancel` | Cancel the token. |
-| `POST /tasks/claim` | A supervisor takes a task of the states that it serves. Body: `{"supervisor", "states"}`. 204 if there is no task. |
+| `POST /tasks/claim` | A supervisor takes a task of the states that it serves. Body: `{"supervisor", "states", "request"}`; `request` is optional. 204 if there is no task. |
 | `POST /tasks/{id}/report` | The outcome of a task. Body: `{"kind", "event", "payload", "error", "context", "schedules", "attempt"}`; `kind` is `event`, `waiting` or `failed`. An event that the state does not allow is refused. |
 | `POST /tasks/heartbeat` | The supervisor's tasks are still alive, in one call. Body: `{"supervisor", "tasks"}`. The answer `{"lost"}` names the lost tasks. |
 | `POST /tasks/{id}/note` | A line of progress. Body: `{"text", "attempt"}`. |
@@ -734,6 +736,8 @@ The API has no prefix. Bodies are JSON. An error is `{"error": "<one sentence>"}
 | `GET /health` | The workflow's name and the graph's checksum: `{"workflow", "checksum"}`. |
 
 A report from outside, for a waiting task, has no `supervisor`. A supervisor's own report adds `"supervisor"`.
+
+`request` in a claim is a request id: 1 to 64 letters, digits, `.`, `_` or `-`. The control plane keeps the last request id of each supervisor, and the task that it got. A claim with the same id gets the same task again, if the supervisor still holds it. Else the claim takes a new task. The supervisor makes a new id after each answer.
 
 `attempt` is optional in a report, a note and a memory write. It names the attempt of the task that the request is for. When the task is on a different attempt, the control plane refuses the request with 409. So a late report of an old attempt cannot land on a new attempt. The supervisor always sends the attempt of its grant. A request without `attempt`, for example from CI or a person, is for the current attempt.
 

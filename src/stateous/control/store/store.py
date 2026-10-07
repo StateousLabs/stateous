@@ -244,8 +244,9 @@ class Transaction:
     and holds the lock until it ends. So the changes to one token take turns: a token
     moves one step at a time. A transaction waits for at most one token's lock, and
     only while it holds no other, so two transactions never wait for each other in a
-    circle. A claim never waits: it tries the lock, and skips a busy token. SQLite
-    takes one writer at a time and needs no locks.
+    circle. A new claim never waits: it tries the lock, and skips a busy token. A
+    repeated claim waits for the lock of the task it got before, and holds no other
+    token's lock then. SQLite takes one writer at a time and needs no locks.
     """
 
     def __init__(self, session: Session, now: datetime) -> None:
@@ -421,6 +422,26 @@ class Transaction:
             task.attempt += 1
             return task
         return None
+
+    def last_claim(self, supervisor: str) -> tables.Claim | None:
+        """The last claim of `supervisor` that named a request id, if any. Locked on
+        Postgres until this transaction ends."""
+        return self._session.get(
+            tables.Claim, supervisor, populate_existing=True, with_for_update=self._locks
+        )
+
+    def remember_claim(self, supervisor: str, request: str, task: tables.Task | None) -> None:
+        """Keep `request` and what it got (a task and its attempt, or no task) as the
+        last claim of `supervisor`. It replaces the claim kept before."""
+        self._session.merge(
+            tables.Claim(
+                supervisor=supervisor,
+                request=request,
+                task_id=None if task is None else task.id,
+                attempt=None if task is None else task.attempt,
+            )
+        )
+        self._session.flush()
 
     def renew_leases(self, supervisor: str, ids: Collection[int], until: datetime) -> set[int]:
         """Move the lease of each task in `ids` that `supervisor` still holds (claimed,

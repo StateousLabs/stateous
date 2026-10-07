@@ -64,17 +64,22 @@ class ControlPlaneApi:
         return _mapping(await self._call("GET", "/health"))
 
     async def claim(
-        self, supervisor: str, states: Collection[str], *, stop: asyncio.Event | None = None
+        self,
+        supervisor: str,
+        states: Collection[str],
+        *,
+        stop: asyncio.Event | None = None,
+        request: str | None = None,
     ) -> TaskGrant | None:
         """A task of one of `states`, or None when there is none now. Also None when
-        `stop` is set while the claim waits to try again."""
+        `stop` is set while the claim waits to try again. Each new try sends the same
+        `request` id: when the control plane granted a task but its answer was lost,
+        the next try gets that task again."""
+        body: dict[str, Any] = {"supervisor": supervisor, "states": list(states)}
+        if request is not None:
+            body["request"] = request
         try:
-            response = await self._call(
-                "POST",
-                "/tasks/claim",
-                {"supervisor": supervisor, "states": list(states)},
-                stop=stop,
-            )
+            response = await self._call("POST", "/tasks/claim", body, stop=stop)
         except _GaveUp:
             return None
         if response.status_code == 204:

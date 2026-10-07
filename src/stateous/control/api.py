@@ -8,6 +8,7 @@ transaction for each call, so each call runs on a thread from the pool."""
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -23,6 +24,7 @@ from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from stateous.control.engine import (
+    REQUEST_PATTERN,
     Engine,
     Entry,
     EventNotAllowed,
@@ -139,7 +141,10 @@ def create_app(engine: Engine) -> Starlette:
         body = await body_of(request)
         supervisor = _name(body.get("supervisor"), "supervisor", MAX_SUPERVISOR)
         states = _names(body.get("states"), "states")
-        grant = await run_in_threadpool(lambda: engine.claim(supervisor, states))
+        request_id = _request_id(body.get("request"))
+        grant = await run_in_threadpool(
+            lambda: engine.claim(supervisor, states, request=request_id)
+        )
         if grant is None:
             return Response(status_code=204)
         return JSONResponse(grant.to_json())
@@ -293,6 +298,15 @@ def _names(value: Any, what: str) -> list[str]:
     if len(items) > MAX_ITEMS:
         raise Problem(422, f"'{what}' has at most {MAX_ITEMS} state names")
     return cast("list[str]", items)
+
+
+def _request_id(value: Any) -> str | None:
+    """A claim's request id; None when the body names none."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(REQUEST_PATTERN, value):
+        raise Problem(422, "'request' is 1 to 64 letters, digits, '.', '_' or '-'")
+    return value
 
 
 def _task_ids(value: Any) -> list[int]:
