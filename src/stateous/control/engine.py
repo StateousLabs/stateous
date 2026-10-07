@@ -13,6 +13,12 @@ How a call ends:
 A token starts at START and leaves it at once, on `__started__`, along the one
 transition whose guard holds on its starting context. When it enters END, it is
 completed. It keeps the state it came from, so the history shows how it ended.
+
+A parallel state's work is its child workflows (design section 8). Entering it
+starts one child token for each, in the same transaction. When a child ends, the
+same transaction checks the parent's join, and fires `joined` on the parent when
+the join is met. When the parent leaves the state, its live children are cancelled.
+A child has the lock of its top token, so a parent and its children change together.
 """
 
 from __future__ import annotations
@@ -23,11 +29,12 @@ from collections.abc import Callable, Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from stateous.control.graph import (
     END,
     ERROR,
+    JOINED,
     OWN_EVENTS,
     START,
     STARTED,
@@ -39,6 +46,7 @@ from stateous.control.store import Store, Transaction, tables
 from stateous.model.durations import duration_problem, parse_duration
 from stateous.model.guards import GuardInput, evaluate
 from stateous.model.wire import EventRecord, Outcome, Schedule, TaskGrant
+from stateous.model.workflow import MAX_TOKEN_ID
 
 DEFAULT_LEASE = timedelta(minutes=2)
 """How long a claimed task stays with its supervisor without a heartbeat."""
@@ -118,6 +126,8 @@ class Token:
     visit: int
     context: dict[str, Any]
     entered_at: datetime
+    parent: str | None = None
+    """The token whose parallel state started this one; None for a top token."""
 
 
 @dataclass(frozen=True)
@@ -167,6 +177,10 @@ class Engine:
         self.clock = clock
         """The time of each transaction. Tests give a clock that they move by hand."""
         self.lease = lease
+        self.graphs: dict[str, Graph] = {graph.name: graph}
+        """The main workflow and each child workflow, by name."""
+        for name in graph.workflows:
+            self.graphs[name] = graph.child(name)
 
     # ── tokens ──────────────────────────────────────────────────────────
 
@@ -185,19 +199,21 @@ class Engine:
                         f"a token {taken!r} already exists; token ids are compared "
                         "without regard to case"
                     )
-                row = self._create(tx, token, context)
+                row = self._create(tx, token, context, self.graph)
             return _token(row)
 
     def get(self, token: str) -> Token:
         with self._transaction() as tx:
             return _token(self._existing(tx, token))
 
-    def tokens(self, *, status: str | None = None, limit: int = 100) -> list[Token]:
-        """Tokens, the most recently moved first."""
+    def tokens(
+        self, *, status: str | None = None, limit: int = 100, parent: str | None = None
+    ) -> list[Token]:
+        """Tokens, the most recently moved first. With `parent`: only its children."""
         if not 0 < limit <= MOST_TOKENS:
             raise InvalidArgument(f"a listing returns 1 to {MOST_TOKENS} tokens, not {limit}")
         with self._transaction() as tx:
-            return [_token(row) for row in tx.find_tokens(status, limit)]
+            return [_token(row) for row in tx.find_tokens(status, limit, parent=parent)]
 
     def history(self, token: str) -> list[Entry]:
         with self._transaction() as tx:
@@ -241,8 +257,8 @@ class Engine:
             return _token(row)
 
     def cancel(self, token: str) -> Token:
-        """Stop a token for good: its tasks and timers are cancelled, its memory is
-        deleted, and anything it held is dropped."""
+        """Stop a token for good: its tasks and timers are cancelled, its children too,
+        its memory is deleted, and anything it held is dropped."""
         with self._transaction() as tx:
             row = self._existing(tx, token)
             if row.status not in ("active", "paused"):
@@ -250,13 +266,18 @@ class Engine:
                     f"token {token!r} is {row.status}; only an active or paused token "
                     "can be cancelled"
                 )
-            if row.status == "paused":
-                for held in _held_events(tx.entries(token)):
-                    reason = "the token was cancelled"
-                    tx.append(token, "event_dropped", event=held.event, reason=reason)
-            self._leave(tx, row, via=None)
-            self._end(tx, row, "cancelled")
+            self._cancel(tx, row)
             return _token(row)
+
+    def _cancel(self, tx: Transaction, row: tables.Token, **data: Any) -> None:
+        """End a live token as cancelled. A paused token drops what it held. All that
+        its state started stops, its children too. `data` goes in the ledger entry."""
+        if row.status == "paused":
+            for held in _held_events(tx.entries(row.token)):
+                reason = "the token was cancelled"
+                tx.append(row.token, "event_dropped", event=held.event, reason=reason)
+        self._leave(tx, row, via=None)
+        self._end(tx, row, "cancelled", **data)
 
     def _replay(self, tx: Transaction, row: tables.Token, held: _Held) -> None:
         """Apply one held event, or drop it and say why. An event from a task applies
@@ -264,6 +285,7 @@ class Engine:
         in this transaction. A dropped event applies none of them. An own event
         (`error`) that cannot apply there fails the token: it has no task left to
         move it."""
+        graph = self._graph(row)
         event, payload = held.event, held.payload
         if row.status != "active":
             reason = f"token {row.token!r} is {row.status}; it takes no events"
@@ -274,7 +296,7 @@ class Engine:
             tx.append(row.token, "event_dropped", event=event, reason=reason)
             return
         context = {**row.context, **held.context}
-        if held.context and (errors := self.graph.context_errors(context)):
+        if held.context and (errors := graph.context_errors(context)):
             reason = "the context changes break the schema: " + "; ".join(errors)
             tx.append(row.token, "event_dropped", event=event, reason=reason)
             return
@@ -333,6 +355,7 @@ class Engine:
         payload: dict[str, Any] | None,
         key: str | None,
     ) -> Fired | Exception:
+        graph = self._graph(row)
         if key is not None and tx.find_key(row.token, key) is not None:
             return Fired(_token(row), duplicate=True)
         if row.status in ENDED:
@@ -341,10 +364,10 @@ class Engine:
         if event in OWN_EVENTS:
             reason = f"{event!r} is Stateous's own event; only Stateous fires it"
             return self._reject(tx, row, event, reason, EventNotAllowed)
-        if not self.graph.declares(event):
-            reason = f"the workflow {self.graph.name!r} has no event {event!r}"
+        if not graph.declares(event):
+            reason = f"the workflow {graph.name!r} has no event {event!r}"
             return self._reject(tx, row, event, reason, EventNotAllowed)
-        if errors := self.graph.payload_errors(event, payload):
+        if errors := graph.payload_errors(event, payload):
             raise InvalidPayload(f"{event}: " + "; ".join(errors))
         if (refusal := self._route(tx, row, event, payload, key=key)) is not None:
             return self._reject(tx, row, event, refusal, EventNotAllowed)
@@ -418,13 +441,21 @@ class Engine:
         context: dict[str, Any],
     ) -> TransitionSpec | _Refusal:
         """The transition the event takes from the token's state, with this context;
-        or why there is none. Changes nothing."""
-        candidates = self.graph.candidates(row.state, event)
+        or why there is none. A transition into a parallel state whose children cannot
+        start is refused. Changes nothing."""
+        graph = self._graph(row)
+        candidates = graph.candidates(row.state, event)
         if not candidates:
             return _Refusal(f"no transition for {event!r} from {row.state!r}")
         counts = tx.counts(row.token)
         counts[event] = counts.get(event, 0) + 1  # count() includes the event being routed
-        facts = GuardInput(context=context, payload=payload or {}, counts=counts)
+        branches = cast("list[dict[str, Any]]", (payload or {}).get("branches", []))
+        facts = GuardInput(
+            context=context,
+            payload=payload or {},
+            counts=counts,
+            branches=branches if event == JOINED else [],
+        )
         matching = [c for c in candidates if c.when is not None and evaluate(c.when, facts)]
         if len(matching) > 1:
             # The compiler refuses guards that can both hold, so this is a graph file
@@ -438,6 +469,10 @@ class Engine:
         chosen = matching[0] if matching else next((c for c in candidates if c.when is None), None)
         if chosen is None:
             return _Refusal(f"no guard matched {event!r} from {row.state!r}, and no otherwise")
+        if chosen.target != END and (
+            problem := self._cannot_enter(tx, row.token, graph, chosen.target, context)
+        ):
+            return _Refusal(problem)
         return chosen
 
     def _take(
@@ -611,11 +646,12 @@ class Engine:
             error = outcome.error or "the routine failed, and said no more"
             self._task_failed(tx, row, task, error)
             return Fired(_token(row))
+        graph = self._graph(row)
         context = {**row.context, **outcome.context}
-        if errors := self.graph.context_errors(context):
+        if errors := graph.context_errors(context):
             raise InvalidContext("the context changes break the schema: " + "; ".join(errors))
         for schedule in outcome.schedules:
-            if problem := self._schedule_problem(schedule):
+            if problem := self._schedule_problem(graph, schedule):
                 raise InvalidPayload(problem)
         if outcome.kind == "waiting":
             self._apply(tx, row, outcome.context, outcome.schedules, context)
@@ -623,12 +659,12 @@ class Engine:
             tx.append(row.token, "task_waiting", task=task.id)
             return Fired(_token(row))
         event = outcome.event or ""
-        emits = self.graph.state(task.state).emits
+        emits = graph.state(task.state).emits
         if event not in emits:
             allowed = ", ".join(emits) or "nothing"
             reason = f"{task.state!r} may not emit {event!r}; it may emit: {allowed}"
             return self._reject(tx, row, event, reason, EventNotAllowed)
-        if errors := self.graph.payload_errors(event, outcome.payload):
+        if errors := graph.payload_errors(event, outcome.payload):
             raise InvalidPayload(f"{event}: " + "; ".join(errors))
         # The guards read the context with the routine's changes. Decide first: a
         # refused outcome saves none of the changes. A paused token decides too, so
@@ -672,14 +708,13 @@ class Engine:
             after = parse_duration(schedule.after)
             self._set_timer(tx, row, schedule.event, schedule.payload, after, kind="timer")
 
-    def _schedule_problem(self, schedule: Schedule) -> str | None:
-        """Why a routine's timer cannot be set, or None."""
+    def _schedule_problem(self, graph: Graph, schedule: Schedule) -> str | None:
+        """Why a routine's timer cannot be set on a token of `graph`, or None."""
         if problem := duration_problem(schedule.after):
             return f"a timer for {schedule.event!r}: {problem}"
-        if schedule.event in OWN_EVENTS or not self.graph.declares(schedule.event):
-            name = self.graph.name
-            return f"a timer names {schedule.event!r}, which is not an event of {name!r}"
-        if errors := self.graph.payload_errors(schedule.event, schedule.payload):
+        if schedule.event in OWN_EVENTS or not graph.declares(schedule.event):
+            return f"a timer names {schedule.event!r}, which is not an event of {graph.name!r}"
+        if errors := graph.payload_errors(schedule.event, schedule.payload):
             return f"a timer for {schedule.event!r}: " + "; ".join(errors)
         return None
 
@@ -688,9 +723,10 @@ class Engine:
     ) -> None:
         """One failed attempt. Queue the task again while the state's retries allow;
         then the token gets `error`. With no way to go on `error`, the token fails."""
+        graph = self._graph(row)
         tx.append(row.token, "task_failed", task=task.id, error=error)
         task.lease_until = None
-        if task.attempt <= self.graph.state(task.state).retries:
+        if task.attempt <= graph.state(task.state).retries:
             task.status, task.claimed_by = "queued", None
             tx.append(row.token, "task_retrying", task=task.id, attempt=task.attempt + 1)
             # The next attempt runs the routine again, and it sets its own timers.
@@ -704,21 +740,24 @@ class Engine:
             # A paused token never moves or ends on its own. Hold `error`, as `_route`
             # would; resume applies it, and fails the token if it still does not fit.
             self._hold(tx, row, ERROR, None, key=None, task=task)
-        elif not self.graph.candidates(row.state, ERROR):
+        elif not graph.candidates(row.state, ERROR):
             self._fail(tx, row, f"{task.state!r} failed, and has no transition on 'error': {error}")
         elif (refusal := self._route(tx, row, ERROR, None, key=None)) is not None:
             self._fail(tx, row, f"{task.state!r} failed, and 'error' cannot move it: {refusal}")
 
     def _grant(self, tx: Transaction, task: tables.Task) -> TaskGrant:
+        """The grant of a claimed task. A child's state is named `<workflow>/<state>`,
+        as the claim names it."""
         row = self._existing(tx, task.token)
         last = tx.last_accepted(task.token)
         entered_by = (
             None if last is None else EventRecord(last.data["event"], last.data.get("payload"))
         )
+        state = task.state if row.workflow is None else f"{row.workflow}/{task.state}"
         return TaskGrant(
             task=task.id,
             token=task.token,
-            state=task.state,
+            state=state,
             visit=task.visit,
             attempt=task.attempt,
             context=dict(row.context),
@@ -780,17 +819,37 @@ class Engine:
 
     # ── entering, leaving, ending ───────────────────────────────────────
 
-    def _create(self, tx: Transaction, token: str, context: dict[str, Any]) -> tables.Token:
-        values = self.graph.with_defaults(context)
+    def _create(
+        self,
+        tx: Transaction,
+        token: str,
+        context: dict[str, Any],
+        graph: Graph,
+        *,
+        parent: tables.Token | None = None,
+    ) -> tables.Token:
+        """A new token of `graph`'s workflow, in the state that its context leads to.
+        With `parent`, it is a child of the parent's parallel state, and it takes the
+        lock of the parent's family."""
+        values = graph.with_defaults(context)
         if problem := _not_json(values):
             raise InvalidContext(f"the context is not JSON: {problem}")
-        if errors := self.graph.context_errors(values):
-            raise InvalidContext(f"{self.graph.name}: " + "; ".join(errors))
-        chosen = self._start_transition(values)
-        tx.append(token, "started", context=values)
+        if errors := graph.context_errors(values):
+            raise InvalidContext(f"{graph.name}: " + "; ".join(errors))
+        chosen = self._start_transition(graph, values)
+        if chosen.target != END and (
+            problem := self._cannot_enter(tx, token, graph, chosen.target, values)
+        ):
+            raise InvalidContext(problem)
+        if parent is not None:
+            tx.adopt(token, parent.token)
+        family: dict[str, str] = {} if parent is None else {"parent": parent.token}
+        tx.append(token, "started", context=values, **family)
         row = tables.Token(
             token=token, state=START, status="active", visit=0, context=values,
             entered_at=tx.now,
+            parent=None if parent is None else parent.token,
+            workflow=None if parent is None else graph.name,
         )  # fmt: skip
         tx.add_token(row)
         # Recorded as any other move: the history shows where the token began, and the
@@ -802,11 +861,11 @@ class Engine:
             self._enter(tx, row, chosen.target)
         return row
 
-    def _start_transition(self, context: dict[str, Any]) -> TransitionSpec:
-        """The transition from START that a token with this context takes. Its guards
-        read only the context: nothing has happened yet."""
+    def _start_transition(self, graph: Graph, context: dict[str, Any]) -> TransitionSpec:
+        """The transition from START that a token of `graph` with this context takes.
+        Its guards read only the context: nothing has happened yet."""
         facts = GuardInput(context=context, payload={}, counts={})
-        starts = self.graph.starts
+        starts = graph.starts
         matching = [t for t in starts if t.when is not None and evaluate(t.when, facts)]
         if len(matching) > 1:
             targets = ", ".join(repr(t.target) for t in matching)
@@ -821,16 +880,67 @@ class Engine:
             )
         return chosen
 
+    def _cannot_enter(
+        self, tx: Transaction, token: str, graph: Graph, state: str, context: dict[str, Any]
+    ) -> str | None:
+        """Why `token` cannot enter `state` of `graph` with this context now: a child
+        that the state would start cannot start. None: it can. These are the checks
+        that `_create` makes, made before anything is recorded, down through nested
+        parallel states."""
+        spec = graph.state(state)
+        if not spec.parallel:
+            return None
+        visit = tx.visits(token, state) + 1
+        inputs = {key: context[key] for key in spec.inputs if key in context}
+        for workflow in spec.parallel:
+            child = child_id(token, state, visit, workflow)
+            if len(child) > MAX_TOKEN_ID:
+                return (
+                    f"the child {child!r} of {state!r} would have an id longer than "
+                    f"{MAX_TOKEN_ID} characters; use a shorter token id"
+                )
+            if tx.token_taken(child):
+                return f"the child id {child!r} is taken by another token"
+            if problem := self._cannot_start(tx, child, self.graphs[workflow], inputs):
+                return f"the child {workflow!r} of {state!r} cannot start: {problem}"
+        return None
+
+    def _cannot_start(
+        self, tx: Transaction, token: str, graph: Graph, context: dict[str, Any]
+    ) -> str | None:
+        """Why a new token `token` of `graph` cannot start with this context; or None."""
+        values = graph.with_defaults(context)
+        if errors := graph.context_errors(values):
+            return "its context breaks the schema: " + "; ".join(errors)
+        try:
+            chosen = self._start_transition(graph, values)
+        except InvalidContext as error:
+            return str(error)
+        if chosen.target == END:
+            return None
+        return self._cannot_enter(tx, token, graph, chosen.target, values)
+
     def _enter(self, tx: Transaction, row: tables.Token, state: str) -> None:
-        """Enter `state`: queue its task, and set its timeout, if it has one."""
-        spec = self.graph.state(state)
+        """Enter `state`: queue its task, or, for a parallel state, start one child for
+        each of its workflows. Set its timeout, if it has one, before the children start."""
+        spec = self._graph(row).state(state)
         visit = tx.visits(row.token, state) + 1
         tx.append(row.token, "entered", state=state, visit=visit)
         row.state, row.visit, row.entered_at = state, visit, tx.now
-        task = tx.queue_task(row.token, state, visit)
-        tx.append(row.token, "task_queued", task=task.id, state=state)
+        if not spec.parallel:
+            task = tx.queue_task(row.token, state, visit)
+            tx.append(row.token, "task_queued", task=task.id, state=state)
         if spec.timeout is not None:
             self._set_timer(tx, row, TIMEOUT, None, parse_duration(spec.timeout), kind="timeout")
+        inputs = {key: row.context[key] for key in spec.inputs if key in row.context}
+        for workflow in spec.parallel:
+            if (row.status, row.state, row.visit) != ("active", state, visit):
+                # A child of a hand-made graph file can end as it starts, and meet the
+                # join. Then the parent has left the state: it starts no more children.
+                return
+            child = child_id(row.token, state, visit, workflow)
+            tx.append(row.token, "branch_started", workflow=workflow, token=child)
+            self._create(tx, child, inputs, self.graphs[workflow], parent=row)
 
     def _set_timer(
         self,
@@ -849,11 +959,12 @@ class Engine:
         tx.append(row.token, "timer_set", event=event, due_at=_iso(timer.due_at))
 
     def _leave(self, tx: Transaction, row: tables.Token, *, via: str | None) -> None:
-        """Stop all that the current state started: its tasks and its timers. When
-        the token leaves on one of the state's own outcomes (`via` in its emits), a
-        task that a supervisor or someone outside works on is done. Else it is
-        cancelled, so the supervisor's heartbeat finds it lost."""
-        finished = via is not None and via in self.graph.state(row.state).emits
+        """Stop all that the current state started: its tasks, its timers and its
+        children. When the token leaves on one of the state's own outcomes (`via` in
+        its emits), a task that a supervisor or someone outside works on is done. Else
+        it is cancelled, so the supervisor's heartbeat finds it lost. Each live child
+        is cancelled, and says why."""
+        finished = via is not None and via in self._graph(row).state(row.state).emits
         for task in tx.open_tasks(row.token):
             done = finished and task.status in ("claimed", "waiting")
             task.status = "done" if done else "cancelled"
@@ -861,6 +972,9 @@ class Engine:
             tx.append(row.token, "task_done" if done else "task_cancelled", task=task.id)
         for timer in tx.pending_timers(row.token):
             timer.status = "cancelled"
+        for child in self._children(tx, row):
+            if child.status in ("active", "paused"):
+                self._cancel(tx, child, reason=f"the parent left {row.state!r}")
 
     def _end(
         self,
@@ -869,17 +983,73 @@ class Engine:
         status: Literal["completed", "failed", "cancelled"],
         **data: Any,
     ) -> None:
-        """The token ends. Its routine memory goes in the same transaction."""
+        """The token ends. Its routine memory goes in the same transaction. A child
+        that completes or fails tells its parent, whose join may now be met. A child
+        is cancelled only when its parent leaves the state, so that tells no one."""
         row.status = status
         tx.append(row.token, status, **data)
         tx.delete_memory(row.token)
+        if status != "cancelled":
+            self._branch_finished(tx, row)
 
     def _fail(self, tx: Transaction, row: tables.Token, reason: str) -> None:
         """No way to go on: the token fails, in the state it is in, and says why."""
         self._leave(tx, row, via=None)
         self._end(tx, row, "failed", reason=reason)
 
+    def _children(self, tx: Transaction, row: tables.Token) -> list[tables.Token]:
+        """The children that the token's current visit of a parallel state started, in
+        the order of the state's workflows. Empty in any other state."""
+        if row.state in (START, END):
+            return []
+        spec = self._graph(row).state(row.state)
+        if not spec.parallel:
+            return []
+        found = {child.token: child for child in tx.children(row.token)}
+        ids = [child_id(row.token, row.state, row.visit, workflow) for workflow in spec.parallel]
+        return [found[i] for i in ids if i in found]
+
+    def _branch_finished(self, tx: Transaction, child: tables.Token) -> None:
+        """A child ended: fire `joined` on its parent when the parent's join is met.
+        With `all`, the payload has an entry for each child; with `any`, for this one.
+        A join that no transition takes fails the parent: it cannot go on."""
+        if child.parent is None:
+            return
+        parent = tx.token(child.parent)
+        if parent is None or parent.status != "active":
+            return  # a paused parent's children are paused too: they do not end
+        if parent.state in (START, END):
+            return
+        spec = self._graph(parent).state(parent.state)
+        prefix = child_id(parent.token, parent.state, parent.visit, "")
+        if not spec.parallel or not child.token.startswith(prefix):
+            return  # the parent has left the state that started this child
+        ended = [sibling for sibling in self._children(tx, parent) if sibling.status in ENDED]
+        if spec.join == "all" and len(ended) < len(spec.parallel):
+            return
+        chosen = ended if spec.join == "all" else [child]
+        payload = {"branches": [self._branch(tx, sibling) for sibling in chosen]}
+        refusal = self._route(tx, parent, JOINED, payload, key=None)
+        if refusal is not None:
+            self._fail(tx, parent, f"the join of {parent.state!r} cannot move the token: {refusal}")
+
+    def _branch(self, tx: Transaction, child: tables.Token) -> dict[str, Any]:
+        """One entry of the `joined` payload. `final` and `payload` tell of one moment:
+        the event that brought the child into its last state."""
+        return {
+            "workflow": child.workflow,
+            "token": child.token,
+            "status": child.status,
+            "final": child.state,
+            "payload": tx.arrival_payload(child.token),
+        }
+
     # ── small parts ─────────────────────────────────────────────────────
+
+    def _graph(self, row: tables.Token) -> Graph:
+        """The graph of the token's own workflow: a child routes by its child workflow,
+        a top token by the main one."""
+        return self.graph if row.workflow is None else self.graphs[row.workflow]
 
     def _reject(
         self,
@@ -913,7 +1083,14 @@ def _token(row: tables.Token) -> Token:
         visit=row.visit,
         context=dict(row.context),
         entered_at=row.entered_at.replace(tzinfo=UTC),
+        parent=row.parent,
     )
+
+
+def child_id(parent: str, state: str, visit: int, workflow: str) -> str:
+    """The id of the child that `parent` starts for `workflow` on its visit `visit` of
+    the parallel state `state`: `TICKET-1.reviews.1.design-review` (design section 8)."""
+    return f"{parent}.{state}.{visit}.{workflow}"
 
 
 def _entry(row: tables.LedgerEntry) -> Entry:

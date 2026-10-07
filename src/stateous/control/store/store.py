@@ -322,8 +322,9 @@ class Transaction:
 
     # ── ledger ──────────────────────────────────────────────────────────
 
-    def append(self, token: str, kind: str, *, key: str | None = None, **data: Any) -> int:
-        """Record one entry. Returns its seq: the next number for this token."""
+    def append(self, token: str, kind: str, /, *, key: str | None = None, **data: Any) -> int:
+        """Record one entry. Returns its seq: the next number for this token. `token`
+        and `kind` are positional only, so `data` can have a key `token` too."""
         self.lock_token(token)
         last = self._session.scalar(
             select(func.max(tables.LedgerEntry.seq)).where(tables.LedgerEntry.token == token)
