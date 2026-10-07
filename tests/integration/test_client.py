@@ -50,6 +50,14 @@ def test_start_get_list_and_history(client: Client) -> None:
     assert client.history("T-1")[0]["kind"] == "started"
 
 
+def test_a_listing_returns_at_most_its_limit(client: Client) -> None:
+    for n in range(3):
+        client.start(f"T-{n}", {"repo": "acme/api"})
+
+    assert len(client.tokens(limit=2)) == 2
+    assert len(client.tokens()) == 3
+
+
 def test_starting_a_token_twice_returns_the_same_token(client: Client) -> None:
     first = client.start("T-1", {"repo": "acme/api"})
 

@@ -15,6 +15,8 @@ from stateous.client import Client
 from stateous.compiler.plot import mermaid
 
 DEFAULT_URL = "http://127.0.0.1:8080"
+MOST_CHILDREN = 1000
+"""The most children that `show` lists: the API's largest listing."""
 
 token_app = typer.Typer(
     help="Act on tokens: start, fire, show, pause, resume, cancel.", no_args_is_help=True
@@ -94,8 +96,14 @@ def show(
                 typer.echo("no tokens")
             return
         typer.echo(token_line(client.get(token)))
-        for child in client.tokens(parent=token):
+        children = client.tokens(parent=token, limit=MOST_CHILDREN)
+        for child in children:
             typer.echo("  child " + token_line(child))
+        if len(children) == MOST_CHILDREN:
+            typer.echo(
+                f"  (only the {MOST_CHILDREN} most recently moved children are shown; "
+                "there can be more)"
+            )
         for entry in client.history(token):
             typer.echo(entry_line(entry))
 
