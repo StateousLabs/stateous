@@ -127,18 +127,19 @@ def plain_problems(error: ValidationError) -> str:
 
 
 def stub_name(state: str) -> str:
-    """The file a state's stub goes in: `<state>.py`, or `<state>_routine.py` when
-    `<state>` is the name of a module that the file would hide (`TAKEN_NAMES`)."""
-    name = _identifier(state)
+    """The file a state's stub goes in: `<state>.py`; `<workflow>_<state>.py` for a
+    state of a child workflow (`<workflow>/<state>`); or with `_routine` added when the
+    name is that of a module that the file would hide (`TAKEN_NAMES`)."""
+    name = _stem(state)
     if name in TAKEN_NAMES:
         return f"{name}_routine.py"
     return f"{name}.py"
 
 
 def implemented_states(folder: Path) -> set[str]:
-    """The states (as Python identifiers) that a file in `folder` marks with
-    `@on_state(states.<state>)`. The files are parsed, not imported. A file that
-    does not parse is not counted."""
+    """The states that a file in `folder` marks with `@on_state(states.<state>)`, as
+    Python names: `in_progress`, or `security.triage` for `states.security.triage`.
+    The files are parsed, not imported. A file that does not parse is not counted."""
     found: set[str] = set()
     for path in sorted(folder.glob("*.py")):
         if path.name == CONTRACT:
@@ -182,8 +183,8 @@ def write_folder(
         else:
             path.write_text(stub(state), encoding="utf-8", newline="\n")
             why = ""
-            if _identifier(state) in TAKEN_NAMES:
-                why = f" ({_identifier(state)}.py would hide a Python module)"
+            if _stem(state) in TAKEN_NAMES:
+                why = f" ({_stem(state)}.py would hide a Python module)"
             done.append(f"wrote    {path}{why}")
     config = folder / CONFIG
     if config.exists():
@@ -204,11 +205,19 @@ def _config_text(url: str) -> str:
 
 
 def _identifier(state: str) -> str:
-    return state.replace("-", "_")
+    """A state as `states.<...>` names it: `in_progress`; `security_review.triage` for
+    the state `triage` of the child workflow `security-review`."""
+    return state.replace("-", "_").replace("/", ".")
+
+
+def _stem(state: str) -> str:
+    """A state as a file name, without `.py`: `security_review_triage`."""
+    return _identifier(state).replace(".", "_")
 
 
 def _marked_state(decorator: ast.expr) -> str | None:
-    """`x` for a decorator `on_state(states.x)` or `stateous.on_state(contract.states.x)`."""
+    """`x` for a decorator `on_state(states.x)` or `stateous.on_state(contract.states.x)`;
+    `w.x` for `on_state(states.w.x)`, a state of the child workflow `w`."""
     if not isinstance(decorator, ast.Call) or len(decorator.args) != 1:
         return None
     called = decorator.func
@@ -218,15 +227,19 @@ def _marked_state(decorator: ast.expr) -> str | None:
         name = called.attr
     else:
         return None
-    argument = decorator.args[0]
-    if name != "on_state" or not isinstance(argument, ast.Attribute):
+    if name != "on_state":
         return None
-    owner = argument.value
-    if (isinstance(owner, ast.Name) and owner.id == "states") or (
-        isinstance(owner, ast.Attribute) and owner.attr == "states"
-    ):
-        return argument.attr
-    return None
+    parts: list[str] = []
+    node = decorator.args[0]
+    while isinstance(node, ast.Attribute):
+        parts.insert(0, node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.insert(0, node.id)
+    if "states" not in parts:
+        return None
+    after = parts[len(parts) - parts[::-1].index("states") :]
+    return ".".join(after) if 1 <= len(after) <= 2 else None
 
 
 def _one_line(text: str) -> str:

@@ -91,3 +91,16 @@ def test_two_folders_with_modules_of_the_same_name_are_each_discovered(tmp_path:
     second = Registry.discover(tmp_path / "two")
 
     assert (first.served, second.served) == (["coding"], ["testing"])
+
+
+def test_a_child_states_routine_is_served_by_its_claim_name() -> None:
+    triage = StateRef("security/triage")
+
+    @on_state(triage)
+    def review(ctx: Context[Any]) -> None:
+        return None
+
+    registry = Registry.from_modules([module(review=review)])
+
+    assert registry.served == ["security/triage"]
+    assert registry.states["security/triage"] is triage

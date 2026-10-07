@@ -10,7 +10,7 @@ import errno
 import os
 import sys
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 import typer
 
@@ -95,10 +95,10 @@ def init(
     url: Annotated[str, typer.Argument(help="The control plane, e.g. http://127.0.0.1:8080.")],
     folder: Annotated[Path, typer.Argument(help="The supervisor's folder. Made if absent.")],
 ) -> None:
-    """Write a supervisor's folder: contract.py, a stub per state, stateous.yaml.
-    Run it again to update contract.py."""
+    """Write a supervisor's folder: contract.py, a stub for each state with a routine
+    (of each workflow), stateous.yaml. Run it again to update contract.py."""
     from stateous.client.client import Client, ClientError
-    from stateous.compiler.codegen import generate_contract, generate_stub
+    from stateous.compiler.codegen import generate_contract, generate_stub, routine_states
     from stateous.supervisor.folder import write_folder
 
     try:
@@ -110,7 +110,7 @@ def init(
     def stub(state: str) -> str:
         return generate_stub(document, state)
 
-    states = list(cast("dict[str, Any]", document["states"]))
+    states = routine_states(document)
     try:
         lines = write_folder(
             folder, url=url, contract=generate_contract(document), states=states, stub=stub

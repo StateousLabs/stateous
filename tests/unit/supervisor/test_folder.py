@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from stateous.compiler.codegen import generate_contract, generate_stub, routine_states
 from stateous.supervisor.folder import (
     FolderConfig,
     FolderError,
@@ -14,6 +15,8 @@ from stateous.supervisor.folder import (
     stub_name,
     write_folder,
 )
+
+from ...parallel import parallel_document
 
 CHECKSUM = "sha256:" + "a" * 64
 CONTRACT_TEXT = (
@@ -229,3 +232,55 @@ def test_init_says_why_a_stub_has_another_name(tmp_path: Path) -> None:
     assert not (folder / "json.py").exists()
     assert f"wrote    {folder / 'json_routine.py'} (json.py would hide a Python module)" in lines
     assert f"wrote    {folder / 'coding.py'}" in lines
+
+
+# ── child states (design section 8) ───────────────────────────────────────
+
+
+def test_child_states_are_found_without_importing_the_files(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text(
+        "from stateous import on_state\nfrom contract import states\n\n\n"
+        "@on_state(states.security.triage)\ndef triage(ctx: object) -> None:\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "b.py").write_text(
+        "import stateous\nimport contract\n\n\n"
+        "@stateous.on_state(contract.states.design_review.approved)\n"
+        "def approved(ctx: object) -> None:\n    return None\n",
+        encoding="utf-8",
+    )
+
+    assert implemented_states(tmp_path) == {"security.triage", "design_review.approved"}
+
+
+def test_a_child_states_stub_is_named_after_its_workflow_and_state() -> None:
+    assert stub_name("security/triage") == "security_triage.py"
+    assert stub_name("design-review/in-progress") == "design_review_in_progress.py"
+
+
+def test_init_writes_a_stub_for_each_state_of_each_workflow(tmp_path: Path) -> None:
+    document = parallel_document()
+    folder = tmp_path / "worker"
+    folder.mkdir()
+    (folder / "mine.py").write_text(generate_stub(document, "design/triage"), encoding="utf-8")
+
+    def child_stub(state: str) -> str:
+        return generate_stub(document, state)
+
+    lines = write_folder(
+        folder,
+        url="http://a.test",
+        contract=generate_contract(document),
+        states=routine_states(document),
+        stub=child_stub,
+    )
+
+    written = sorted(path.name for path in folder.glob("*.py"))
+    assert written == [
+        "blocked.py", "coding.py", "contract.py", "design_approved.py", "design_rejected.py",
+        "merging.py", "mine.py", "security_approved.py", "security_rejected.py",
+        "security_triage.py",
+    ]  # fmt: skip
+    assert "kept     the routine of 'design/triage'" in lines
+    assert not (folder / "reviews.py").exists()  # a parallel state has no routine
