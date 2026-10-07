@@ -133,3 +133,61 @@ def test_the_longest_request_id_is_taken() -> None:
     engine.start("T-1", TICKET)
 
     assert engine.claim("box-1", STATES, request="A9._-" + "x" * 59) is not None
+
+
+def test_a_repeat_after_another_supervisor_claimed_the_requeued_task_is_a_new_claim() -> None:
+    clock = Clock()
+    engine = new_engine(clock=clock)
+    engine.start("T-1", TICKET)
+    engine.start("T-2", TICKET)
+    first = claimed(engine, "r-1")
+    clock.advance(minutes=3)
+    engine.tick()  # the lease ends, and the task is queued again
+    other = claimed(engine, "r-9", "box-2")
+    assert (other.task, other.attempt) == (first.task, 2)
+
+    again = claimed(engine, "r-1")
+
+    assert again.token == "T-2"
+
+
+def test_a_repeat_while_the_supervisor_holds_a_new_attempt_is_a_new_claim() -> None:
+    clock = Clock()
+    engine = new_engine(clock=clock)
+    engine.start("T-1", TICKET)
+    engine.start("T-2", TICKET)
+    first = claimed(engine, "r-1")
+    clock.advance(minutes=3)
+    engine.tick()  # the lease ends, and the task is queued again
+    second = claimed(engine, None)  # no request id: r-1 stays the remembered claim
+    assert (second.task, second.attempt) == (first.task, 2)
+
+    again = claimed(engine, "r-1")
+
+    assert again.token == "T-2"
+
+
+def test_a_repeat_after_the_token_was_cancelled_is_a_new_claim() -> None:
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    engine.start("T-2", TICKET)
+    claimed(engine, "r-1")
+    engine.cancel("T-1")
+
+    again = claimed(engine, "r-1")
+
+    assert again.token == "T-2"
+
+
+def test_a_repeat_after_the_token_was_paused_gets_the_same_grant_as_accepted() -> None:
+    """A pause does not take a claimed task from its supervisor, so the repeat gets
+    the same grant again. This is the accepted behaviour."""
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    engine.start("T-2", TICKET)
+    first = claimed(engine, "r-1")
+    engine.pause("T-1")
+
+    again = claimed(engine, "r-1")
+
+    assert again == first

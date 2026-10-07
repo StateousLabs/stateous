@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Connection, create_engine, delete, event, func, or_, select, text, update
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -246,7 +247,10 @@ class Transaction:
     only while it holds no other, so two transactions never wait for each other in a
     circle. A new claim never waits: it tries the lock, and skips a busy token. A
     repeated claim waits for the lock of the task it got before, and holds no other
-    token's lock then. SQLite takes one writer at a time and needs no locks.
+    token's lock then. A claim with a request id also locks the supervisor's row in
+    `claims` (`last_claim`). It takes that lock only before any token lock, and no
+    transaction that holds a token lock waits for that row. So this order is safe
+    too. SQLite takes one writer at a time and needs no locks.
     """
 
     def __init__(self, session: Session, now: datetime) -> None:
@@ -423,12 +427,27 @@ class Transaction:
             return task
         return None
 
-    def last_claim(self, supervisor: str) -> tables.Claim | None:
-        """The last claim of `supervisor` that named a request id, if any. Locked on
-        Postgres until this transaction ends."""
-        return self._session.get(
+    def last_claim(self, supervisor: str) -> tables.Claim:
+        """The last claim of `supervisor` that named a request id. Locked on Postgres
+        until this transaction ends. Call it before any token lock.
+
+        A supervisor with no claim yet gets a row with an empty request id, which no
+        request id is equal to. The row is made first, so that the lock has a row to
+        lock: two first claims with the same request id take turns, and the second
+        is a repeat of the first."""
+        if self._locked:
+            raise RuntimeError("a transaction locks a claim only when it holds no token lock")
+        dialect = postgresql if self._locks else sqlite
+        self._session.execute(
+            dialect.insert(tables.Claim)
+            .values(supervisor=supervisor, request="")
+            .on_conflict_do_nothing(index_elements=["supervisor"])
+        )
+        row = self._session.get(
             tables.Claim, supervisor, populate_existing=True, with_for_update=self._locks
         )
+        assert row is not None, "the claim row was made above"
+        return row
 
     def remember_claim(self, supervisor: str, request: str, task: tables.Task | None) -> None:
         """Keep `request` and what it got (a task and its attempt, or no task) as the

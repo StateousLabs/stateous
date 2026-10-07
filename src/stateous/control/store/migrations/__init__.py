@@ -72,6 +72,13 @@ def migrate(engine: Engine, *, script_location: Path | None = None) -> None:
             raise ForeignDatabase(
                 f"this database has no {', '.join(missing)} table; start a new database"
             )
+        added = _expected(location, newest) - _expected(location, current)
+        if foreign := sorted(added & present):  # the upgrade cannot make them
+            names = ", ".join(foreign)
+            raise ForeignDatabase(
+                f"this database has a table named {names} that Stateous did not make; "
+                "start a new database"
+            )
         if current != newest:
             command.upgrade(_config(location, connection), "head")
 

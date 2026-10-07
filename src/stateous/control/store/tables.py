@@ -132,7 +132,8 @@ class Claim(Base):
 
     supervisor: Mapped[str] = mapped_column(String(256), primary_key=True)
     request: Mapped[str] = mapped_column(String(64))
-    """The request id that the supervisor sent with the claim."""
+    """The request id that the supervisor sent with the claim. Empty: the row was
+    made for a first claim, before that claim was kept."""
     task_id: Mapped[int | None] = mapped_column(default=None)
     """The task the claim got; None when there was no task."""
     attempt: Mapped[int | None] = mapped_column(default=None)

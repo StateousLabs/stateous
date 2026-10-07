@@ -498,7 +498,7 @@ class Engine:
         the supervisor still holds that attempt of the task, with a lease that has
         not ended. The lease is renewed. None: the claim is a new one."""
         last = tx.last_claim(supervisor)
-        if last is None or last.request != request or last.task_id is None:
+        if last.request != request or last.task_id is None:
             return None
         task = tx.task(last.task_id)
         if (

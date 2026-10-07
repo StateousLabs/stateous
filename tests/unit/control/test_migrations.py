@@ -310,6 +310,22 @@ def test_a_database_at_the_newest_revision_that_lost_the_claims_table_is_refused
         Store(url)
 
 
+def test_a_database_at_the_baseline_with_a_claims_table_of_its_own_is_refused_untouched(
+    tmp_path: Path,
+) -> None:
+    url = sqlite_url(tmp_path / "foreign-claims.db")
+    engine = create_engine(url)
+    upgrade_from_empty(engine, revision=BASELINE)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE claims (id INTEGER PRIMARY KEY)"))
+    engine.dispose()
+
+    with pytest.raises(ForeignDatabase, match="a table named claims that Stateous did not make"):
+        Store(url)
+
+    assert version_of(url) == BASELINE
+
+
 def test_a_new_database_that_fails_to_be_stamped_is_left_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

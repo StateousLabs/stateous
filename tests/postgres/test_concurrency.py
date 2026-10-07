@@ -138,3 +138,17 @@ def test_token_ids_differing_only_in_case_started_at_once_make_one_token(engine:
     assert all(isinstance(r, Token | InvalidTokenId) for r in results), results
     assert len({r.token for r in results if isinstance(r, Token)}) == 1
     assert len(engine.tokens()) == 1
+
+
+def test_a_first_claim_and_its_repeat_at_once_get_the_same_grant(engine: Engine) -> None:
+    for n in range(40):
+        engine.start(f"T-{n}", TICKET)
+
+    for round_ in range(10):  # each round is the first claim of a new supervisor
+        name = f"box-{round_}"
+
+        results = at_once(2, lambda i, name=name: engine.claim(name, ["coding"], request="r-1"))
+
+        assert [r for r in results if isinstance(r, Exception)] == []
+        assert results[0] is not None
+        assert results[0] == results[1]
