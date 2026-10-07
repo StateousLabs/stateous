@@ -39,3 +39,19 @@ def test_the_session_drops_only_the_databases_it_created(
 
     assert dropped == ["t_mine"]
     assert conftest._created_databases == []
+
+
+def test_the_test_server_on_localhost_is_reached_on_ipv4(pytestconfig: pytest.Config) -> None:
+    """`localhost` is `::1` first on Windows, and Docker Desktop's relay there can
+    lose bytes (tests/postgres/test_connection.py). The tests use 127.0.0.1."""
+    conftest = shared_conftest(pytestconfig)
+    server_url: Any = conftest.server_url
+
+    assert (
+        server_url("postgresql://stateous:secret@localhost:55432/postgres")
+        == "postgresql://stateous:secret@127.0.0.1:55432/postgres"
+    )
+    assert (
+        server_url("postgresql://stateous:secret@db.example:5432/postgres")
+        == "postgresql://stateous:secret@db.example:5432/postgres"
+    )

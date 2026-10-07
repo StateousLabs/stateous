@@ -6,6 +6,7 @@ Set STATEOUS_TEST_POSTGRES to a server, for example
 
 Then each in-memory store that a test opens is a new Postgres database, and the
 tests marked `needs_postgres` run. Without it, nothing changes, and they are skipped.
+The tests connect to `localhost` on 127.0.0.1 (see `server_url`).
 """
 
 import os
@@ -63,7 +64,23 @@ def sdlc_document() -> dict[str, Any]:
 
 # ── the Postgres switch ────────────────────────────────────────────────────
 
-POSTGRES = os.environ.get("STATEOUS_TEST_POSTGRES")
+
+def server_url(url: str) -> str:
+    """The URL of the test server, with `localhost` changed to 127.0.0.1.
+
+    On Windows, `localhost` is `::1` first. Docker Desktop has a different relay on
+    `::1` (`wslrelay`) than on 127.0.0.1, and on `::1` the bytes of a pipelined
+    statement sometimes do not get to Postgres. Then the server waits for them, the
+    client waits for the answer, and the test run stops for ever
+    (tests/postgres/test_connection.py)."""
+    parsed = make_url(url)
+    if parsed.host == "localhost":
+        parsed = parsed.set(host="127.0.0.1")
+    return parsed.render_as_string(hide_password=False)
+
+
+_GIVEN = os.environ.get("STATEOUS_TEST_POSTGRES")
+POSTGRES = None if _GIVEN is None else server_url(_GIVEN)
 
 _created_databases: list[str] = []
 """Databases that `fresh_postgres_database` made and no one dropped yet."""
