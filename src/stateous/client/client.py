@@ -90,12 +90,21 @@ class Client:
         return self._object("POST", f"/tokens/{_segment(token)}/cancel", {})
 
     def report(
-        self, task: int, event: str, payload: dict[str, Any] | None = None
+        self,
+        task: int,
+        event: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        attempt: int | None = None,
     ) -> dict[str, Any]:
-        """The outcome of a task that waits for the outside (its routine returned None)."""
+        """The outcome of a task that waits for the outside (its routine returned None).
+        With `attempt`: only for that attempt of the task. The control plane refuses
+        it (409) when the task is on another attempt."""
         body: dict[str, Any] = {"kind": "event", "event": event}
         if payload is not None:
             body["payload"] = payload
+        if attempt is not None:
+            body["attempt"] = attempt
         return self._object("POST", f"/tasks/{task}/report", body)
 
     def workflow(self) -> dict[str, Any]:

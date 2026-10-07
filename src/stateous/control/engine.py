@@ -103,7 +103,8 @@ class TokenNotActive(EngineError, ValueError):
 
 
 class TaskNotHeld(EngineError, ValueError):
-    """The task is not this supervisor's, or no one works on it any more."""
+    """The task is not this supervisor's, no one works on it any more, or the
+    request is for an attempt of it that is over."""
 
 
 @dataclass(frozen=True)
@@ -475,15 +476,26 @@ class Engine:
             )  # fmt: skip
             return self._grant(tx, task)
 
-    def report(self, task: int, outcome: Outcome, *, supervisor: str | None = None) -> Fired:
+    def report(
+        self,
+        task: int,
+        outcome: Outcome,
+        *,
+        supervisor: str | None = None,
+        attempt: int | None = None,
+    ) -> Fired:
         """The outcome of a task. With `supervisor`: from the supervisor that claimed
         it. Without: from outside (CI, a person), for a claimed or waiting task, with
-        an event or a failure."""
+        an event or a failure. With `attempt` (or `outcome.attempt`): only for that
+        attempt of the task, so a late report of an old attempt cannot land on a new
+        one."""
         if supervisor is not None:
             _check_supervisor(supervisor)
         _check_outcome(outcome)
+        attempt = outcome.attempt if attempt is None else attempt
+        waiting = outcome.kind == "waiting"
         with self._transaction() as tx:
-            held = self._worked_task(tx, task, supervisor, waiting=outcome.kind == "waiting")
+            held = self._worked_task(tx, task, supervisor, waiting=waiting, attempt=attempt)
             row = self._existing(tx, held.token)
             result = self._report(tx, row, held, outcome)
         return _settled(result)
@@ -497,18 +509,20 @@ class Engine:
             renewed = tx.renew_leases(supervisor, tasks, tx.now + self.lease)
         return sorted(set(tasks) - renewed)
 
-    def note(self, task: int, text: str) -> None:
-        """One line of progress in the token's history."""
+    def note(self, task: int, text: str, *, attempt: int | None = None) -> None:
+        """One line of progress in the token's history. With `attempt`: only for that
+        attempt of the task."""
         line = text.strip()
         if not 0 < len(line) <= NOTE_LENGTH:
             raise InvalidPayload(f"a note is 1 to {NOTE_LENGTH} characters")
         with self._transaction() as tx:
-            held = self._worked_task(tx, task, None, waiting=False)
+            held = self._worked_task(tx, task, None, waiting=False, attempt=attempt)
             tx.append(held.token, "note", task=held.id, text=line)
 
-    def set_memory(self, task: int, key: str, value: Any) -> None:
+    def set_memory(self, task: int, key: str, value: Any, *, attempt: int | None = None) -> None:
         """Save one key of the routine memory of the task's token and state, at once.
-        `None` deletes the key. The history records the key, never the value."""
+        `None` deletes the key. The history records the key, never the value. With
+        `attempt`: only for that attempt of the task."""
         if not 0 < len(key) <= MEMORY_KEY_LENGTH:
             raise InvalidPayload(f"a memory key is 1 to {MEMORY_KEY_LENGTH} characters")
         if value is not None:
@@ -517,7 +531,7 @@ class Engine:
             except (TypeError, ValueError) as error:
                 raise InvalidPayload(f"the value of {key!r} is not JSON: {error}") from None
         with self._transaction() as tx:
-            held = self._worked_task(tx, task, None, waiting=False)
+            held = self._worked_task(tx, task, None, waiting=False, attempt=attempt)
             if value is None:
                 if tx.forget(held.token, held.state, key):
                     tx.append(held.token, "memory_deleted", state=held.state, memory_key=key)
@@ -526,12 +540,24 @@ class Engine:
                 tx.append(held.token, "memory_set", state=held.state, memory_key=key)
 
     def _worked_task(
-        self, tx: Transaction, task_id: int, supervisor: str | None, *, waiting: bool
+        self,
+        tx: Transaction,
+        task_id: int,
+        supervisor: str | None,
+        *,
+        waiting: bool,
+        attempt: int | None,
     ) -> tables.Task:
-        """The task, if it is still worked on, and, with `supervisor`, by it."""
+        """The task, if it is still worked on, and, with `supervisor`, by it; and,
+        with `attempt`, on that attempt."""
         task = tx.task(task_id)
         if task is None:
             raise TaskNotFound(f"there is no task {task_id}")
+        if attempt is not None and attempt != task.attempt:
+            raise TaskNotHeld(
+                f"task {task_id} is on attempt {task.attempt}; the request is for attempt "
+                f"{attempt}, which is over"
+            )
         if task.status not in WORKED_ON:
             raise TaskNotHeld(f"task {task_id} is {task.status}; no one works on it now")
         if supervisor is not None and (task.status != "claimed" or task.claimed_by != supervisor):

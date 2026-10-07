@@ -85,6 +85,7 @@ class ControlPlaneApi:
             raise Refused(response.status_code, f"the claimed task is not valid: {error}") from None
 
     async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
+        """Report a task. The outcome names the attempt it is for."""
         body = {**outcome.to_json(), "supervisor": supervisor}
         await self._call("POST", f"/tasks/{task}/report", body)
 
@@ -100,12 +101,15 @@ class ControlPlaneApi:
             raise Refused(200, "the heartbeat answer has no list of lost tasks")
         return [int(task) for task in cast("list[Any]", lost)]
 
-    async def note(self, task: int, text: str) -> None:
-        await self._call("POST", f"/tasks/{task}/note", {"text": text})
+    async def note(self, task: int, text: str, *, attempt: int) -> None:
+        """One line of progress, for that attempt of the task."""
+        await self._call("POST", f"/tasks/{task}/note", {"text": text, "attempt": attempt})
 
-    async def set_memory(self, task: int, key: str, value: Any) -> None:
-        """Save one key of the routine's memory. `None` deletes the key."""
-        await self._call("PUT", f"/tasks/{task}/memory", {"key": key, "value": value})
+    async def set_memory(self, task: int, key: str, value: Any, *, attempt: int) -> None:
+        """Save one key of the routine's memory, for that attempt of the task. `None`
+        deletes the key."""
+        body = {"key": key, "value": value, "attempt": attempt}
+        await self._call("PUT", f"/tasks/{task}/memory", body)
 
     async def aclose(self) -> None:
         await self._client.aclose()

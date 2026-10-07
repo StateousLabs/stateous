@@ -8,7 +8,9 @@ most `tasks` routines run at once.
 
 A routine's `ctx.memory[...] = value` and `ctx.note(...)` go to the control plane
 at once, in order, for each task. The report waits until they are sent. It
-carries the routine's context writes and its timers (`ctx.schedule`).
+carries the routine's context writes and its timers (`ctx.schedule`). The
+report, each note and each memory write name the attempt of the grant, so the
+control plane refuses them when the task is on a new attempt.
 
 Every `heartbeat_every` seconds, the supervisor names the tasks it still works
 on. The control plane answers with the tasks it took back: the token left the
@@ -37,7 +39,7 @@ import signal
 import sys
 import threading
 from collections.abc import Callable, Collection, Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import FrameType
 from typing import Any, Literal, Protocol, cast
 
@@ -83,9 +85,9 @@ class Api(Protocol):
 
     async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]: ...
 
-    async def note(self, task: int, text: str) -> None: ...
+    async def note(self, task: int, text: str, *, attempt: int) -> None: ...
 
-    async def set_memory(self, task: int, key: str, value: Any) -> None: ...
+    async def set_memory(self, task: int, key: str, value: Any, *, attempt: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -104,9 +106,10 @@ class _Sends:
     `call_soon_threadsafe`. The thread's result goes to the loop the same way and
     later, so its sends are in the queue before the result arrives."""
 
-    def __init__(self, api: Api, task: int) -> None:
+    def __init__(self, api: Api, task: int, attempt: int) -> None:
         self._api = api
         self._task = task
+        self._attempt = attempt
         self._loop = asyncio.get_running_loop()
         self._loop_thread = threading.get_ident()
         self._queue: asyncio.Queue[_Send] = asyncio.Queue()
@@ -128,9 +131,11 @@ class _Sends:
             send = await self._queue.get()
             try:
                 if send.kind == "memory":
-                    await self._api.set_memory(self._task, send.key, send.value)
+                    await self._api.set_memory(
+                        self._task, send.key, send.value, attempt=self._attempt
+                    )
                 else:
-                    await self._api.note(self._task, send.key)
+                    await self._api.note(self._task, send.key, attempt=self._attempt)
             except Refused as error:
                 log.warning(
                     "task %d: the control plane refused a %s: %s",
@@ -371,7 +376,8 @@ class Supervisor:
         )
         running = _Running(grant)
         running.job = asyncio.create_task(
-            self._do(running, _Sends(self.api, grant.task)), name=f"stateous-task-{grant.task}"
+            self._do(running, _Sends(self.api, grant.task, grant.attempt)),
+            name=f"stateous-task-{grant.task}",
         )
         self._running.add(running)
         self._idle.clear()
@@ -418,6 +424,9 @@ class Supervisor:
             return Outcome(kind="failed", error=f"{type(error).__name__}: {error}")
 
     async def _report(self, grant: TaskGrant, outcome: Outcome) -> None:
+        """Report the outcome for the grant's attempt: a late report of an old
+        attempt cannot land on a new one."""
+        outcome = replace(outcome, attempt=grant.attempt)
         try:
             await self.api.report(grant.task, outcome, supervisor=self.name)
         except Refused as error:
@@ -453,7 +462,9 @@ class Supervisor:
     async def _report_refusal(self, grant: TaskGrant, refusal: Refused) -> None:
         """Fail the task with the refusal, once, so it does not wait for its lease."""
         failed = Outcome(
-            kind="failed", error=f"the control plane refused the report: {refusal.message}"
+            kind="failed",
+            error=f"the control plane refused the report: {refusal.message}",
+            attempt=grant.attempt,
         )
         try:
             await self.api.report(grant.task, failed, supervisor=self.name)

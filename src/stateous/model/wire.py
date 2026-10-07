@@ -127,6 +127,9 @@ class Outcome:
     context: dict[str, Any] = field(default_factory=dict[str, Any])
     """The routine's writes."""
     schedules: tuple[Schedule, ...] = ()
+    attempt: int | None = None
+    """The attempt of the task that the report is for. The control plane refuses
+    the report when the task is on another attempt. None: any attempt."""
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {"kind": self.kind}
@@ -138,6 +141,8 @@ class Outcome:
             out["error"] = self.error
         out["context"] = self.context
         out["schedules"] = [schedule.to_json() for schedule in self.schedules]
+        if self.attempt is not None:
+            out["attempt"] = self.attempt
         return out
 
     @classmethod
@@ -154,6 +159,9 @@ class Outcome:
         schedules: Any = body.get("schedules", [])
         if not isinstance(schedules, list):
             raise WireError("an outcome's 'schedules' must be a list")
+        attempt = None if body.get("attempt") is None else _whole(body, "attempt", what)
+        if attempt is not None and attempt < 1:
+            raise WireError("an outcome's 'attempt' is 1 or more")
         return cls(
             kind=kind,
             event=event,
@@ -161,6 +169,7 @@ class Outcome:
             error=error,
             context=_optional_object(body, "context", what) or {},
             schedules=tuple(Schedule.from_json(item) for item in cast("list[Any]", schedules)),
+            attempt=attempt,
         )
 
 

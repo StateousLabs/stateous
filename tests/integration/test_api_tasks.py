@@ -333,3 +333,57 @@ def test_a_note_or_memory_after_the_lease_ended_is_409(
     memory = http.put(f"/tasks/{grant['task']}/memory", json={"key": "dev", "value": 1})
 
     assert (note.status_code, memory.status_code) == (409, 409)
+
+
+def requeued(http: TestClient) -> dict[str, Any]:
+    """Attempt 1 of coding fails; attempt 2 is claimed. Returns the new grant."""
+    first = claimed(http)
+    body = {"kind": "failed", "error": "x", "supervisor": "box-1", "attempt": 1}
+    assert http.post(f"/tasks/{first['task']}/report", json=body).status_code == 200
+    again = http.post("/tasks/claim", json={"supervisor": "box-1", "states": ["coding"]})
+    assert again.status_code == 200, again.text
+    assert (again.json()["task"], again.json()["attempt"]) == (first["task"], 2)
+    return again.json()
+
+
+def test_a_late_report_note_or_memory_from_an_old_attempt_is_409(http: TestClient) -> None:
+    grant = requeued(http)
+    task = grant["task"]
+
+    late = {"kind": "event", "event": "done", "supervisor": "box-1", "attempt": 1}
+    report = http.post(f"/tasks/{task}/report", json=late)
+    note = http.post(f"/tasks/{task}/note", json={"text": "late", "attempt": 1})
+    memory = http.put(f"/tasks/{task}/memory", json={"key": "dev", "value": 1, "attempt": 1})
+
+    assert (report.status_code, note.status_code, memory.status_code) == (409, 409, 409)
+    assert "attempt 2" in report.json()["error"]
+    assert "attempt 1" in report.json()["error"]
+    assert http.get("/tokens/T-1").json()["state"] == "coding"
+
+
+def test_a_report_note_and_memory_of_the_current_attempt_are_accepted(http: TestClient) -> None:
+    grant = requeued(http)
+    task = grant["task"]
+
+    note = http.post(f"/tasks/{task}/note", json={"text": "now", "attempt": 2})
+    memory = http.put(f"/tasks/{task}/memory", json={"key": "dev", "value": 1, "attempt": 2})
+    body = {"kind": "event", "event": "done", "supervisor": "box-1", "attempt": 2}
+    report = http.post(f"/tasks/{task}/report", json=body)
+
+    assert (note.status_code, memory.status_code, report.status_code) == (204, 204, 200)
+    assert report.json()["state"] == "testing"
+
+
+@pytest.mark.parametrize("attempt", ["1", 0, True, 1.5])
+def test_an_attempt_that_is_not_a_whole_number_of_1_or_more_is_422(
+    http: TestClient, attempt: object
+) -> None:
+    task = claimed(http)["task"]
+
+    report = http.post(
+        f"/tasks/{task}/report", json={"kind": "event", "event": "done", "attempt": attempt}
+    )
+    note = http.post(f"/tasks/{task}/note", json={"text": "x", "attempt": attempt})
+    memory = http.put(f"/tasks/{task}/memory", json={"key": "k", "value": 1, "attempt": attempt})
+
+    assert (report.status_code, note.status_code, memory.status_code) == (422, 422, 422)

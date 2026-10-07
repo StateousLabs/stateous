@@ -414,7 +414,7 @@ c.close()
 
 `Client` is also a context manager: `with Client(url) as c: ...`.
 
-A routine that returns `None` leaves its task waiting. The outside actor then calls `c.report(task, event, payload)` with the task's id. The client raises `Refused` (from `stateous.client`) when the control plane refuses a call. `Refused` has `.status` and `.message`. It raises `Unreachable` when the control plane does not answer.
+A routine that returns `None` leaves its task waiting. The outside actor then calls `c.report(task, event, payload)` with the task's id. With `attempt=N`, the control plane refuses the report (409) when the task is not on attempt N. The client raises `Refused` (from `stateous.client`) when the control plane refuses a call. `Refused` has `.status` and `.message`. It raises `Unreachable` when the control plane does not answer.
 
 ## Agents, with PHD
 
@@ -726,14 +726,16 @@ The API has no prefix. Bodies are JSON. An error is `{"error": "<one sentence>"}
 | `POST /tokens/{id}/resume` | Resume the token. |
 | `POST /tokens/{id}/cancel` | Cancel the token. |
 | `POST /tasks/claim` | A supervisor takes a task of the states that it serves. Body: `{"supervisor", "states"}`. 204 if there is no task. |
-| `POST /tasks/{id}/report` | The outcome of a task. Body: `{"kind", "event", "payload", "error", "context", "schedules"}`; `kind` is `event`, `waiting` or `failed`. An event that the state does not allow is refused. |
+| `POST /tasks/{id}/report` | The outcome of a task. Body: `{"kind", "event", "payload", "error", "context", "schedules", "attempt"}`; `kind` is `event`, `waiting` or `failed`. An event that the state does not allow is refused. |
 | `POST /tasks/heartbeat` | The supervisor's tasks are still alive, in one call. Body: `{"supervisor", "tasks"}`. The answer `{"lost"}` names the lost tasks. |
-| `POST /tasks/{id}/note` | A line of progress. Body: `{"text"}`. |
-| `PUT /tasks/{id}/memory` | Save one key of the routine's memory. Body: `{"key", "value"}`. A `null` value deletes the key. |
+| `POST /tasks/{id}/note` | A line of progress. Body: `{"text", "attempt"}`. |
+| `PUT /tasks/{id}/memory` | Save one key of the routine's memory. Body: `{"key", "value", "attempt"}`. A `null` value deletes the key. |
 | `GET /workflow` | The graph file. `init` and `show --graph` use it. |
 | `GET /health` | The workflow's name and the graph's checksum: `{"workflow", "checksum"}`. |
 
 A report from outside, for a waiting task, has no `supervisor`. A supervisor's own report adds `"supervisor"`.
+
+`attempt` is optional in a report, a note and a memory write. It names the attempt of the task that the request is for. When the task is on a different attempt, the control plane refuses the request with 409. So a late report of an old attempt cannot land on a new attempt. The supervisor always sends the attempt of its grant. A request without `attempt`, for example from CI or a person, is for the current attempt.
 
 ## The commands
 

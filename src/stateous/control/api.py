@@ -162,8 +162,9 @@ def create_app(engine: Engine) -> Starlette:
 
     async def note(request: Request) -> Response:
         task = _task(request)
-        text = _note((await body_of(request)).get("text"))
-        await run_in_threadpool(lambda: engine.note(task, text))
+        body = await body_of(request)
+        text, attempt = _note(body.get("text")), _attempt(body.get("attempt"))
+        await run_in_threadpool(lambda: engine.note(task, text, attempt=attempt))
         return Response(status_code=204)
 
     async def memory(request: Request) -> Response:
@@ -172,8 +173,8 @@ def create_app(engine: Engine) -> Starlette:
         key = _name(body.get("key"), "key")
         if "value" not in body:
             raise Problem(422, "memory needs a 'value'; null deletes the key")
-        value = body["value"]
-        await run_in_threadpool(lambda: engine.set_memory(task, key, value))
+        value, attempt = body["value"], _attempt(body.get("attempt"))
+        await run_in_threadpool(lambda: engine.set_memory(task, key, value, attempt=attempt))
         return Response(status_code=204)
 
     routes = [
@@ -303,6 +304,15 @@ def _task_ids(value: Any) -> list[int]:
     if len(items) > MAX_ITEMS:
         raise Problem(422, f"'tasks' has at most {MAX_ITEMS} task ids")
     return cast("list[int]", items)
+
+
+def _attempt(value: Any) -> int | None:
+    """The attempt a request is for; None when the body names none."""
+    if value is None:
+        return None
+    if type(value) is not int or not 1 <= value <= MAX_TASK:
+        raise Problem(422, "'attempt' is a whole number of 1 or more")
+    return value
 
 
 def _note(value: Any) -> str:

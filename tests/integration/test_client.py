@@ -91,6 +91,25 @@ def test_report_moves_a_task_that_waits_for_the_outside(client: Client, engine: 
     assert client.report(grant.task, "done")["state"] == "testing"
 
 
+def test_report_with_an_attempt_is_refused_for_an_attempt_that_is_over(
+    client: Client, engine: Engine
+) -> None:
+    client.start("T-1", {"repo": "acme/api"})
+    first = engine.claim("box-1", ["coding"])
+    assert first is not None
+    engine.report(first.task, Outcome(kind="failed", error="x"), supervisor="box-1")
+    again = engine.claim("box-1", ["coding"])
+    assert again is not None
+    engine.report(again.task, Outcome(kind="waiting"), supervisor="box-1")
+
+    with pytest.raises(Refused) as refused:
+        client.report(again.task, "done", attempt=1)
+
+    assert refused.value.status == 409
+    assert client.get("T-1")["state"] == "coding"
+    assert client.report(again.task, "done", attempt=2)["state"] == "testing"
+
+
 def test_workflow_returns_the_graph(client: Client, sdlc: dict[str, Any]) -> None:
     assert client.workflow() == sdlc
 

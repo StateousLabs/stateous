@@ -73,6 +73,7 @@ def test_report_heartbeat_note_and_memory_use_the_contracts_paths_and_bodies() -
 
     outcome = Outcome(
         kind="waiting",
+        attempt=2,
         context={"note": "x"},
         schedules=(Schedule(event="remind", payload=None, after="10m"),),
     )
@@ -82,9 +83,9 @@ def test_report_heartbeat_note_and_memory_use_the_contracts_paths_and_bodies() -
         try:
             await api.report(7, outcome, supervisor="box-1")
             lost = await api.heartbeat("box-1", [7, 3])
-            await api.note(7, "half done")
-            await api.set_memory(7, "dev", "s-1")
-            await api.set_memory(7, "dev", None)
+            await api.note(7, "half done", attempt=2)
+            await api.set_memory(7, "dev", "s-1", attempt=2)
+            await api.set_memory(7, "dev", None, attempt=2)
             return lost
         finally:
             await api.aclose()
@@ -93,9 +94,9 @@ def test_report_heartbeat_note_and_memory_use_the_contracts_paths_and_bodies() -
     assert seen == [
         ("POST", "/tasks/7/report", {**outcome.to_json(), "supervisor": "box-1"}),
         ("POST", "/tasks/heartbeat", {"supervisor": "box-1", "tasks": [7, 3]}),
-        ("POST", "/tasks/7/note", {"text": "half done"}),
-        ("PUT", "/tasks/7/memory", {"key": "dev", "value": "s-1"}),
-        ("PUT", "/tasks/7/memory", {"key": "dev", "value": None}),
+        ("POST", "/tasks/7/note", {"text": "half done", "attempt": 2}),
+        ("PUT", "/tasks/7/memory", {"key": "dev", "value": "s-1", "attempt": 2}),
+        ("PUT", "/tasks/7/memory", {"key": "dev", "value": None, "attempt": 2}),
     ]
 
 
@@ -130,7 +131,7 @@ def test_an_unreachable_control_plane_is_tried_again_with_one_log_line_each_time
     async def scenario() -> None:
         api = api_with(handler, delays)
         try:
-            await api.note(7, "still here")
+            await api.note(7, "still here", attempt=1)
         finally:
             await api.aclose()
 
@@ -156,7 +157,7 @@ def test_the_backoff_grows_to_30_seconds_and_stays_there() -> None:
     async def scenario() -> None:
         api = api_with(handler, delays)
         try:
-            await api.note(1, "x")
+            await api.note(1, "x", attempt=1)
         finally:
             await api.aclose()
 
@@ -185,7 +186,7 @@ def test_a_refusal_is_not_tried_again(status: int, answer: Any, message: str) ->
     async def scenario() -> None:
         api = api_with(handler, delays)
         try:
-            await api.note(7, "x")
+            await api.note(7, "x", attempt=1)
         finally:
             await api.aclose()
 

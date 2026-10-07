@@ -56,6 +56,7 @@ def test_none_fields_are_left_out() -> None:
         Outcome("event", event="done"),
         Outcome("waiting", context={"pr": 88}),
         Outcome("failed", error="RuntimeError: boom"),
+        Outcome("event", event="done", attempt=2),
         Outcome(
             "waiting",
             schedules=(
@@ -71,6 +72,11 @@ def test_every_outcome_survives_the_trip(outcome: Outcome) -> None:
 
 def test_an_outcome_always_carries_its_context_and_schedules() -> None:
     assert Outcome("waiting").to_json() == {"kind": "waiting", "context": {}, "schedules": []}
+
+
+def test_an_outcome_carries_its_attempt_only_when_it_has_one() -> None:
+    assert Outcome("waiting", attempt=3).to_json()["attempt"] == 3
+    assert "attempt" not in Outcome("waiting").to_json()
 
 
 def test_a_minimal_outcome_is_read_with_defaults() -> None:
@@ -93,6 +99,9 @@ def test_a_minimal_outcome_is_read_with_defaults() -> None:
             "'soon' is not a duration",
         ),
         ({"kind": "waiting", "schedules": [{"event": 3, "after": "1h"}]}, "needs 'event'"),
+        ({"kind": "waiting", "attempt": "2"}, "an outcome needs 'attempt' as a whole number"),
+        ({"kind": "waiting", "attempt": True}, "an outcome needs 'attempt' as a whole number"),
+        ({"kind": "waiting", "attempt": 0}, "an outcome's 'attempt' is 1 or more"),
     ],
 )
 def test_a_malformed_outcome_is_refused_with_a_reason(data: Any, reason: str) -> None:

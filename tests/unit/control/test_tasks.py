@@ -431,3 +431,61 @@ def test_a_report_that_routing_refuses_after_the_decision_raises(
 
     with pytest.raises(RuntimeError, match="a refusal the decision did not foresee"):
         engine.report(grant.task, done(), supervisor="box-1")
+
+
+# ── attempts ─────────────────────────────────────────────────────────────
+
+
+def requeued(engine: Engine) -> TaskGrant:
+    """Attempt 1 of coding fails; attempt 2 is claimed. Returns the new grant."""
+    engine.start("T-1", TICKET)
+    first = claimed(engine)
+    engine.report(first.task, failed(), supervisor="box-1", attempt=1)
+    again = claimed(engine)
+    assert (again.task, again.attempt) == (first.task, 2)
+    return again
+
+
+def test_a_late_report_from_an_old_attempt_is_refused_and_does_not_move_the_token() -> None:
+    engine = new_engine()
+    grant = requeued(engine)
+
+    with pytest.raises(TaskNotHeld, match=r"attempt 2.*attempt 1"):
+        engine.report(grant.task, done(), supervisor="box-1", attempt=1)
+    with pytest.raises(TaskNotHeld, match=r"attempt 2.*attempt 1"):
+        engine.report(grant.task, Outcome(kind="event", event="done", attempt=1))
+
+    assert engine.get("T-1").state == "coding"
+    assert engine.report(grant.task, done(), supervisor="box-1", attempt=2).token.state == "testing"
+
+
+def test_the_attempt_in_the_outcome_is_checked_too() -> None:
+    engine = new_engine()
+    grant = requeued(engine)
+
+    outcome = Outcome(kind="event", event="done", attempt=2)
+
+    assert engine.report(grant.task, outcome, supervisor="box-1").token.state == "testing"
+
+
+def test_a_note_or_memory_from_an_old_attempt_is_refused() -> None:
+    engine = new_engine()
+    grant = requeued(engine)
+
+    with pytest.raises(TaskNotHeld, match=r"attempt 2.*attempt 1"):
+        engine.note(grant.task, "late", attempt=1)
+    with pytest.raises(TaskNotHeld, match=r"attempt 2.*attempt 1"):
+        engine.set_memory(grant.task, "dev", "s-1", attempt=1)
+
+    engine.note(grant.task, "now", attempt=2)
+    engine.set_memory(grant.task, "dev", "s-2", attempt=2)
+    assert memory_of(engine, "T-1", "coding") == {"dev": "s-2"}
+
+
+def test_a_report_without_an_attempt_is_taken_as_before() -> None:
+    engine = new_engine()
+    grant = requeued(engine)
+
+    engine.note(grant.task, "from outside")
+
+    assert engine.report(grant.task, done()).token.state == "testing"

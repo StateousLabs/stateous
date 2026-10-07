@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Collection
+from dataclasses import replace
 from types import ModuleType
 from typing import Any
 
@@ -42,6 +43,9 @@ class FakeApi:
         self.grants = list(grants)
         self.calls: list[tuple[Any, ...]] = []
         self.reports: dict[int, Outcome] = {}
+        """Each task's last report, without its attempt (see `attempts`)."""
+        self.attempts: list[tuple[str, int, int | None]] = []
+        """The attempt that each report, note and memory write named, in order."""
         self.lost: set[int] = set()
         self.refuse_reports = False
         self.refuse_notes = False
@@ -71,6 +75,8 @@ class FakeApi:
 
     async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
         self.calls.append(("report", task, outcome.kind))
+        self.attempts.append(("report", task, outcome.attempt))
+        outcome = replace(outcome, attempt=None)
         if self.refusals:
             raise self.refusals.pop(0)
         if self.refuse_reports:
@@ -81,13 +87,15 @@ class FakeApi:
         self.calls.append(("heartbeat", tuple(sorted(tasks))))
         return sorted(self.lost & set(tasks))
 
-    async def note(self, task: int, text: str) -> None:
+    async def note(self, task: int, text: str, *, attempt: int) -> None:
+        self.attempts.append(("note", task, attempt))
         await asyncio.sleep(self.note_delay)
         if self.refuse_notes:
             raise Refused(409, f"task {task} is not this supervisor's")
         self.calls.append(("note", task, text))
 
-    async def set_memory(self, task: int, key: str, value: Any) -> None:
+    async def set_memory(self, task: int, key: str, value: Any, *, attempt: int) -> None:
+        self.attempts.append(("memory", task, attempt))
         self.calls.append(("memory", task, key, value))
 
     def reported(self, task: int) -> bool:

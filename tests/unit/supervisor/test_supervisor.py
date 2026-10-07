@@ -183,6 +183,20 @@ def test_memory_writes_and_notes_are_sent_in_order_before_the_report(is_async: b
     ]
 
 
+def test_the_report_notes_and_memory_writes_carry_the_grants_attempt() -> None:
+    @on_state(CODING)
+    async def coding(ctx: Context[Any]) -> done:
+        ctx.memory["dev"] = "s-1"
+        ctx.note("one")
+        return done()
+
+    api = FakeApi(grant(1, "coding", attempt=3))
+
+    asyncio.run(run_until(make(api, coding), api.reported, 1))
+
+    assert api.attempts == [("memory", 1, 3), ("note", 1, 3), ("report", 1, 3)]
+
+
 def test_a_refused_note_is_logged_and_the_report_is_still_sent(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
