@@ -119,6 +119,19 @@ def test_a_refused_report_fails_the_task_at_once_with_the_refusal(refusal: Refus
     )
 
 
+def test_the_failure_report_after_a_refusal_carries_the_grants_attempt() -> None:
+    @on_state(CODING)
+    async def coding(ctx: Context[Any]) -> done:
+        return done()
+
+    api = FakeApi(grant(1, "coding", attempt=3))
+    api.refusals = [Refused(422, "the context changes break the schema: count: not an integer")]
+
+    asyncio.run(run_until(make(api, coding), api.reported, 1))
+
+    assert api.attempts == [("report", 1, 3), ("report", 1, 3)]
+
+
 def test_a_report_refused_because_the_task_is_gone_is_dropped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -170,6 +183,41 @@ def test_a_report_refused_because_the_task_is_not_held_is_dropped() -> None:
 
     assert asyncio.run(scenario()) == 0
     assert api.sends(1) == [("report", 1, "event")]
+
+
+class WrongAttemptApi(FakeApi):
+    """Refuses every report with 409: the task moved to a new attempt. The task is
+    not lost (another attempt, maybe this supervisor's, still holds it), so a
+    heartbeat would say it is still held. A failure report for the old attempt
+    would be refused the same way."""
+
+    async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
+        self.calls.append(("report", task, outcome.kind))
+        raise Refused(409, f"task {task} is at attempt 2, not attempt 1")
+
+
+def test_a_report_refused_because_the_task_moved_to_a_new_attempt_is_dropped() -> None:
+    """A late report of an old attempt is refused 409, naming the attempt. The
+    supervisor does not send a failure report for that old attempt: it would be
+    refused again, for the same reason."""
+
+    @on_state(CODING)
+    async def coding(ctx: Context[Any]) -> done:
+        return done()
+
+    api = WrongAttemptApi(grant(1, "coding", attempt=1))
+    supervisor = make(api, coding)
+
+    async def scenario() -> int:
+        running = asyncio.create_task(supervisor.run())
+        await until(api.called, "report", 1, "event")
+        await until(nothing_runs, supervisor)
+        supervisor.on_signal()
+        return await asyncio.wait_for(running, 5.0)
+
+    assert asyncio.run(scenario()) == 0
+    assert api.sends(1) == [("report", 1, "event")]
+    assert not any(call[0] == "heartbeat" for call in api.calls)
 
 
 def test_a_failure_report_that_is_refused_too_is_logged_and_dropped(

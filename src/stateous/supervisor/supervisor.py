@@ -446,13 +446,17 @@ class Supervisor:
         log.info("task %d of %s: reported %s", grant.task, grant.token, said)
 
     async def _still_held(self, grant: TaskGrant, refusal: Refused) -> bool:
-        """After a refused report: is the task still this supervisor's? 404: the task
-        is gone. 409: the task is not ours (TaskNotHeld), or the event is not
-        allowed. The answer has no code, so a heartbeat tells which."""
+        """After a refused report: is the task still this supervisor's, on this
+        attempt? 404: the task is gone. 409 that names the attempt: the task moved
+        to a new attempt, so this one is over, even if the task id is still this
+        supervisor's. 409 for another reason: the task is not ours, or the event is
+        not allowed. The answer has no code, so a heartbeat tells the rest."""
         if refusal.status == 404:
             return False
         if refusal.status != 409:
             return True
+        if _names_another_attempt(refusal.message):
+            return False
         try:
             return grant.task not in await self.api.heartbeat(self.name, [grant.task])
         except Exception:
@@ -480,6 +484,13 @@ class Supervisor:
             log.exception("task %d of %s: could not report", grant.task, grant.token)
             return
         log.info("task %d of %s: reported failed", grant.task, grant.token)
+
+
+def _names_another_attempt(message: str) -> bool:
+    """True for a 409 refusal that names the task's attempt (see `TaskNotHeld` in
+    `stateous.control.engine`): "task 7 is at attempt 2, not attempt 3". Other 409
+    refusals do not say "is at attempt"."""
+    return "is at attempt" in message
 
 
 def outcome_of(state: StateRef[Any], value: object, ctx: Context[Any]) -> Outcome:

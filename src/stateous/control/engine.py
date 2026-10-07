@@ -85,7 +85,8 @@ class InvalidPayload(EngineError, ValueError):
 
 
 class InvalidArgument(EngineError, ValueError):
-    """A supervisor name or a listing limit is out of its range."""
+    """A supervisor name or a listing limit is out of its range; or a report's
+    `attempt` argument and its outcome's `attempt` differ."""
 
 
 class InvalidTokenId(EngineError, ValueError):
@@ -488,10 +489,15 @@ class Engine:
         it. Without: from outside (CI, a person), for a claimed or waiting task, with
         an event or a failure. With `attempt` (or `outcome.attempt`): only for that
         attempt of the task, so a late report of an old attempt cannot land on a new
-        one."""
+        one. The two must agree when both are given."""
         if supervisor is not None:
             _check_supervisor(supervisor)
         _check_outcome(outcome)
+        if attempt is not None and outcome.attempt is not None and attempt != outcome.attempt:
+            raise InvalidArgument(
+                f"the attempt argument ({attempt}) and the outcome's attempt "
+                f"({outcome.attempt}) differ"
+            )
         attempt = outcome.attempt if attempt is None else attempt
         waiting = outcome.kind == "waiting"
         with self._transaction() as tx:
@@ -554,10 +560,7 @@ class Engine:
         if task is None:
             raise TaskNotFound(f"there is no task {task_id}")
         if attempt is not None and attempt != task.attempt:
-            raise TaskNotHeld(
-                f"task {task_id} is on attempt {task.attempt}; the request is for attempt "
-                f"{attempt}, which is over"
-            )
+            raise TaskNotHeld(f"task {task_id} is at attempt {task.attempt}, not attempt {attempt}")
         if task.status not in WORKED_ON:
             raise TaskNotHeld(f"task {task_id} is {task.status}; no one works on it now")
         if supervisor is not None and (task.status != "claimed" or task.claimed_by != supervisor):

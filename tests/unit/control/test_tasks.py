@@ -7,6 +7,7 @@ import pytest
 from stateous.control.engine import (
     Engine,
     EventNotAllowed,
+    InvalidArgument,
     InvalidContext,
     InvalidPayload,
     TaskNotFound,
@@ -489,3 +490,63 @@ def test_a_report_without_an_attempt_is_taken_as_before() -> None:
     engine.note(grant.task, "from outside")
 
     assert engine.report(grant.task, done()).token.state == "testing"
+
+
+def test_the_attempt_mismatch_message_is_neutral_about_direction() -> None:
+    """The request's attempt can be behind the task's, or ahead of it: the wording
+    must be true both ways, not "which is over" (true only when behind)."""
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+
+    with pytest.raises(TaskNotHeld, match=r"task \d+ is at attempt 1, not attempt 2"):
+        engine.report(grant.task, done(), supervisor="box-1", attempt=2)
+
+
+def test_a_report_refuses_when_the_attempt_argument_and_the_outcomes_attempt_differ() -> None:
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+    outcome = Outcome(kind="event", event="done", attempt=2)
+
+    with pytest.raises(InvalidArgument, match="attempt"):
+        engine.report(grant.task, outcome, supervisor="box-1", attempt=1)
+
+    assert engine.get("T-1").state == "coding"
+
+
+def test_a_report_whose_attempt_argument_matches_the_outcomes_attempt_is_accepted() -> None:
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+    outcome = Outcome(kind="event", event="done", attempt=1)
+
+    assert engine.report(grant.task, outcome, supervisor="box-1", attempt=1).token.state == (
+        "testing"
+    )
+
+
+def test_a_late_report_note_and_memory_after_the_lease_ended_are_refused_by_attempt() -> None:
+    """A lease that ends counts as a failed attempt and queues the task again (see
+    `_end_leases`). Attempt 1's late report, note and memory write are refused;
+    attempt 2's report is accepted."""
+    clock = Clock()
+    engine = new_engine(clock=clock)
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+    clock.advance(minutes=3)  # past the default 2-minute lease
+    engine.tick()
+    again = claimed(engine)
+    assert (again.task, again.attempt) == (grant.task, 2)
+
+    with pytest.raises(TaskNotHeld, match=r"attempt 2.*attempt 1"):
+        engine.report(grant.task, done(), supervisor="box-1", attempt=1)
+    with pytest.raises(TaskNotHeld, match=r"attempt 2.*attempt 1"):
+        engine.note(grant.task, "late", attempt=1)
+    with pytest.raises(TaskNotHeld, match=r"attempt 2.*attempt 1"):
+        engine.set_memory(grant.task, "dev", "s-1", attempt=1)
+
+    assert engine.get("T-1").state == "coding"
+    assert engine.report(again.task, done(), supervisor="box-1", attempt=2).token.state == (
+        "testing"
+    )
