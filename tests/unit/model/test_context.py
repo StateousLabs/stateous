@@ -102,15 +102,20 @@ def test_a_note_is_sent_at_once_without_surrounding_space() -> None:
     assert calls.notes == ["tests ran: 41 passed"]
 
 
-@pytest.mark.parametrize(
-    ("text", "reason"),
-    [("", "needs some text"), ("   ", "needs some text"), ("x" * 501, "at most 500 characters")],
-)
-def test_an_empty_or_long_note_is_refused(text: str, reason: str) -> None:
+@pytest.mark.parametrize("text", ["", "   "])
+def test_an_empty_note_does_nothing(text: str) -> None:
     calls = Calls()
 
-    with pytest.raises(ValueError, match=reason):
-        context(calls).note(text)
+    context(calls).note(text)
+
+    assert calls.notes == []
+
+
+def test_a_long_note_is_refused() -> None:
+    calls = Calls()
+
+    with pytest.raises(ValueError, match="at most 500 characters"):
+        context(calls).note("x" * 501)
     assert calls.notes == []
 
 

@@ -255,7 +255,7 @@ def test(ctx: TicketContext) -> events.passed | events.failed:
 | `ctx["key"]` | The token's context: its business data. A routine can write it: `ctx["key"] = value`. The change is saved with the outcome, or not at all. |
 | `ctx.get("key", default)` | The same as `ctx["key"]`, with a default value. `ctx["key"]` raises `KeyError` for a key that is not set. |
 | `ctx.memory` | The routine's own memory, for this token **and** this state. It is saved at once. It stays across crashes, retries and later visits to the state. It is deleted when the token ends. Guards cannot read it. |
-| `ctx.note(text)` | One line of progress in the token's history: 1 to 500 characters. It is sent at once. Empty text raises `ValueError`. |
+| `ctx.note(text)` | One line of progress in the token's history: up to 500 characters. It is sent at once. Empty text does nothing. |
 | `ctx.token` | The token's id. |
 | `ctx.task` | The task's id. |
 | `ctx.visit` | 1 the first time the token is in this state, 2 the next time, and so on. |
@@ -478,7 +478,7 @@ PHD needs a stack and credentials for each run. `phd.Stack.load("stacks/dev")` l
 
 `coding.py` needs a PHD release with these features. Its tests use a stand-in for PHD.
 
-`coding.py` gives each `event.summary` to `ctx.note(...)`. An empty summary makes `ctx.note` raise. Then the attempt fails.
+`coding.py` gives each `event.summary` to `ctx.note(...)`. An empty summary does nothing, so this works for every event.
 
 Until the release, use `start()`, and call `handle.cancel()` yourself:
 
@@ -766,7 +766,6 @@ Each `token` command also takes `--url`. An error prints one sentence to stderr,
 ### Known limits
 
 - `coding.py` needs PHD features that are not released yet. See "Agents, with PHD".
-- An empty `event.summary` from PHD makes `ctx.note` raise, and the attempt fails.
 - The supervisor cannot stop a `def` routine. It ignores the result of that routine.
 - A paused token never ends on its own. A lease continues while the token is paused.
 - `count('event')` counts the event over the whole life of the token, not for one visit.

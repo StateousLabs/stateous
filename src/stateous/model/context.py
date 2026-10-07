@@ -118,10 +118,11 @@ class Context(Generic[C]):
         return copy.deepcopy(self._values[key]) if key in self._values else default
 
     def note(self, text: str) -> None:
-        """One line of progress in the token's history, sent at once."""
+        """One line of progress in the token's history, sent at once. Empty text (after
+        stripping) does nothing: no record, no send, no error."""
         line = text.strip()
         if not line:
-            raise ValueError("a note needs some text")
+            return
         if len(line) > MAX_NOTE:
             raise ValueError(f"a note is at most {MAX_NOTE} characters; this one has {len(line)}")
         self._note(line)
