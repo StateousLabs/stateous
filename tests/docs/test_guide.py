@@ -263,11 +263,39 @@ def test_the_guide_says_which_phd_features_are_not_released() -> None:
         assert said in agents, said
 
 
-def test_the_nesting_section_states_what_the_pattern_does_not_do() -> None:
+def test_the_nesting_section_describes_parallel_states() -> None:
     nesting = section(read(GUIDE), "## Nested and parallel work")
 
-    assert "does not cancel the children" in nesting
-    assert "count(" in nesting and "once" in nesting
+    for said in (
+        "parallel=[",
+        'join="all"',
+        'join="any"',
+        "inputs=[",
+        "`joined`",
+        "branches.all(",
+        "branches.any(",
+        "`workflow`",
+        "`token`",
+        "`status`",
+        "`final`",
+        "`payload`",
+        "`<parent>.<state>.<visit>.<workflow>`",
+        "`<workflow>/<state>`",
+        "`states.design_review.triage`",
+        "409",
+        "`GET /tokens?parent=<id>`",
+        "otherwise=True",
+        "### Work done by tokens that you start yourself",
+    ):
+        assert said in nesting, said
+
+
+def test_the_guide_no_longer_says_that_the_engine_has_no_parallel_states() -> None:
+    guide = read(GUIDE)
+
+    assert "no nested or parallel states" not in guide
+    assert "The engine has no nested states" not in guide
+    assert "three events of its own: `timeout`, `error` and `joined`" in guide
 
 
 def test_sentences_are_short() -> None:

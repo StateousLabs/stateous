@@ -96,6 +96,7 @@ flow.transition(testing, END, on=failed, otherwise=True)
 |---|---|
 | `Workflow(name, context=Model)` | A workflow. `context` is optional. |
 | `flow.state(name, timeout=None, retries=0)` | A state. After `timeout`, the token gets the event `timeout`. A failed task is tried again `retries` times. Then the token gets the event `error`. |
+| `flow.state(name, parallel=[wf, ...], join="all", inputs=[keys], timeout=None)` | A parallel state: its work is one child token for each workflow. See "Nested and parallel work". |
 | `flow.event(name, payload=Model)` | An event. `payload` is optional. |
 | `flow.transition(source, target, on=event, when=None, otherwise=False)` | Where an event goes. `START` and `END` begin and end every token. |
 
@@ -104,7 +105,7 @@ Rules:
 - A transition from `START` has no `on=`.
 - A name of a state or an event has lower-case letters, digits, `_` and `-`. It starts with a letter and has 64 characters or fewer.
 - A duration is a whole number and one unit: `30s`, `10m`, `6h` or `2d`. The longest is `3650d`.
-- Stateous has two events of its own: `timeout` and `error`. Use them by name, for example `on="timeout"`. You cannot declare them, and you cannot fire them.
+- Stateous has three events of its own: `timeout`, `error` and `joined`. Use them by name, for example `on="timeout"`. You cannot declare them, and you cannot fire them.
 - If no transition takes `timeout` or `error`, the token fails.
 
 ### Guards
@@ -337,6 +338,8 @@ stateous token cancel TICKET-1
 Each `token` command takes `--url`. The default is the environment variable `STATEOUS_URL`, else `http://127.0.0.1:8080`.
 
 `start` with the id of a token that exists shows that token. It does not start a second token. `fire` takes an optional payload, as a JSON object after the event's name.
+
+`show` with the id of a parent also lists its children, below the token's line.
 
 `show` with an id shows the token and its history. The times are local:
 
@@ -590,81 +593,70 @@ Only an active token can be paused, and only a paused token can be resumed. `can
 
 ## Nested and parallel work
 
-The engine has no nested states and no parallel states. But the work of a state can be other workflows. Use this pattern:
-
-1. The routine of `reviews` starts child tokens with the client. Then it returns `None`.
-2. Each child is a token of a review workflow, on its own control plane. In its last state, the child fires its verdict on the parent.
-3. The parent joins with a guard.
+The work of a state can be other workflows that run at the same time. Such a state is a parallel state.
 
 ```python
-# The parent's workflow (part): the join
-reviews = flow.state("reviews")
-approved = flow.event("approved")
-rejected = flow.event("rejected")
+# The parent's workflow (part): two reviews at the same time
+security = Workflow("security-review", context=Review)  # its own states, events, transitions
+design = Workflow("design-review", context=Review)
 
+reviews = flow.state("reviews", parallel=[security, design], join="all", inputs=["repo", "branch"])
 flow.transition(coding, reviews, on=done)
-flow.transition(reviews, testing, on=approved, when="count('approved') >= 2")
-flow.transition(reviews, reviews, on=approved, otherwise=True)  # the first approval: wait
-flow.transition(reviews, coding, on=rejected)
+flow.transition(
+    reviews,
+    merging,
+    on="joined",
+    when="branches.all(status == 'completed' and final == 'approved')",
+)
+flow.transition(reviews, coding, on="joined", otherwise=True)
 ```
 
-The first approval goes from `reviews` back to `reviews`. That transition enters the state again, so the control plane makes a new task, and the routine runs again. The routine must not start the children a second time. So it keeps a mark in `ctx.memory`, which stays across visits to the state:
+| Argument | What it does |
+|---|---|
+| `parallel=[wf, ...]` | One child token for each workflow. The state has no routine and no task. |
+| `join="all"` | Wait until each child has ended. This is the default. |
+| `join="any"` | Continue when the first child ends. The control plane cancels the other children. |
+| `inputs=[keys]` | The keys of the parent's context that each child gets as its starting context. `compile` makes sure that they give each required field of the child's context model. |
 
-```python
-# The parent's routine: start the reviews once, then wait
-from stateous import Client, on_state
+A parallel state can have `timeout`. It cannot have `retries`. Declare the child workflows in `flow.py` too. `compile` uses the workflow that no parallel state runs.
 
-from contract import TicketContext, states
+### The join
 
-REVIEWS = "http://reviews.internal:8080"  # the review workflow's control plane
+When the join is met, the control plane fires the event `joined` on the parent. Its payload is `{"branches": [...]}`. The list has one entry for each child that ended:
 
+- `workflow`: the child's workflow;
+- `token`: the child's id;
+- `status`: `completed` or `failed`;
+- `final`: the state that the child was in when it ended;
+- `payload`: the payload of the event that brought the child into that state.
 
-@on_state(states.reviews)
-def reviews(ctx: TicketContext) -> None:
-    if "children" in ctx.memory:
-        return None  # an approval brought the token back: wait for the next verdict
-    with Client(REVIEWS) as client:
-        for kind in ("security", "design"):
-            client.start(f"{ctx.token}-{kind}", {"parent": ctx.token, "kind": kind})
-    ctx.memory["children"] = ["security", "design"]
-    return None  # the children report later
-```
+A guard on `joined` can use `branches.all(...)` and `branches.any(...)`. In the parentheses, use `workflow`, `token`, `status`, `final` and `payload.field`. The guard can also use `ctx` and `count`.
 
-```python
-# The child's routine, in the review workflow's supervisor folder
-from stateous import Client, on_state
-from stateous.client import Refused
+`compile` cannot prove that two guards with `branches` never overlap. So give the guard to one transition, and make the other transition the fallback with `otherwise=True`.
 
-from contract import ReviewContext, events, states
+If no transition takes `joined`, the parent fails.
 
-PARENT = "http://cp.internal:8080"  # the parent's control plane
+### Child tokens
 
+When the parent enters the state, the control plane starts the children in the same transaction. A child's id is `<parent>.<state>.<visit>.<workflow>`, for example `TICKET-1.reviews.1.design-review`.
 
-@on_state(states.verdict)
-def verdict(ctx: ReviewContext) -> events.sent:
-    name = "approved" if ctx["findings"] == 0 else "rejected"
-    try:
-        with Client(PARENT) as parent:
-            parent.fire(ctx["parent"], name, key=f"{ctx.token}-verdict")
-    except Refused as error:
-        if error.status != 409:
-            raise  # no such parent, or a bad event: the attempt fails
-        # 409: the parent left `reviews` already: it needs no more verdicts
-    return events.sent()
-```
+A child is a normal token. It has tasks, timers, memory and history. Supervisors claim its tasks as they claim other tasks.
 
-`client.start` with an id that exists returns that token. So if the parent's routine crashes before it writes the mark, the retry starts no second child.
+A claim names a child's state as `<workflow>/<state>`, for example `design-review/triage`. In `contract.py`, this state is `states.design_review.triage`. Its events are in `events.design_review`. `stateous init` writes a stub for each state of each workflow, in a file such as `design_review_triage.py`. A parallel state has no stub.
 
-The key `f"{ctx.token}-verdict"` makes the verdict apply one time, also when the child's routine runs again.
+When a child ends, the control plane checks the join in the same transaction. The parent can leave the state on `joined`, on `timeout` or on an event that you fire. When the parent leaves the state, or when you cancel it, the control plane cancels each child that has not ended.
 
-States, events, guards with counts, and tokens that start other tokens give sequences, branches, loops, retries, fan-out and joins.
+### Steer the parent
 
-The pattern has limits:
+`pause` and `resume` on the parent also pause and resume its children. You cannot pause, resume or cancel a child alone: the answer is 409, because a child is a part of its parent's work.
 
-- Cancelling the parent does not cancel the children.
-- You write the join by hand.
-- `count('approved')` counts all approvals of the token. So this join is correct only when the token enters `reviews` from `coding` once.
-- For the same reason, the mark in `ctx.memory` stays when the token comes back from `coding`. The routine then starts no new children.
+`GET /tokens/{id}` shows a child's `parent`. `GET /tokens?parent=<id>` lists the children. `stateous token show` with the parent's id shows them below the parent.
+
+A child workflow can have parallel states too. `compile` makes sure that a top token id of 64 characters fits below each nesting. If a child's id is longer than 128 characters, the control plane refuses the event that enters the state.
+
+### Work done by tokens that you start yourself
+
+You can also start tokens yourself. A routine starts them with the client, and returns `None`. Each child then reports to the parent with `fire`. You write the join yourself, with guards and `count('event')`.
 
 ## Try it on one computer
 
@@ -721,14 +713,14 @@ The API has no prefix. Bodies are JSON. An error is `{"error": "<one sentence>"}
 | Method and path | What it does |
 |---|---|
 | `POST /tokens` | Start a token. Body: `{"token", "context"}`. If the token exists, you get it back (200, else 201). |
-| `GET /tokens` | List the tokens. Query: `status`, `limit` (1 to 1000, default 100). |
-| `GET /tokens/{id}` | One token: `{"token", "state", "status", "visit", "context", "entered_at"}`. |
+| `GET /tokens` | List the tokens. Query: `status`, `parent` (only the children of this token), `limit` (1 to 1000, default 100). |
+| `GET /tokens/{id}` | One token: `{"token", "state", "status", "visit", "context", "entered_at"}`. A child also has `"parent"`. |
 | `GET /tokens/{id}/history` | The token's history: `[{"seq", "at", "kind", "data"}]`. |
 | `POST /tokens/{id}/events/{event}` | Fire an event. Body: `{"payload"}`, optional. Header `Idempotency-Key`, optional. A second delivery with the same key gets `{"duplicate": true, "token": …}`. |
 | `POST /tokens/{id}/pause` | Pause the token. |
 | `POST /tokens/{id}/resume` | Resume the token. |
 | `POST /tokens/{id}/cancel` | Cancel the token. |
-| `POST /tasks/claim` | A supervisor takes a task of the states that it serves. Body: `{"supervisor", "states", "request"}`; `request` is optional. 204 if there is no task. |
+| `POST /tasks/claim` | A supervisor takes a task of the states that it serves. Body: `{"supervisor", "states", "request"}`; `request` is optional. A state of a child workflow is `<workflow>/<state>`. 204 if there is no task. |
 | `POST /tasks/{id}/report` | The outcome of a task. Body: `{"kind", "event", "payload", "error", "context", "schedules", "attempt"}`; `kind` is `event`, `waiting` or `failed`. An event that the state does not allow is refused. |
 | `POST /tasks/heartbeat` | The supervisor's tasks are still alive, in one call. Body: `{"supervisor", "tasks"}`. The answer `{"lost"}` names the lost tasks. |
 | `POST /tasks/{id}/note` | A line of progress. Body: `{"text", "attempt"}`. |
@@ -754,7 +746,7 @@ Stateous has five commands.
 | `stateous supervise FOLDER` | The supervisor. |
 | `stateous token start ID [CONTEXT_JSON]` | Start a token. |
 | `stateous token fire ID EVENT [PAYLOAD_JSON] [--key K]` | Fire an event, with an optional idempotency key. |
-| `stateous token show [ID] [--graph]` | Show a token. With no id, list the tokens. `--graph` draws the workflow. |
+| `stateous token show [ID] [--graph]` | Show a token, its children and its history. With no id, list the tokens. `--graph` draws the workflow. |
 | `stateous token pause ID` | Pause a token. |
 | `stateous token resume ID` | Resume a token. |
 | `stateous token cancel ID` | Cancel a token. |
@@ -764,7 +756,6 @@ Each `token` command also takes `--url`. An error prints one sentence to stderr,
 ## What Stateous does not do
 
 - It has no authentication, no tenants and no keys. Add them around Stateous with a proxy, a VPN, or one control plane for each customer.
-- It has no nested or parallel states in the engine. Use the pattern in "Nested and parallel work".
 - It serves one workflow structure for each database. It has no versions side by side.
 - It does not launch agents. A routine launches them with PHD.
 
@@ -775,3 +766,4 @@ Each `token` command also takes `--url`. An error prints one sentence to stderr,
 - A paused token never ends on its own. A lease continues while the token is paused.
 - `count('event')` counts the event over the whole life of the token, not for one visit.
 - In a context or payload model, a field with `default_factory` can be required in `contract.py`. This occurs when the field's type is a model or a union.
+- `compile` cannot prove that two guards with `branches.all` or `branches.any` never overlap. Use one such guard and `otherwise=True`.
