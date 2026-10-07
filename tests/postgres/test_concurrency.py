@@ -4,11 +4,13 @@ SQLite takes one transaction at a time, so these can only fail on Postgres.
 """
 
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import suppress
 from typing import Any
 
 import pytest
+from sqlalchemy import text
 
 from stateous.control.engine import Engine, InvalidTokenId, TaskNotHeld, Token, child_id
 from stateous.control.graph import Graph
@@ -203,3 +205,58 @@ def test_a_childs_event_and_its_parents_pause_at_once_take_turns() -> None:
         assert (engine.get("T-1").status, engine.get(security).status) == ("paused", "paused")
     finally:
         store.close()
+
+
+def test_a_cascade_that_the_database_stops_for_a_deadlock_runs_once_more(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A heartbeat locks task rows in the order of their ids. A cancel locks the tasks
+    of the children in the order of the workflows: here, the other order. A second
+    connection plays the heartbeat, one row at a time, so the two meet in a circle."""
+    engine, store = parallel_engine()
+    try:
+        engine.start("T-1", TICKET)
+        engine.fire("T-1", "done", None)
+        security = child_id("T-1", "reviews", 1, "security")
+        engine.fire(security, "lgtm", None)  # a new task, with a larger id
+        late = engine.claim("box", ["security/approved"])
+        early = engine.claim("box", ["design/triage"])
+        assert late is not None and early is not None and early.task < late.task
+        results: list[Any] = []
+
+        def cancel() -> None:
+            try:
+                results.append(engine.cancel("T-1"))
+            except Exception as error:
+                results.append(error)
+
+        with store.engine.connect() as heartbeat:
+            renew = text("UPDATE tasks SET lease_until = lease_until WHERE id = :id")
+            heartbeat.execute(renew, {"id": early.task})
+            thread = threading.Thread(target=cancel)
+            thread.start()
+            waiting(store, until=1)  # the cancel holds the late task, waits for the early one
+            heartbeat.execute(renew, {"id": late.task})  # Postgres stops the cancel
+            heartbeat.commit()
+        thread.join(timeout=30)
+
+        assert [type(r).__name__ for r in results] == ["Token"]
+        assert engine.get("T-1").status == "cancelled"
+        assert [r.getMessage() for r in caplog.records if r.name == "stateous.engine"] == [
+            "the database stopped cancel for a deadlock; trying once more"
+        ]
+    finally:
+        store.close()
+
+
+def waiting(store: Store, *, until: int) -> None:
+    """Wait (at most 10 s) until `until` sessions of the store's database wait for a lock."""
+    query = text(
+        "SELECT count(*) FROM pg_stat_activity "
+        "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+    )
+    deadline = time.monotonic() + 10
+    with store.engine.connect() as watcher:
+        while (watcher.scalar(query) or 0) < until:
+            assert time.monotonic() < deadline, "the cancel never waited for the lock"
+            time.sleep(0.02)

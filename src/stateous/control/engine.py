@@ -1,7 +1,8 @@
 """The engine: tokens, events and tasks of one compiled workflow.
 
 Each public call is one transaction. The ledger entries and the rows they explain
-(the token, its tasks, its timers, its memory) commit together, or not at all.
+(the token, its tasks, its timers, its memory) commit together, or not at all. When
+Postgres stops a call for a deadlock, the call runs once more (`_retried`).
 
 How a call ends:
 - A malformed request raises and records nothing: an unknown token or task, or a
@@ -23,13 +24,17 @@ A child has the lock of its top token, so a parent and its children change toget
 
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import re
 from collections.abc import Callable, Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, cast
+from typing import Any, Literal, ParamSpec, TypeVar, cast
+
+from sqlalchemy.exc import DBAPIError
 
 from stateous.control.graph import (
     END,
@@ -47,6 +52,8 @@ from stateous.model.durations import duration_problem, parse_duration
 from stateous.model.guards import GuardInput, evaluate
 from stateous.model.wire import EventRecord, Outcome, Schedule, TaskGrant
 from stateous.model.workflow import MAX_TOKEN_ID
+
+log = logging.getLogger("stateous.engine")
 
 DEFAULT_LEASE = timedelta(minutes=2)
 """How long a claimed task stays with its supervisor without a heartbeat."""
@@ -66,10 +73,34 @@ MOST_TOKENS = 1000
 """The most tokens that one listing returns."""
 WORKED_ON = ("claimed", "waiting")
 """A task in one of these statuses is still worked on: by its supervisor, or outside."""
+TRY_AGAIN = frozenset({"40P01", "40001"})
+"""The SQLSTATEs of a deadlock and of a serialization failure. Postgres stops one
+transaction of a deadlock; a public call that it stops runs once more."""
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _retried(call: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Run a public call once more when the database stops it for a deadlock or a
+    serialization failure. Its transaction rolled back, so nothing is applied twice.
+    Any other error, and a second deadlock, go to the caller."""
+
+    @functools.wraps(call)
+    def once_more(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        try:
+            return call(*args, **kwargs)
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) not in TRY_AGAIN:
+                raise
+            log.warning("the database stopped %s for a deadlock; trying once more", call.__name__)
+        return call(*args, **kwargs)
+
+    return once_more
 
 
 class EngineError(Exception):
@@ -189,6 +220,7 @@ class Engine:
 
     # ── tokens ──────────────────────────────────────────────────────────
 
+    @_retried
     def start(self, token: str, context: dict[str, Any]) -> Token:
         """Start a token: it leaves START for the state its context leads to. To
         start a token that exists returns it, unchanged."""
@@ -207,10 +239,12 @@ class Engine:
                 row = self._create(tx, token, context, self.graph)
             return _token(row)
 
+    @_retried
     def get(self, token: str) -> Token:
         with self._transaction() as tx:
             return _token(self._existing(tx, token))
 
+    @_retried
     def tokens(
         self, *, status: str | None = None, limit: int = 100, parent: str | None = None
     ) -> list[Token]:
@@ -220,6 +254,7 @@ class Engine:
         with self._transaction() as tx:
             return [_token(row) for row in tx.find_tokens(status, limit, parent=parent)]
 
+    @_retried
     def history(self, token: str) -> list[Entry]:
         with self._transaction() as tx:
             self._existing(tx, token)
@@ -227,6 +262,7 @@ class Engine:
 
     # ── steering ────────────────────────────────────────────────────────
 
+    @_retried
     def pause(self, token: str) -> Token:
         """Stop a token: it does not move, its queued task is not handed out, its
         timers stand still. Events that arrive meanwhile are held, not lost. Its
@@ -248,6 +284,7 @@ class Engine:
             if child.status == "active":
                 self._pause(tx, child)
 
+    @_retried
     def resume(self, token: str) -> Token:
         """Let a paused token move again, and its children too. Their timers get the
         paused time back. Then the events that the token and its children held apply
@@ -305,6 +342,7 @@ class Engine:
             f"work, and cannot be {done} on its own; {verb} {top.token!r} instead"
         )
 
+    @_retried
     def cancel(self, token: str) -> Token:
         """Stop a token for good: its tasks and timers are cancelled, its children too,
         its memory is deleted, and anything it held is dropped."""
@@ -362,6 +400,7 @@ class Engine:
 
     # ── the graph on record, for serve ──────────────────────────────────
 
+    @_retried
     def recorded_graph(self) -> RecordedGraph | None:
         """The structure and checksum on record; None for a new database."""
         with self._transaction() as tx:
@@ -370,11 +409,13 @@ class Engine:
                 return None
             return RecordedGraph(row.structure, row.checksum)
 
+    @_retried
     def live_tokens(self) -> int:
         """How many tokens are active or paused."""
         with self._transaction() as tx:
             return tx.count_live()
 
+    @_retried
     def record_graph(self) -> None:
         """Put this engine's graph on record."""
         with self._transaction() as tx:
@@ -383,6 +424,7 @@ class Engine:
 
     # ── events ──────────────────────────────────────────────────────────
 
+    @_retried
     def fire(
         self, token: str, event: str, payload: dict[str, Any] | None, *, key: str | None = None
     ) -> Fired:
@@ -556,6 +598,7 @@ class Engine:
 
     # ── tasks: the control plane's side of the supervisor ───────────────
 
+    @_retried
     def claim(
         self, supervisor: str, states: Collection[str], *, request: str | None = None
     ) -> TaskGrant | None:
@@ -606,6 +649,7 @@ class Engine:
         task.lease_until = tx.now + self.lease
         return self._grant(tx, task)
 
+    @_retried
     def report(
         self,
         task: int,
@@ -635,6 +679,7 @@ class Engine:
             result = self._report(tx, row, held, outcome)
         return _settled(result)
 
+    @_retried
     def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
         """Renew the leases of the tasks that `supervisor` still holds. Returns the
         others, sorted: the token left the state, was cancelled, or the lease ended.
@@ -644,6 +689,7 @@ class Engine:
             renewed = tx.renew_leases(supervisor, tasks, tx.now + self.lease)
         return sorted(set(tasks) - renewed)
 
+    @_retried
     def note(self, task: int, text: str, *, attempt: int | None = None) -> None:
         """One line of progress in the token's history. With `attempt`: only for that
         attempt of the task."""
@@ -654,6 +700,7 @@ class Engine:
             held = self._worked_task(tx, task, None, waiting=False, attempt=attempt)
             tx.append(held.token, "note", task=held.id, text=line)
 
+    @_retried
     def set_memory(self, task: int, key: str, value: Any, *, attempt: int | None = None) -> None:
         """Save one key of the routine memory of the task's token and state, at once.
         `None` deletes the key. The history records the key, never the value. With
@@ -826,6 +873,7 @@ class Engine:
 
     # ── time ────────────────────────────────────────────────────────────
 
+    @_retried
     def tick(self) -> int:
         """What the clock does: end the leases of tasks whose supervisors stopped
         answering, then fire each timer that is due (a timeout is one). Each in its

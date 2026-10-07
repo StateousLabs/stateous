@@ -267,6 +267,11 @@ class Transaction:
     takes that lock only before any token lock, and no transaction that holds a token
     lock waits for that row. So this order is safe too. SQLite takes one writer at a
     time and needs no locks.
+
+    A heartbeat changes task rows without a token lock, in the order of their ids. A
+    change to a family can change the tasks of several children in another order.
+    Then Postgres finds a deadlock and stops one transaction. The engine runs a
+    stopped call once more.
     """
 
     def __init__(self, session: Session, now: datetime) -> None:
