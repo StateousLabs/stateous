@@ -6,7 +6,9 @@ import pytest
 from pydantic import BaseModel
 
 from stateous import END, START, Workflow
-from stateous.model.workflow import DefinitionError
+from stateous.model.workflow import JOINED, RESERVED_EVENTS, DefinitionError
+
+from ...parallel import ALL_APPROVED, parallel_workflow, review
 
 
 class Report(BaseModel):
@@ -100,7 +102,7 @@ def test_an_event_is_declared_once_with_its_payload() -> None:
         flow.event("failed")
 
 
-@pytest.mark.parametrize("name", ["timeout", "error", "__started__"])
+@pytest.mark.parametrize("name", ["timeout", "error", "joined", "__started__"])
 def test_stateous_own_events_are_never_declared(name: str) -> None:
     with pytest.raises(DefinitionError, match=f"event {name!r} is Stateous's own"):
         Workflow("sdlc").event(name)
@@ -310,3 +312,98 @@ def test_two_unguarded_ways_out_of_start_are_ambiguous() -> None:
 
     with pytest.raises(DefinitionError, match="START is ambiguous: two transitions"):
         flow.transition(START, b)
+
+
+# ── parallel states (design section 8) ────────────────────────────────────
+
+
+def test_a_parallel_state_runs_child_workflows_and_joins() -> None:
+    security, design = review("security"), review("design")
+    flow = Workflow("sdlc")
+
+    reviews = flow.state("reviews", parallel=[security, design], join="any", inputs=["repo"])
+
+    assert reviews.parallel == (security, design)
+    assert (reviews.join, reviews.inputs) == ("any", ("repo",))
+    assert flow.state("coding").parallel == ()
+
+
+def test_joined_is_stateous_own_event() -> None:
+    assert JOINED == "joined"
+    assert JOINED in RESERVED_EVENTS
+
+
+def test_a_join_is_all_or_any() -> None:
+    with pytest.raises(DefinitionError, match="join must be 'all' or 'any', not 'most'"):
+        Workflow("sdlc").state("reviews", parallel=[review("a")], join="most")
+
+
+def test_a_parallel_state_has_no_retries() -> None:
+    with pytest.raises(DefinitionError, match="a parallel state has no task, so it has no retries"):
+        Workflow("sdlc").state("reviews", parallel=[review("a")], retries=1)
+
+
+def test_a_parallel_state_runs_each_workflow_once() -> None:
+    twice = review("a")
+
+    with pytest.raises(DefinitionError, match="runs the workflow 'a' two times"):
+        Workflow("sdlc").state("reviews", parallel=[twice, review("a")])
+
+
+def test_a_workflow_cannot_run_itself() -> None:
+    flow = Workflow("sdlc")
+
+    with pytest.raises(DefinitionError, match="a workflow cannot run itself"):
+        flow.state("reviews", parallel=[flow])
+
+
+@pytest.mark.parametrize("given", [review("a"), ["a"]])
+def test_parallel_takes_a_list_of_workflows(given: object) -> None:
+    with pytest.raises(DefinitionError, match="parallel takes a list of workflows"):
+        Workflow("sdlc").state("reviews", parallel=given)  # pyright: ignore[reportArgumentType]
+
+
+@pytest.mark.parametrize(("join", "inputs"), [("any", ()), ("all", ("repo",))])
+def test_join_and_inputs_need_parallel(join: str, inputs: tuple[str, ...]) -> None:
+    with pytest.raises(DefinitionError, match="join and inputs are for a parallel state"):
+        Workflow("sdlc").state("coding", join=join, inputs=inputs)
+
+
+def test_inputs_is_a_list_of_context_keys() -> None:
+    with pytest.raises(DefinitionError, match=r"inputs is a list of context keys, e\.g\."):
+        Workflow("sdlc").state("reviews", parallel=[review("a")], inputs="repo")
+
+
+def test_only_a_parallel_state_is_left_on_joined() -> None:
+    flow = Workflow("sdlc")
+    coding = flow.state("coding")
+
+    with pytest.raises(DefinitionError, match="only a parallel state is left on 'joined'"):
+        flow.transition(coding, END, on="joined")
+
+
+def test_a_parallel_state_is_left_on_joined_with_a_guard_on_its_children() -> None:
+    flow = parallel_workflow()
+
+    joins = [edge for edge in flow.transitions if edge.event.name == JOINED]
+
+    assert [edge.target.name for edge in joins] == ["merging", "coding"]
+    assert joins[0].when is not None and joins[0].when.branches
+    assert joins[0].when.expression == ALL_APPROVED
+
+
+def test_branches_are_read_only_on_joined() -> None:
+    flow = Workflow("sdlc")
+    coding = flow.state("coding")
+    done = flow.event("done")
+
+    with pytest.raises(DefinitionError, match=r"branches.all\(\) and branches.any\(\) are for"):
+        flow.transition(coding, END, on=done, when="branches.all(final == 'x')")
+
+
+def test_a_guard_on_joined_reads_no_payload_field_outside_branches() -> None:
+    flow = Workflow("sdlc")
+    reviews = flow.state("reviews", parallel=[review("a")])
+
+    with pytest.raises(DefinitionError, match="'joined' payload has no field 'count'"):
+        flow.transition(reviews, END, on="joined", when="payload.count > 1")

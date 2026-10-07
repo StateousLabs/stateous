@@ -5,6 +5,9 @@ its sibling `schemas.py`. The modules it imports are forgotten afterwards, so tw
 projects with a `flow.py` each can be compiled in one process. Before that, each
 model in them is completed: a model that names a model defined later in its file
 (`from __future__ import annotations`) needs its module to resolve the name.
+The file holds one workflow, and maybe the child workflows that its parallel
+states run. It is an error when it holds zero workflows, or two that no parallel
+state runs.
 
 No bytecode is written: a cached `.pyc` can outlive an edit made in the same
 second.
@@ -23,15 +26,17 @@ from stateous.model.workflow import DefinitionError, Workflow
 
 
 class LoadError(ValueError):
-    """A `flow.py` cannot be loaded, or does not hold exactly one workflow."""
+    """A `flow.py` cannot be loaded, or does not hold one workflow that no parallel
+    state runs."""
 
 
 def load_workflow(path: Path) -> Workflow:
-    """The one `Workflow` at module level in the file at `path`.
+    """The one `Workflow` at module level in the file at `path` that no parallel
+    state runs.
 
     Raises:
-        LoadError: The file is missing, does not import, or holds zero or two
-            workflows.
+        LoadError: The file is missing, does not import, or holds zero workflows,
+            or two that no parallel state runs.
         DefinitionError: The file makes a mistake while it declares the workflow.
     """
     file = path.resolve()
@@ -55,10 +60,14 @@ def load_workflow(path: Path) -> Workflow:
     found = list({id(flow): flow for flow in workflows}.values())  # one object, one workflow
     if not found:
         raise LoadError(f"{path} defines no Workflow at module level")
-    if len(found) > 1:
-        names = ", ".join(repr(flow.name) for flow in found)
-        raise LoadError(f"{path} defines {len(found)} workflows ({names}); keep one per file")
-    return found[0]
+    # The child workflows of parallel states are at module level too (design section 8).
+    # The workflow that no parallel state runs is the one to compile.
+    run = {id(child) for flow in found for s in flow.states.values() for child in s.parallel}
+    tops = [flow for flow in found if id(flow) not in run] or found
+    if len(tops) > 1:
+        names = ", ".join(repr(flow.name) for flow in tops)
+        raise LoadError(f"{path} defines {len(tops)} workflows ({names}); keep one per file")
+    return tops[0]
 
 
 def _complete_models(modules: list[ModuleType]) -> None:

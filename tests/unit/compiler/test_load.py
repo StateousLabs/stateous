@@ -103,3 +103,36 @@ def test_a_definition_error_stays_a_definition_error(tmp_path: Path) -> None:
 
     with pytest.raises(DefinitionError, match="event 'timeout' is Stateous's own"):
         load_workflow(project(tmp_path, flow=flow))
+
+
+FAMILY = """\
+from schemas import Ticket
+
+from stateous import END, START, Workflow
+
+review = Workflow("review", context=Ticket)
+waiting = review.state("waiting")
+review.transition(START, waiting)
+review.transition(waiting, END, on=review.event("lgtm"))
+
+flow = Workflow("sdlc", context=Ticket)
+reviews = flow.state("reviews", parallel=[review], inputs=["repo"])
+flow.transition(START, reviews)
+flow.transition(reviews, END, on="joined")
+"""
+
+
+def test_the_workflow_that_no_parallel_state_runs_is_the_one(tmp_path: Path) -> None:
+    flow = load_workflow(project(tmp_path, flow=FAMILY))
+
+    assert flow.name == "sdlc"
+    assert [child.name for child in flow.states["reviews"].parallel] == ["review"]
+
+
+def test_two_top_workflows_beside_a_child_are_refused(tmp_path: Path) -> None:
+    flow = FAMILY + "\nother = Workflow('other')\n"
+
+    with pytest.raises(
+        LoadError, match=r"defines 2 workflows \('sdlc', 'other'\); keep one per file"
+    ):
+        load_workflow(project(tmp_path, flow=flow))
