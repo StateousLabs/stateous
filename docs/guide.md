@@ -581,7 +581,8 @@ The history shows `done held while paused`, then `resumed` and `done applied on 
 
 - It never moves or ends on its own. Its timers and its timeout stop. On resume, they get the paused time back.
 - No supervisor takes its queued tasks.
-- A routine that runs already continues, and its lease continues too. The control plane holds its outcome: the event, the context changes and the timers. The token does not change until the resume.
+- A routine that runs already continues, and its lease continues too. When the routine returns an event, the control plane holds all of the outcome until the resume: the event, the context changes and the timers.
+- When the routine returns `None`, the task waits. The control plane saves its context changes and its timers at once. This outcome has no event, so the resume cannot drop it.
 - On resume, a held outcome that still fits applies its context changes and timers, and then moves the token. A timer counts from the resume. The control plane drops a held outcome if the token left that state meanwhile, and applies none of its changes. The history records `dropped on resume`.
 - A task that fails while the token is paused holds the event `error` until the resume.
 
