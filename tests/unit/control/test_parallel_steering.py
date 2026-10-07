@@ -74,7 +74,7 @@ def test_cancelling_the_parent_cancels_its_children_and_their_tasks() -> None:
     assert statuses(engine, TOP, SECURITY, DESIGN) == ["cancelled"] * 3
     assert engine.heartbeat("box", [grant.task]) == [grant.task]  # the supervisor stops it
     cancelled = next(e for e in engine.history(SECURITY) if e.kind == "cancelled")
-    assert cancelled.data == {"reason": "the parent left 'reviews'"}
+    assert cancelled.data == {"reason": "the parent was cancelled"}
     assert next(e for e in engine.history(TOP) if e.kind == "cancelled").data == {}
     accepted = [e.data["event"] for e in engine.history(TOP) if e.kind == "event_accepted"]
     assert "joined" not in accepted  # cancelled children make no join
@@ -174,3 +174,102 @@ def test_resuming_the_parent_gives_its_childrens_timers_the_paused_time() -> Non
     engine.tick()
     assert "timer_fired" in kinds(engine, SECURITY)
     assert engine.get(SECURITY).state == "approved"
+
+
+# ── resume applies the family's held events in the order they arrived ─────
+
+
+def test_resume_applies_the_childrens_held_events_in_the_order_they_arrived() -> None:
+    engine = Engine(Store("sqlite://"), Graph(parallel_document("any")), clock=Clock())
+    engine.start(TOP, {"repo": "acme/api"})
+    engine.fire(TOP, "done", None)
+    design = engine.claim("box", ["design/triage"])
+    security = engine.claim("box", ["security/triage"])
+    assert design is not None and security is not None
+    engine.pause(TOP)
+    engine.report(design.task, Outcome(kind="event", event="lgtm"), supervisor="box")
+    engine.fire(DESIGN, "recorded", None)
+    engine.report(security.task, Outcome(kind="event", event="lgtm"), supervisor="box")
+    engine.fire(SECURITY, "recorded", None)
+
+    resumed = engine.resume(TOP)
+
+    assert resumed.state == "merging"
+    assert statuses(engine, DESIGN, SECURITY) == ["completed", "cancelled"]
+    accepted = next(
+        e for e in reversed(engine.history(TOP))
+        if e.kind == "event_accepted" and e.data["event"] == "joined"
+    )  # fmt: skip
+    assert [b["workflow"] for b in accepted.data["payload"]["branches"]] == ["design"]
+    dropped = [e.data["event"] for e in engine.history(SECURITY) if e.kind == "event_dropped"]
+    assert dropped == ["lgtm", "recorded"]
+    assert "event_replayed" not in kinds(engine, SECURITY)
+
+
+def with_abort() -> dict[str, Any]:
+    """`parallel_document()`, and an outside event `abort` that takes `reviews` back to
+    `coding`."""
+    document = parallel_document()
+    document["events"]["abort"] = {}
+    document["transitions"].append({"from": "reviews", "to": "coding", "on": "abort"})
+    return document
+
+
+def test_a_parents_event_held_before_a_childs_outcome_applies_first() -> None:
+    engine = Engine(Store("sqlite://"), Graph(with_abort()), clock=Clock())
+    engine.start(TOP, {"repo": "acme/api"})
+    engine.fire(TOP, "done", None)
+    engine.pause(TOP)
+    engine.fire(TOP, "abort", None)
+    engine.fire(SECURITY, "lgtm", None)
+    engine.fire(SECURITY, "recorded", None)
+
+    resumed = engine.resume(TOP)
+
+    assert resumed.state == "coding"
+    assert statuses(engine, SECURITY, DESIGN) == ["cancelled", "cancelled"]
+    dropped = [e.data["event"] for e in engine.history(SECURITY) if e.kind == "event_dropped"]
+    assert dropped == ["lgtm", "recorded"]
+
+
+# ── a grandchild: pause, resume and cancel reach it through each level ────
+
+
+def nested_engine() -> tuple[Engine, str, str]:
+    """`nested_document()` with T-1 started: the engine, the middle child, the leaf."""
+    engine = Engine(Store("sqlite://"), Graph(nested_document()), clock=Clock())
+    engine.start(TOP, {})
+    middle = child_id(TOP, "outer", 1, "middle")
+    return engine, middle, child_id(middle, "inner", 1, "leaf")
+
+
+def test_pause_and_resume_reach_a_grandchild_and_its_held_event_joins_each_level() -> None:
+    engine, middle, leaf = nested_engine()
+
+    engine.pause(TOP)
+
+    assert statuses(engine, TOP, middle, leaf) == ["paused"] * 3
+    assert engine.claim("box", ["leaf/work"]) is None
+    engine.fire(leaf, "ok", None)
+    assert statuses(engine, TOP, middle, leaf) == ["paused"] * 3
+
+    resumed = engine.resume(TOP)
+
+    assert resumed.status == "completed"
+    assert statuses(engine, middle, leaf) == ["completed", "completed"]
+    assert "event_replayed" in kinds(engine, leaf)
+
+
+def test_cancelling_the_top_token_cancels_a_paused_grandchild_and_drops_what_it_held() -> None:
+    engine, middle, leaf = nested_engine()
+    engine.pause(TOP)
+    engine.fire(leaf, "ok", None)
+
+    engine.cancel(TOP)
+
+    assert statuses(engine, TOP, middle, leaf) == ["cancelled"] * 3
+    for child in (middle, leaf):
+        cancelled = next(e for e in engine.history(child) if e.kind == "cancelled")
+        assert cancelled.data == {"reason": "the parent was cancelled"}
+    dropped = [e.data for e in engine.history(leaf) if e.kind == "event_dropped"]
+    assert dropped == [{"event": "ok", "reason": "the token was cancelled"}]

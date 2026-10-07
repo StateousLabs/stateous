@@ -49,7 +49,10 @@ def test_a_paused_token_does_not_move_and_its_events_are_held() -> None:
 
     assert (fired.token.state, fired.token.status) == ("coding", "paused")
     held = engine.history("T-1")[-1]
-    assert (held.kind, held.data) == ("event_deferred", {"event": "done", "payload": None})
+    assert (held.kind, held.data) == (
+        "event_deferred",
+        {"event": "done", "payload": None, "arrival": 1},
+    )
 
 
 def test_only_an_active_token_can_be_paused() -> None:
@@ -330,6 +333,7 @@ def test_a_held_error_from_a_state_the_token_left_is_dropped_on_resume() -> None
     held = engine.history("T-1")[-1]
     assert held.data == {
         "event": "error", "payload": None, "state": "testing", "visit": 1, "task": grant.task,
+        "arrival": 2,
     }  # fmt: skip
 
     token = engine.resume("T-1")
@@ -350,6 +354,7 @@ def test_a_held_outcome_records_the_state_and_task_it_came_from() -> None:
     deferred = next(e for e in engine.history("T-1") if e.kind == "event_deferred")
     assert deferred.data == {
         "event": "done", "payload": None, "state": "coding", "visit": 1, "task": grant.task,
+        "arrival": 1,
     }  # fmt: skip
 
 
@@ -418,6 +423,7 @@ def test_the_history_shows_a_held_outcome_once() -> None:
     assert deferred == [
         {
             "event": "done", "payload": None, "state": "coding", "visit": 1, "task": grant.task,
+            "arrival": 1,
             "context": {"rejected": 1},
             "schedules": [{"event": "stuck", "after": "10m"}],
         }

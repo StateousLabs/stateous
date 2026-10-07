@@ -207,6 +207,30 @@ def test_join_any_goes_on_with_the_first_child_and_cancels_the_others() -> None:
     assert engine.get(DESIGN).status == "cancelled"
     assert [branch["workflow"] for branch in joined(engine)] == ["security"]
     assert engine.heartbeat("box", [grant.task]) == [grant.task]  # its task was cancelled
+    cancelled = next(e for e in engine.history(DESIGN) if e.kind == "cancelled")
+    assert cancelled.data == {"reason": "the parent left 'reviews' on 'joined'"}
+
+
+def test_a_parent_that_fails_tells_its_children_why() -> None:
+    document = parallel_document()
+    document["transitions"] = [
+        edge for edge in document["transitions"]
+        if not (edge["from"] == "reviews" and edge.get("on") == "timeout")
+    ]  # fmt: skip
+    clock = Clock()
+    engine = new(document, clock)
+    engine.start(TOP, {"repo": "acme/api"})
+    engine.fire(TOP, "done", None)
+
+    clock.advance(hours=49)  # past the timeout of `reviews`, which no transition takes
+    engine.tick()
+
+    assert engine.get(TOP).status == "failed"
+    reason = engine.history(TOP)[-1].data["reason"]
+    assert reason.startswith("'reviews' timed out")
+    for child in (SECURITY, DESIGN):
+        cancelled = next(e for e in engine.history(child) if e.kind == "cancelled")
+        assert cancelled.data == {"reason": f"the parent failed: {reason}"}
 
 
 def test_leaving_a_parallel_state_early_cancels_the_live_children() -> None:
@@ -219,7 +243,7 @@ def test_leaving_a_parallel_state_early_cancels_the_live_children() -> None:
     assert engine.get(TOP).state == "blocked"
     assert engine.get(DESIGN).status == "cancelled"
     cancelled = next(e for e in engine.history(DESIGN) if e.kind == "cancelled")
-    assert cancelled.data == {"reason": "the parent left 'reviews'"}
+    assert cancelled.data == {"reason": "the parent left 'reviews' on 'timeout'"}
 
 
 def test_a_join_that_no_transition_takes_fails_the_parent() -> None:

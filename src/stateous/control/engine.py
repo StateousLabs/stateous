@@ -249,10 +249,10 @@ class Engine:
                 self._pause(tx, child)
 
     def resume(self, token: str) -> Token:
-        """Let a paused token move again. Its timers get the paused time back. Its
-        children resume first, and apply what they held; a join can be met then. Then
-        the token's held events apply in the order they arrived; those that no longer
-        fit are dropped and recorded."""
+        """Let a paused token move again, and its children too. Their timers get the
+        paused time back. Then the events that the token and its children held apply
+        in the order they arrived; those that no longer fit are dropped and recorded.
+        A child's event can meet a join, and move the parent."""
         with self._transaction() as tx:
             row = self._existing(tx, token)
             self._refuse_child(tx, row, "resume")
@@ -264,18 +264,30 @@ class Engine:
             return _token(row)
 
     def _resume(self, tx: Transaction, row: tables.Token) -> None:
-        entries = tx.entries(row.token)
-        paused_at = max((e.at for e in entries if e.kind == "paused"), default=tx.now)
-        for timer in tx.pending_timers(row.token):
-            # Only the part of the pause after the timer was set.
-            timer.due_at += tx.now - max(paused_at, timer.set_at)
-        row.status = "active"
-        tx.append(row.token, "resumed")
+        """Resume the token and each paused token below it. Then apply what they all
+        held, as one list in the order of arrival (design section 7)."""
+        held: list[tuple[_Held, tables.Token]] = []
+        for member in self._family(tx, row):
+            if member.status != "paused":
+                continue
+            entries = tx.entries(member.token)
+            paused_at = max((e.at for e in entries if e.kind == "paused"), default=tx.now)
+            for timer in tx.pending_timers(member.token):
+                # Only the part of the pause after the timer was set.
+                timer.due_at += tx.now - max(paused_at, timer.set_at)
+            member.status = "active"
+            tx.append(member.token, "resumed")
+            held.extend((event, member) for event in _held_events(entries))
+        for event, member in sorted(held, key=_arrival):
+            self._replay(tx, member, event)
+
+    def _family(self, tx: Transaction, row: tables.Token) -> list[tables.Token]:
+        """The token, then each child of its current state, and their children, depth
+        first."""
+        found = [row]
         for child in self._children(tx, row):
-            if child.status == "paused":  # a join can have cancelled it meanwhile
-                self._resume(tx, child)
-        for held in _held_events(entries):
-            self._replay(tx, row, held)
+            found.extend(self._family(tx, child))
+        return found
 
     def _refuse_child(
         self, tx: Transaction, row: tables.Token, verb: Literal["pause", "resume", "cancel"]
@@ -314,7 +326,7 @@ class Engine:
             for held in _held_events(tx.entries(row.token)):
                 reason = "the token was cancelled"
                 tx.append(row.token, "event_dropped", event=held.event, reason=reason)
-        self._leave(tx, row, via=None)
+        self._leave(tx, row, via=None, why="the parent was cancelled")
         self._end(tx, row, "cancelled", **data)
 
     def _replay(self, tx: Transaction, row: tables.Token, held: _Held) -> None:
@@ -456,9 +468,18 @@ class Engine:
         """Hold an event for a paused token. An event from a task is bound to the
         task's state and visit: resume drops it if the token left them. A report's
         context changes and timers are held with its event. Until resume applies or
-        drops them, this ledger entry is their only record."""
+        drops them, this ledger entry is their only record. `arrival` counts the
+        events that the whole family holds, so resume applies them in that order."""
+        top = row
+        while top.parent is not None:
+            top = self._existing(tx, top.parent)
+        arrival = 1 + sum(
+            len(_held_events(tx.entries(member.token))) for member in self._family(tx, top)
+        )
         if task is None:
-            tx.append(row.token, "event_deferred", key=key, event=event, payload=payload)
+            tx.append(
+                row.token, "event_deferred", key=key, event=event, payload=payload, arrival=arrival
+            )
             return
         held: dict[str, Any] = {}
         if changes:
@@ -467,7 +488,7 @@ class Engine:
             held["schedules"] = [schedule.to_json() for schedule in schedules]
         tx.append(
             row.token, "event_deferred", key=key, event=event, payload=payload,
-            state=task.state, visit=task.visit, task=task.id, **held,
+            state=task.state, visit=task.visit, task=task.id, arrival=arrival, **held,
         )  # fmt: skip
 
     def _decide(
@@ -527,7 +548,7 @@ class Engine:
         tx.append(
             row.token, "event_accepted", key=key, event=event, payload=payload, state=row.state
         )
-        self._leave(tx, row, via=event)
+        self._leave(tx, row, via=event, why=f"the parent left {row.state!r} on {event!r}")
         if chosen.target == END:
             self._end(tx, row, "completed")
         else:
@@ -996,12 +1017,12 @@ class Engine:
         )
         tx.append(row.token, "timer_set", event=event, due_at=_iso(timer.due_at))
 
-    def _leave(self, tx: Transaction, row: tables.Token, *, via: str | None) -> None:
+    def _leave(self, tx: Transaction, row: tables.Token, *, via: str | None, why: str) -> None:
         """Stop all that the current state started: its tasks, its timers and its
         children. When the token leaves on one of the state's own outcomes (`via` in
         its emits), a task that a supervisor or someone outside works on is done. Else
         it is cancelled, so the supervisor's heartbeat finds it lost. Each live child
-        is cancelled, and says why."""
+        is cancelled, with `why` as its reason."""
         finished = via is not None and via in self._graph(row).state(row.state).emits
         for task in tx.open_tasks(row.token):
             done = finished and task.status in ("claimed", "waiting")
@@ -1012,7 +1033,7 @@ class Engine:
             timer.status = "cancelled"
         for child in self._children(tx, row):
             if child.status in ("active", "paused"):
-                self._cancel(tx, child, reason=f"the parent left {row.state!r}")
+                self._cancel(tx, child, reason=why)
 
     def _end(
         self,
@@ -1032,7 +1053,7 @@ class Engine:
 
     def _fail(self, tx: Transaction, row: tables.Token, reason: str) -> None:
         """No way to go on: the token fails, in the state it is in, and says why."""
-        self._leave(tx, row, via=None)
+        self._leave(tx, row, via=None, why=f"the parent failed: {reason}")
         self._end(tx, row, "failed", reason=reason)
 
     def _children(self, tx: Transaction, row: tables.Token) -> list[tables.Token]:
@@ -1200,6 +1221,18 @@ class _Held:
     """The context changes of a held outcome; empty for an event from outside."""
     schedules: tuple[Schedule, ...]
     """The timers of a held outcome. Resume sets them: `after` counts from then."""
+    arrival: int
+    """Its place among the events that the token's family holds: 1, 2, 3 …; 0 for an
+    event held before Stateous counted them."""
+    at: datetime
+    token: str
+    seq: int
+
+
+def _arrival(item: tuple[_Held, tables.Token]) -> tuple[int, datetime, str, int]:
+    """The order in which a family's held events apply: the order they arrived."""
+    held = item[0]
+    return (held.arrival, held.at, held.token, held.seq)
 
 
 def _schedules(data: list[Any] | None) -> tuple[Schedule, ...]:
@@ -1218,6 +1251,10 @@ def _held_events(entries: list[tables.LedgerEntry]) -> list[_Held]:
             origin=(e.data["state"], e.data["visit"]) if "state" in e.data else None,
             context=dict(e.data.get("context") or {}),
             schedules=_schedules(e.data.get("schedules")),
+            arrival=int(e.data.get("arrival", 0)),
+            at=e.at,
+            token=e.token,
+            seq=e.seq,
         )
         for e in entries
         if e.kind == "event_deferred" and e.seq > since
