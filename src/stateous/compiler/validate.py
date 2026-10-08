@@ -88,6 +88,7 @@ def _problems(flow: Workflow) -> Iterable[str]:
     yield from _overlapping_guards(flow)
     yield from _context_keys(flow)
     yield from _inputs(flow)
+    yield from _parallel_exits(flow)
     yield from _counted_events(flow)
 
 
@@ -180,6 +181,27 @@ def _inputs(flow: Workflow) -> Iterable[str]:
                         f"state {state.name!r} does not hand on {key!r}, which "
                         f"{child.name!r} requires; add it to inputs"
                     )
+
+
+def _parallel_exits(flow: Workflow) -> Iterable[str]:
+    """A parallel state has no task, so only its join can move its token on. It
+    must leave on `joined`, and it can never leave on `error` (design section 8)."""
+    for state in flow.states.values():
+        if not state.parallel:
+            continue
+        on_joined = any(
+            edge.source is state and edge.event.name == JOINED for edge in flow.transitions
+        )
+        on_error = any(
+            edge.source is state and edge.event.name == ERROR for edge in flow.transitions
+        )
+        if not on_joined:
+            yield f"parallel state {state.name!r} needs a transition on {JOINED!r}"
+        if on_error:
+            yield (
+                f"parallel state {state.name!r} has no task, so {ERROR!r} can never fire; "
+                "check 'branches' on 'joined'"
+            )
 
 
 def _counted_events(flow: Workflow) -> Iterable[str]:

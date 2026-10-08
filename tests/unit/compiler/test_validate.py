@@ -5,7 +5,7 @@ from pydantic import BaseModel, create_model
 
 from stateous import END, START, Workflow
 from stateous.compiler.validate import TOP_ID_ROOM, nested_workflows, validate
-from stateous.model.workflow import DefinitionError
+from stateous.model.workflow import DefinitionError, State
 
 from ...parallel import Review, parallel_workflow, review
 
@@ -344,3 +344,67 @@ def test_a_guard_on_joined_may_count_joined() -> None:
     flow.transition(reviews, reviews, on="joined", otherwise=True)
 
     validate(flow)
+
+
+# ── a parallel state's own exits (design section 8) ───────────────────────
+
+
+def test_a_parallel_state_without_a_transition_on_joined_is_refused() -> None:
+    flow = Workflow("sdlc", context=Review)
+    reviews = flow.state("reviews", parallel=[review("security")], inputs=("repo", "branch"))
+    flow.transition(START, reviews)
+    flow.transition(reviews, END, on="timeout")
+
+    assert "parallel state 'reviews' needs a transition on 'joined'" in refused(flow)
+
+
+def test_a_parallel_state_with_a_transition_on_error_is_refused() -> None:
+    flow = Workflow("sdlc", context=Review)
+    reviews = flow.state("reviews", parallel=[review("security")], inputs=("repo", "branch"))
+    flow.transition(START, reviews)
+    flow.transition(reviews, END, on="joined")
+    flow.transition(reviews, END, on="error")
+
+    problem = refused(flow)
+
+    assert (
+        "parallel state 'reviews' has no task, so 'error' can never fire; "
+        "check 'branches' on 'joined'"
+    ) in problem
+
+
+def nested_in_review() -> tuple[Workflow, Workflow, State]:
+    """`sdlc`, whose child `review` has its own parallel state `inner`, running
+    `security`. Both parent and child pass `repo` and `branch` along."""
+    child = Workflow("review", context=Review)
+    inner = child.state("inner", parallel=[review("security")], inputs=("repo", "branch"))
+    child.transition(START, inner)
+    flow = Workflow("sdlc", context=Review)
+    reviews = flow.state("reviews", parallel=[child], inputs=("repo", "branch"))
+    flow.transition(START, reviews)
+    flow.transition(reviews, END, on="joined")
+    return flow, child, inner
+
+
+def test_a_parallel_state_in_a_child_workflow_also_needs_joined() -> None:
+    flow, child, inner = nested_in_review()
+    child.transition(inner, END, on="timeout")
+
+    problem = refused(flow)
+
+    assert (
+        "in child workflow 'review': parallel state 'inner' needs a transition on 'joined'"
+    ) in problem
+
+
+def test_a_parallel_state_in_a_child_workflow_also_refuses_error() -> None:
+    flow, child, inner = nested_in_review()
+    child.transition(inner, END, on="joined")
+    child.transition(inner, END, on="error")
+
+    problem = refused(flow)
+
+    assert (
+        "in child workflow 'review': parallel state 'inner' has no task, so 'error' can "
+        "never fire; check 'branches' on 'joined'"
+    ) in problem
