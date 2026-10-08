@@ -147,10 +147,10 @@ class ControlPlaneApi:
             try:
                 response = await self._client.request(method, path, json=body)
             except httpx2.TransportError as error:
-                problem = str(error) or type(error).__name__
+                problem = _unreached(self.url, str(error) or type(error).__name__)
             else:
                 if response.status_code in UNAVAILABLE:
-                    problem = _unavailable(response)
+                    problem = _unavailable(self.url, response)
                 elif response.status_code >= 400:
                     message, code = _error_of(response)
                     raise Refused(response.status_code, message, code=code)
@@ -160,12 +160,7 @@ class ControlPlaneApi:
                 raise GaveUp
             delay = self._backoff[min(failures, len(self._backoff) - 1)]
             failures += 1
-            log.warning(
-                "cannot reach the control plane at %s (%s); trying again in %gs",
-                self.url,
-                problem,
-                delay,
-            )
+            log.warning("%s; trying again in %gs", problem, delay)
             await self._wait(delay, stop)
 
     async def _wait(self, delay: float, stop: asyncio.Event | None) -> None:
@@ -207,15 +202,26 @@ def _error_of(response: httpx2.Response) -> tuple[str, str | None]:
     return text or f"the control plane answered {response.status_code}", named
 
 
-def _unavailable(response: httpx2.Response) -> str:
-    """Why an answer 502, 503 or 504 counts as "not reached". When the answer has a
-    code, the line gives the code and the sentence: `not_serving` (another control
-    plane took the database) is not an outage, but another control plane can take
-    over at the same URL, so the supervisor tries again."""
+def _unreached(url: str, why: str) -> str:
+    """The start of the log line of a call that did not reach the control plane."""
+    return f"cannot reach the control plane at {url} ({why})"
+
+
+def _unavailable(url: str, response: httpx2.Response) -> str:
+    """The start of the log line of an answer 502, 503 or 504, which counts as "not
+    reached". When the answer has a code, the line gives the code and the sentence.
+    `not_serving` (another control plane took the database) is not an outage: the
+    line says that the control plane does not serve its database now, and gives the
+    code. Another control plane can take over at the same URL, so the supervisor
+    tries again."""
     message, code = _error_of(response)
+    if code == "not_serving":
+        return (
+            f"the control plane at {url} does not serve its database now (not_serving): {message}"
+        )
     if code is None:
-        return f"it answered {response.status_code}"
-    return f"it answered {response.status_code}, {code}: {message}"
+        return _unreached(url, f"it answered {response.status_code}")
+    return _unreached(url, f"it answered {response.status_code}, {code}: {message}")
 
 
 def _body(response: httpx2.Response) -> Any:

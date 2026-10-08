@@ -191,10 +191,11 @@ def test_a_control_plane_that_is_not_serving_is_tried_again_and_the_log_names_wh
 
     asyncio.run(scenario())
 
-    lines = [r.getMessage() for r in caplog.records if "cannot reach" in r.getMessage()]
-    assert len(lines) == 1
-    assert "not_serving" in lines[0]
-    assert "another control plane took this database" in lines[0]
+    lines = [r.getMessage() for r in caplog.records if "trying again" in r.getMessage()]
+    assert lines == [
+        "the control plane at http://cp.test does not serve its database now (not_serving): "
+        "another control plane took this database; trying again in 1s"
+    ]
 
 
 def test_the_backoff_grows_to_30_seconds_and_stays_there() -> None:
