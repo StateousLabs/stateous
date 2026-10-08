@@ -67,6 +67,9 @@ class FakeApi:
         plane. They try again until `down` is false, or give up when `stop` is set."""
         self.tries = 0
         """The sends that did not reach the control plane."""
+        self.heartbeat_down = False
+        """When true: heartbeats do not reach the control plane. They try again until
+        `heartbeat_down` is false, or give up when `stop` is set."""
 
     async def health(self) -> dict[str, Any]:
         return {"workflow": "demo", "checksum": self.checksum}
@@ -104,8 +107,15 @@ class FakeApi:
             raise Refused(409, f"task {task} is not this supervisor's")
         self.reports[task] = outcome
 
-    async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
+    async def heartbeat(
+        self, supervisor: str, tasks: Collection[int], *, stop: asyncio.Event | None = None
+    ) -> list[int]:
         self.calls.append(("heartbeat", tuple(sorted(tasks))))
+        while self.heartbeat_down:
+            self.tries += 1
+            if stop is not None and stop.is_set():
+                raise GaveUp
+            await asyncio.sleep(0.01)
         return sorted(self.lost & set(tasks))
 
     async def note(

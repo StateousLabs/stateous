@@ -272,7 +272,7 @@ def test_a_claim_does_not_try_again_after_stop_is_set() -> None:
     assert (requests, delays) == (["/tasks/claim"], [])
 
 
-@pytest.mark.parametrize("call", ["report", "note", "memory"])
+@pytest.mark.parametrize("call", ["report", "note", "memory", "heartbeat"])
 def test_a_send_after_stop_has_one_try_and_then_raises_gave_up(call: str) -> None:
     requests: list[str] = []
     delays: list[float] = []
@@ -290,6 +290,8 @@ def test_a_send_after_stop_has_one_try_and_then_raises_gave_up(call: str) -> Non
                 await api.report(7, Outcome(kind="waiting"), supervisor="box-1", stop=stop)
             elif call == "note":
                 await api.note(7, "one", attempt=1, stop=stop)
+            elif call == "heartbeat":
+                await api.heartbeat("box-1", [7], stop=stop)
             else:
                 await api.set_memory(7, "dev", "s-1", attempt=1, stop=stop)
         finally:

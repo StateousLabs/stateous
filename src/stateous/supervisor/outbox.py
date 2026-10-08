@@ -40,11 +40,17 @@ CREATE TABLE IF NOT EXISTS messages (
 
 
 class OutboxError(Exception):
-    """The outbox cannot be opened. The message is one plain sentence."""
+    """The outbox cannot be opened or written. The message is one plain sentence."""
 
 
 class OutboxBusy(OutboxError):
     """Another outbox has the file open: another supervisor runs on the folder."""
+
+
+class OutboxWriteError(OutboxError):
+    """The supervisor cannot write a message to the outbox, for example because the
+    disk is full. A routine gets this error from a note or a memory write, so its
+    attempt fails and the message is not lost silently."""
 
 
 def outbox_path(folder: Path) -> Path:

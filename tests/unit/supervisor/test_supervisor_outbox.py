@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from typing import Any
 
 import pytest
@@ -13,7 +14,7 @@ import pytest
 from stateous.model.context import Context
 from stateous.model.contract import on_state
 from stateous.model.wire import Outcome
-from stateous.supervisor.outbox import Kind, Outbox
+from stateous.supervisor.outbox import Kind, Message, Outbox
 from stateous.supervisor.remote import Refused
 
 from .fakes import CODING, FakeApi, done, grant, make, nothing_runs, run_until, until
@@ -211,3 +212,108 @@ def test_the_messages_of_a_task_the_control_plane_took_back_leave_the_outbox() -
         assert asyncio.run(scenario()) == 0
         assert outbox.pending() == []
         assert api.sends(1) == [("memory", 1, "dev", "s-1")]
+
+
+# ── a refused report, then a heartbeat that does not reach the control plane ──
+
+
+def left_report(outbox: Outbox) -> None:
+    outbox.append(1, 1, "T-1", "report", Outcome(kind="event", event="done").to_json())
+
+
+def test_a_stop_while_a_left_report_is_checked_does_not_wait_and_keeps_the_report() -> None:
+    with Outbox.in_memory() as outbox:
+        left_report(outbox)
+        api = FakeApi(grant(2, "coding"))
+        api.refusals = [Refused(409, "task 1 is not this supervisor's")]
+        api.heartbeat_down = True
+
+        def tried() -> bool:
+            return api.tries >= 2
+
+        assert asyncio.run(run_until(make(api, coding, outbox=outbox), tried)) == 0
+        assert api.called("heartbeat", (1,))
+        assert kinds(outbox) == [(1, "report")]  # not decided: the next start sends it again
+        assert api.claims() == 0
+
+
+def test_a_stop_while_a_refused_report_is_checked_does_not_wait_and_keeps_the_report(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with Outbox.in_memory() as outbox:
+        api = FakeApi(grant(1, "coding"))
+        api.refusals = [Refused(409, "task 1 is not this supervisor's")]
+        api.heartbeat_down = True
+
+        def tried() -> bool:
+            return api.called("report", 1, "event") and api.tries >= 2
+
+        caplog.set_level(logging.WARNING, logger="stateous.supervisor")
+        assert asyncio.run(run_until(make(api, coding, outbox=outbox), tried)) == 0
+        assert kinds(outbox) == [(1, "report")]
+        assert "the report stays in the outbox" in caplog.text
+
+
+def test_a_duplicate_report_left_after_a_crash_is_dropped_when_the_task_is_not_held() -> None:
+    """The report reached the control plane before the crash, but did not leave the
+    outbox. At the next start the control plane refuses it again: the task is done."""
+    with Outbox.in_memory() as outbox:
+        left_report(outbox)
+        api = FakeApi()
+        api.refusals = [Refused(409, "task 1 is done; no one works on it now")]
+        api.lost = {1}
+
+        def claimed() -> bool:
+            return api.claims() >= 1
+
+        asyncio.run(run_until(make(api, coding, outbox=outbox), claimed))
+
+        assert api.called("heartbeat", (1,))
+        assert api.sends(1) == [("report", 1, "event")]  # no failure report
+        assert outbox.pending() == []
+
+
+# ── an outbox that cannot be written ─────────────────────────────────────────
+
+
+class FullOutbox(Outbox):
+    """A disk that is full: notes and memory writes cannot be written. Reports can."""
+
+    def append(self, task: int, attempt: int, token: str, kind: Kind, body: Any) -> Message:
+        if kind != "report":
+            raise sqlite3.OperationalError("database or disk is full")
+        return super().append(task, attempt, token, kind, body)
+
+
+@on_state(CODING)
+async def noting(ctx: Context[Any]) -> done:
+    ctx.note("one")
+    return done()
+
+
+@on_state(CODING)
+def noting_in_a_thread(ctx: Context[Any]) -> done:
+    ctx.note("one")
+    return done()
+
+
+@pytest.mark.parametrize("routine", [noting, noting_in_a_thread], ids=["async", "def"])
+def test_a_note_that_the_outbox_cannot_write_fails_the_attempt(
+    routine: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    with FullOutbox.in_memory() as outbox:
+        api = FakeApi(grant(1, "coding"))
+
+        caplog.set_level(logging.WARNING, logger="stateous.supervisor")
+        asyncio.run(run_until(make(api, routine, outbox=outbox), api.reported, 1))
+
+        assert api.reports[1].kind == "failed"
+        assert api.reports[1].error == (
+            "OutboxWriteError: cannot write the note to the outbox: database or disk is full"
+        )
+        assert api.sends(1) == [("report", 1, "failed")]
+        lines = [r.getMessage() for r in caplog.records if "outbox" in r.getMessage()]
+        assert lines == [
+            "task 1 of T-1: cannot write the note to the outbox: database or disk is full"
+        ]
+        assert "Traceback" not in caplog.text

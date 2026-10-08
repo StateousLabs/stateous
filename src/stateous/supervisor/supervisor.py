@@ -42,10 +42,12 @@ returns 1.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import inspect
 import logging
 import signal
+import sqlite3
 import sys
 import threading
 import uuid
@@ -67,6 +69,7 @@ from stateous.supervisor.outbox import (
     Outbox,
     OutboxBusy,
     OutboxError,
+    OutboxWriteError,
     outbox_path,
 )
 from stateous.supervisor.registry import Registry, Routine
@@ -82,6 +85,9 @@ IDLE = 1.0
 
 CANCEL_WAIT = 5.0
 """After the second signal: seconds to wait for the cancelled routines to end."""
+
+_WRITE_CHECK = 0.1
+"""Seconds between the checks of a def routine that waits for an outbox write."""
 
 
 class SupervisorError(Exception):
@@ -109,7 +115,9 @@ class Api(Protocol):
         self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
     ) -> None: ...
 
-    async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]: ...
+    async def heartbeat(
+        self, supervisor: str, tasks: Collection[int], *, stop: asyncio.Event | None = None
+    ) -> list[int]: ...
 
     async def note(
         self, task: int, text: str, *, attempt: int, stop: asyncio.Event | None = None
@@ -132,9 +140,14 @@ class _Sends:
 
     The routine adds them from the loop (an async routine) or from its thread (a
     def routine). A send from the thread goes to the loop with
-    `call_soon_threadsafe`. The thread's result goes to the loop the same way and
-    later, so its sends are in the queue before the result arrives. The outbox is
-    written on the loop only."""
+    `call_soon_threadsafe`, and the thread waits until the loop wrote it to the
+    outbox. The thread's result goes to the loop the same way and later, so its
+    sends are in the queue before the result arrives. The outbox is written on the
+    loop only.
+
+    When the outbox cannot be written (for example, the disk is full), the routine
+    gets `OutboxWriteError` from `ctx.note()` or `ctx.memory[...] = ...`. An async
+    routine and a def routine get it the same way."""
 
     def __init__(self, supervisor: Supervisor, grant: TaskGrant) -> None:
         self._supervisor = supervisor
@@ -181,14 +194,41 @@ class _Sends:
         if threading.get_ident() == self._loop_thread:
             self._put(kind, body)
             return
-        with contextlib.suppress(RuntimeError):  # the loop has closed
-            self._loop.call_soon_threadsafe(self._put, kind, body)
+        written: concurrent.futures.Future[None] = concurrent.futures.Future()
+
+        def put() -> None:
+            try:
+                self._put(kind, body)
+            except Exception as error:
+                written.set_exception(error)
+            else:
+                written.set_result(None)
+
+        try:
+            self._loop.call_soon_threadsafe(put)
+        except RuntimeError:  # the loop has closed
+            return
+        while not self._closed:  # after the close, the loop does not write it
+            try:
+                written.result(timeout=_WRITE_CHECK)  # raises the error of the write
+            except TimeoutError:
+                continue
+            return
 
     def _put(self, kind: Kind, body: dict[str, Any]) -> None:
+        """Write the message to the outbox, and queue it. Raise `OutboxWriteError`
+        when the outbox cannot be written."""
         if self._closed:
             return
         grant = self._grant
-        message = self._supervisor.outbox.append(grant.task, grant.attempt, grant.token, kind, body)
+        try:
+            message = self._supervisor.outbox.append(
+                grant.task, grant.attempt, grant.token, kind, body
+            )
+        except sqlite3.Error as error:
+            problem = f"cannot write the {kind} to the outbox: {error}"
+            log.error("task %d of %s: %s", grant.task, grant.token, problem)
+            raise OutboxWriteError(problem) from None
         self._queue.put_nowait(message)
 
 
@@ -441,6 +481,8 @@ class Supervisor:
             await sends.flush()
         except asyncio.CancelledError:
             raise
+        except OutboxWriteError:  # `_put` logged it; the task fails when its lease ends
+            pass
         except Exception:  # a fault of the supervisor; the task fails when its lease ends
             log.exception("task %d of %s: could not finish", grant.task, grant.token)
         finally:
@@ -561,7 +603,10 @@ class Supervisor:
         attempt? 404: the task is gone. 409 that names the attempt: the task moved
         to a new attempt, so this one is over, even if the task id is still this
         supervisor's. 409 for another reason: the task is not ours, or the event is
-        not allowed. The answer has no code, so a heartbeat tells the rest."""
+        not allowed. The answer has no code, so a heartbeat tells the rest.
+
+        When the heartbeat does not reach the control plane before the stop, it
+        raises `GaveUp`: nothing is decided, and the report stays in the outbox."""
         if refusal.status == 404:
             return False
         if refusal.status != 409:
@@ -569,7 +614,9 @@ class Supervisor:
         if _names_another_attempt(refusal.message):
             return False
         try:
-            return task not in await self.api.heartbeat(self.name, [task])
+            return task not in await self.api.heartbeat(self.name, [task], stop=self._stopping)
+        except GaveUp:
+            raise
         except Exception:
             log.exception("task %d of %s: could not check the task", task, token)
             return False

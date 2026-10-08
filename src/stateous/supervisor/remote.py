@@ -8,8 +8,8 @@ plane that restarts). Any other answer of 400 or more is a refusal: `Refused`,
 and no new try.
 
 A call can get a `stop` event. When it is set, a call that waits to try again
-gives up: a claim returns None, and a report, a note or a memory write raises
-`GaveUp`. A call made after the stop has one try. A request in flight is not cut:
+gives up: a claim returns None, and a report, a note, a memory write or a
+heartbeat raises `GaveUp`. A call made after the stop has one try. A request in flight is not cut:
 the control plane can grant a task in it, and the supervisor must run that task."""
 
 from __future__ import annotations
@@ -97,13 +97,12 @@ class ControlPlaneApi:
         body = {**outcome.to_json(), "supervisor": supervisor}
         await self._call("POST", f"/tasks/{task}/report", body, stop=stop)
 
-    async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
+    async def heartbeat(
+        self, supervisor: str, tasks: Collection[int], *, stop: asyncio.Event | None = None
+    ) -> list[int]:
         """The ids among `tasks` that this supervisor no longer holds."""
-        answer = _mapping(
-            await self._call(
-                "POST", "/tasks/heartbeat", {"supervisor": supervisor, "tasks": list(tasks)}
-            )
-        )
+        body = {"supervisor": supervisor, "tasks": list(tasks)}
+        answer = _mapping(await self._call("POST", "/tasks/heartbeat", body, stop=stop))
         lost = answer.get("lost")
         if not isinstance(lost, list):
             raise Refused(200, "the heartbeat answer has no list of lost tasks")

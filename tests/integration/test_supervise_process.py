@@ -25,6 +25,7 @@ from .supervising import (
     free_port,
     has_kind,
     init_folder,
+    kinds,
     status_is,
     wait_for,
 )
@@ -346,6 +347,9 @@ def test_a_report_made_while_the_control_plane_is_down_arrives_after_a_restart(
         assert status_is(client, "T-1", "active")
         second = stack.enter_context(started(["supervise", str(folder)], second_log))
         wait_for(status_is, client, "T-1", "completed")
+        history = kinds(client, "T-1")  # the left report finished the first attempt
+        assert history.count("task_claimed") == 1, history
+        assert "task_retrying" not in history, history
 
         interrupt(second)
         assert second.wait(timeout=30) == 0, text_of(second_log)

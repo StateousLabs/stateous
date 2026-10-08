@@ -30,8 +30,10 @@ class RegrantingApi(FakeApi):
         super().__init__(grant(1, "coding", attempt=1))
         self.lost = {1}
 
-    async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
-        lost = await super().heartbeat(supervisor, tasks)
+    async def heartbeat(
+        self, supervisor: str, tasks: Collection[int], *, stop: asyncio.Event | None = None
+    ) -> list[int]:
+        lost = await super().heartbeat(supervisor, tasks, stop=stop)
         if lost:
             self.lost = set()
             self.grants.append(grant(1, "coding", attempt=2))
