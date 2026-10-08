@@ -25,7 +25,7 @@ from stateous import Context, Occurrence, OutcomeError
 from stateous.model.wire import TaskGrant
 
 ROOT = Path(__file__).parents[2]
-FOLDER = ROOT / "examples" / "sdlc-worker"
+FOLDER = ROOT / "examples" / "sdlc-supervisor"
 STUB = Path(__file__).parent / "phd_stub"
 MODULES = ("contract", "testing", "coding", "phd")
 PHD_SPEC = ROOT.parent / "poly-harness-dispatcher" / "src" / "phd" / "spec" / "spec.py"

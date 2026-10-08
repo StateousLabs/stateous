@@ -18,7 +18,7 @@ Then run the `stateous` command in that environment, for example with `uv run st
 
 ## The example
 
-[`examples/sdlc/`](examples/sdlc/) is a workflow with two states: `coding` and `testing`. [`examples/sdlc-worker/`](examples/sdlc-worker/) is the supervisor's folder for it.
+[`examples/sdlc/`](examples/sdlc/) is a workflow with two states: `coding` and `testing`. [`examples/sdlc-supervisor/`](examples/sdlc-supervisor/) is the supervisor's folder for it.
 
 ```bash
 # on the control plane's computer
@@ -26,8 +26,8 @@ stateous compile sdlc/flow.py                         # writes sdlc/build/sdlc.j
 stateous serve sdlc/build/sdlc.json --listen 0.0.0.0:8080
 
 # on the supervisor's computer
-stateous init http://cp.internal:8080 sdlc-worker     # contract.py, a stub per state, stateous.yaml
-stateous supervise sdlc-worker                        # runs the routines
+stateous init http://cp.internal:8080 sdlc-supervisor     # contract.py, a stub per state, stateous.yaml
+stateous supervise sdlc-supervisor                        # runs the routines
 
 # anywhere
 stateous token start TICKET-1 '{"repo": "acme/api"}' --url http://cp.internal:8080

@@ -1,4 +1,4 @@
-# sdlc-worker/testing.py
+# sdlc-supervisor/testing.py
 import subprocess
 import sys
 import tempfile

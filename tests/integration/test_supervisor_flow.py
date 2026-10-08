@@ -132,7 +132,7 @@ def index_of(history: list[dict[str, Any]], kind: str, **data: Any) -> int:
 
 def test_a_supervisor_runs_a_workflow_against_a_real_control_plane(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
-    folder = tmp_path / "demo-worker"
+    folder = tmp_path / "demo-supervisor"
     with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
         init_folder(url, folder)
         for name, text in (("triage", TRIAGE), ("coding", CODING), ("review", REVIEW)):
@@ -222,7 +222,7 @@ async def work(ctx: Context) -> events.done:
 
 def test_a_refused_report_fails_the_task_at_once_with_the_refusal(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, COUNTING)
-    folder = tmp_path / "tally-worker"
+    folder = tmp_path / "tally-supervisor"
     with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
         init_folder(url, folder)
         (folder / "work.py").write_text(BREAKS_THE_SCHEMA, encoding="utf-8")

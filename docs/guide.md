@@ -1,6 +1,6 @@
 # The Stateous guide
 
-This page tells you how to use Stateous. It uses one example from start to end: [`examples/sdlc/`](../examples/sdlc/) and [`examples/sdlc-worker/`](../examples/sdlc-worker/). The design is in [`design.md`](design.md).
+This page tells you how to use Stateous. It uses one example from start to end: [`examples/sdlc/`](../examples/sdlc/) and [`examples/sdlc-supervisor/`](../examples/sdlc-supervisor/). The design is in [`design.md`](design.md).
 
 ## What Stateous does
 
@@ -29,7 +29,7 @@ sdlc/                    the control plane's side: the workflow
   schemas.py             the context and payload models
   build/sdlc.json        written by `stateous compile`: the graph file
 
-sdlc-worker/             the supervisor's side, on any computer: no graph
+sdlc-supervisor/             the supervisor's side, on any computer: no graph
   contract.py            written by `stateous init`: states, their events, the models
   coding.py              @on_state(states.coding) ...
   testing.py             @on_state(states.testing) ...
@@ -156,7 +156,7 @@ A supervisor on a different computer must reach the control plane. Then use `--l
 ## Set up a supervisor
 
 ```bash
-stateous init http://cp.internal:8080 sdlc-worker
+stateous init http://cp.internal:8080 sdlc-supervisor
 ```
 
 `stateous init` gets the graph from the control plane. Then it writes these files:
@@ -168,12 +168,12 @@ stateous init http://cp.internal:8080 sdlc-worker
 `init` never writes over a routine file or over `stateous.yaml`. A stub that would hide a Python module gets the name `<state>_routine.py`. For example, the state `queue` gets `queue_routine.py`. `init` prints one line for each file:
 
 ```text
-wrote    sdlc-worker/contract.py
-wrote    sdlc-worker/coding.py
+wrote    sdlc-supervisor/contract.py
+wrote    sdlc-supervisor/coding.py
 kept     the routine of 'testing'
-wrote    sdlc-worker/stateous.yaml
+wrote    sdlc-supervisor/stateous.yaml
 
-Write the routines, then run: stateous supervise sdlc-worker
+Write the routines, then run: stateous supervise sdlc-supervisor
 ```
 
 On Windows, the paths in these lines have `\` in place of `/`.
@@ -195,7 +195,7 @@ name: build-box-1              # optional; the default is the host name
 A routine does the work of one state. It is in the supervisor's folder, and it imports only `contract.py`.
 
 ```python
-# sdlc-worker/testing.py
+# sdlc-supervisor/testing.py
 import subprocess
 import sys
 import tempfile
@@ -297,7 +297,7 @@ For agents, the contract gives each state two helpers:
 ### Run the supervisor
 
 ```bash
-stateous supervise sdlc-worker
+stateous supervise sdlc-supervisor
 ```
 
 The supervisor runs at most `tasks` routines at once. An `async def` routine runs on the supervisor's event loop. A `def` routine runs in a thread. While a routine runs, the supervisor sends a heartbeat every 30 seconds.
@@ -424,7 +424,7 @@ A routine that returns `None` leaves its task waiting. The outside actor then ca
 PHD is a library that runs coding agents. A routine calls PHD, and the supervisor watches the routine. PHD does not report to Stateous. It knows nothing of workflows.
 
 ```python
-# sdlc-worker/coding.py: an agent, run by PHD (see the guide, "Agents, with PHD")
+# sdlc-supervisor/coding.py: an agent, run by PHD (see the guide, "Agents, with PHD")
 import phd
 
 from stateous import on_state
@@ -665,9 +665,9 @@ These steps run the example on one computer, without PHD. You report `coding` yo
 Run the steps in a copy of this repository, in the environment that has Stateous:
 
 ```bash
-mkdir -p try/sdlc-worker
+mkdir -p try/sdlc-supervisor
 cp -r examples/sdlc try/
-cp examples/sdlc-worker/testing.py try/sdlc-worker/
+cp examples/sdlc-supervisor/testing.py try/sdlc-supervisor/
 cd try
 stateous compile sdlc/flow.py
 stateous serve sdlc/build/sdlc.json --db sqlite:///try.db
@@ -676,9 +676,9 @@ stateous serve sdlc/build/sdlc.json --db sqlite:///try.db
 In a second terminal, in `try/`:
 
 ```bash
-stateous init http://127.0.0.1:8080 sdlc-worker
-rm sdlc-worker/coding.py
-stateous supervise sdlc-worker
+stateous init http://127.0.0.1:8080 sdlc-supervisor
+rm sdlc-supervisor/coding.py
+stateous supervise sdlc-supervisor
 ```
 
 `init` writes a stub `coding.py`, because no file implements `coding`. You remove it: on this computer, you are the agent.

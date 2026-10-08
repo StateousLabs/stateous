@@ -28,7 +28,7 @@ CONTRACT_TEXT = (
 
 
 def folder_with(tmp_path: Path, config: str, contract: str = CONTRACT_TEXT) -> Path:
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
     folder.mkdir()
     (folder / "contract.py").write_text(contract, encoding="utf-8")
     (folder / "stateous.yaml").write_text(config, encoding="utf-8")
@@ -132,7 +132,7 @@ def test_a_stub_is_named_after_its_state() -> None:
 def test_a_new_folder_gets_the_contract_a_stub_per_state_and_stateous_yaml(
     tmp_path: Path,
 ) -> None:
-    folder = tmp_path / "new" / "sdlc-worker"
+    folder = tmp_path / "new" / "sdlc-supervisor"
 
     lines = write_folder(
         folder,
@@ -151,7 +151,7 @@ def test_a_new_folder_gets_the_contract_a_stub_per_state_and_stateous_yaml(
 
 
 def test_init_again_replaces_the_contract_and_keeps_everything_else(tmp_path: Path) -> None:
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
     write_folder(folder, url="http://a.test", contract="old\n", states=["coding"], stub=stub)
     (folder / "coding.py").write_text(stub("coding") + "# mine\n", encoding="utf-8")
     (folder / "stateous.yaml").write_text("url: http://b.test\ntasks: 9\n", encoding="utf-8")
@@ -168,7 +168,7 @@ def test_init_again_replaces_the_contract_and_keeps_everything_else(tmp_path: Pa
 
 
 def test_a_state_implemented_in_another_file_gets_no_stub(tmp_path: Path) -> None:
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
     folder.mkdir()
     (folder / "all_routines.py").write_text(stub("coding"), encoding="utf-8")
 
@@ -178,7 +178,7 @@ def test_a_state_implemented_in_another_file_gets_no_stub(tmp_path: Path) -> Non
 
 
 def test_a_file_with_the_stubs_name_is_never_written_over(tmp_path: Path) -> None:
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
     folder.mkdir()
     (folder / "coding.py").write_text("HELPERS = 1\n", encoding="utf-8")
 
@@ -222,7 +222,7 @@ def test_a_stub_never_takes_the_name_of_a_python_module(state: str) -> None:
 
 
 def test_init_says_why_a_stub_has_another_name(tmp_path: Path) -> None:
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
 
     lines = write_folder(
         folder, url="http://a.test", contract=CONTRACT_TEXT, states=["json", "coding"], stub=stub
@@ -261,7 +261,7 @@ def test_a_child_states_stub_is_named_after_its_workflow_and_state() -> None:
 
 def test_init_writes_a_stub_for_each_state_of_each_workflow(tmp_path: Path) -> None:
     document = parallel_document()
-    folder = tmp_path / "worker"
+    folder = tmp_path / "supervisor"
     folder.mkdir()
     (folder / "mine.py").write_text(generate_stub(document, "design/triage"), encoding="utf-8")
 
@@ -287,7 +287,7 @@ def test_init_writes_a_stub_for_each_state_of_each_workflow(tmp_path: Path) -> N
 
 
 def test_two_states_with_one_file_name_each_get_a_stub(tmp_path: Path) -> None:
-    folder = tmp_path / "worker"
+    folder = tmp_path / "supervisor"
 
     lines = write_folder(
         folder, url="http://a.test", contract=CONTRACT_TEXT, states=["a_b", "a/b"], stub=stub
@@ -300,7 +300,7 @@ def test_two_states_with_one_file_name_each_get_a_stub(tmp_path: Path) -> None:
 
 
 def test_a_numbered_stub_never_takes_the_name_of_another_state(tmp_path: Path) -> None:
-    folder = tmp_path / "worker"
+    folder = tmp_path / "supervisor"
 
     write_folder(
         folder,

@@ -261,12 +261,12 @@ def test_the_example_runs_as_real_processes(tmp_path: Path, processes: Processes
 
     # ── The supervisor's computer: init, then supervise ────────────────────
     computer = tmp_path / "computer"
-    folder = computer / "sdlc-worker"
+    folder = computer / "sdlc-supervisor"
     folder.mkdir(parents=True)
-    shutil.copy(EXAMPLES / "sdlc-worker" / "testing.py", folder / "testing.py")
-    processes.ok("init", url, "sdlc-worker", cwd=computer)
+    shutil.copy(EXAMPLES / "sdlc-supervisor" / "testing.py", folder / "testing.py")
+    processes.ok("init", url, "sdlc-supervisor", cwd=computer)
 
-    example = EXAMPLES / "sdlc-worker"
+    example = EXAMPLES / "sdlc-supervisor"
     contract = (folder / "contract.py").read_text(encoding="utf-8")
     assert contract == (example / "contract.py").read_text(encoding="utf-8")
     kept = (folder / "testing.py").read_text(encoding="utf-8")
@@ -289,7 +289,7 @@ def test_the_example_runs_as_real_processes(tmp_path: Path, processes: Processes
     assert "stateous init" in refused.stderr, refused.stderr
 
     supervise_log = tmp_path / "supervise.log"
-    supervising = processes.start("supervise", "sdlc-worker", cwd=computer, log=supervise_log)
+    supervising = processes.start("supervise", "sdlc-supervisor", cwd=computer, log=supervise_log)
 
     # ── The tokens ─────────────────────────────────────────────────────────
     passing = checkout(tmp_path / "repos" / "passing", PASSING)

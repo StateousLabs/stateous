@@ -64,7 +64,7 @@ pythonVersion = "3.11"
 typeCheckingMode = "strict"
 executionEnvironments = [
     { root = "examples/sdlc" },
-    { root = "examples/sdlc-worker", extraPaths = ["tests/examples/phd_stub"] },
+    { root = "examples/sdlc-supervisor", extraPaths = ["tests/examples/phd_stub"] },
 ]
 
 [tool.pytest.ini_options]

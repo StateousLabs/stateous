@@ -3,7 +3,7 @@ design says (section 3), and its `testing` routine does what the guide says.
 
 If a test of a committed file fails after a change to the compiler or the code
 generator, write the files again. First run `uv run stateous compile
-examples/sdlc/flow.py`. Then write examples/sdlc-worker/contract.py with
+examples/sdlc/flow.py`. Then write examples/sdlc-supervisor/contract.py with
 `generate_contract(load_graph(text))`, where `text` is the new graph file.
 """
 
@@ -27,7 +27,7 @@ from stateous.model.wire import EventRecord, TaskGrant
 
 ROOT = Path(__file__).parents[2]
 FLOW = ROOT / "examples" / "sdlc"
-FOLDER = ROOT / "examples" / "sdlc-worker"
+FOLDER = ROOT / "examples" / "sdlc-supervisor"
 GRAPH = FLOW / "build" / "sdlc.json"
 STATEOUS = [sys.executable, "-m", "stateous"]
 MODULES = ("contract", "testing", "coding", "phd")

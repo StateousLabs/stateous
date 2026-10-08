@@ -36,8 +36,8 @@ TYPER_OWN = {"--help", "--install-completion", "--show-completion"}
 EXAMPLE_FILES = {
     "sdlc/flow.py",
     "sdlc/schemas.py",
-    "sdlc-worker/testing.py",
-    "sdlc-worker/coding.py",
+    "sdlc-supervisor/testing.py",
+    "sdlc-supervisor/coding.py",
 }
 ROUTES = [  # contract §13
     "POST /tokens",
@@ -308,5 +308,5 @@ def test_sentences_are_short() -> None:
 def test_the_readme_leads_to_the_guide_and_the_example() -> None:
     readme = read(README)
 
-    for target in ("docs/guide.md", "examples/sdlc/", "examples/sdlc-worker/", "LICENSE"):
+    for target in ("docs/guide.md", "examples/sdlc/", "examples/sdlc-supervisor/", "LICENSE"):
         assert f"]({target}" in readme, target

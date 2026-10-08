@@ -122,9 +122,9 @@ def design_rejected(ctx: ReviewContext) -> events.design.recorded:
 """
 
 
-def worker(tmp_path: Path) -> Path:
+def supervisor_folder(tmp_path: Path) -> Path:
     """A supervisor's folder with one file of routines, for each state of each workflow."""
-    folder = tmp_path / "worker"
+    folder = tmp_path / "supervisor"
     folder.mkdir()
     (folder / "routines.py").write_text(ROUTINES, encoding="utf-8")
     return folder
@@ -132,7 +132,7 @@ def worker(tmp_path: Path) -> Path:
 
 def test_a_parallel_state_runs_its_children_end_to_end(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
-    folder = worker(tmp_path)
+    folder = supervisor_folder(tmp_path)
 
     with control_plane(graph, database(tmp_path)) as url:
         init_folder(url, folder)
@@ -163,7 +163,7 @@ def test_a_parallel_state_runs_its_children_end_to_end(tmp_path: Path) -> None:
 
 def test_a_waiting_child_is_steered_through_its_parent(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
-    folder = worker(tmp_path)
+    folder = supervisor_folder(tmp_path)
     slow = "T-2.reviews.1.design"
 
     with control_plane(graph, database(tmp_path)) as url:

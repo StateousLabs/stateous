@@ -110,8 +110,8 @@ def says(log: Path, text: str) -> bool:
     return text in text_of(log)
 
 
-def worker_folder(tmp_path: Path, url: str, routine: str = SLOW) -> Path:
-    folder = tmp_path / "slow-worker"
+def supervisor_folder(tmp_path: Path, url: str, routine: str = SLOW) -> Path:
+    folder = tmp_path / "slow-supervisor"
     init_folder(url, folder)
     (folder / "slow.py").write_text(routine, encoding="utf-8")
     return folder
@@ -121,7 +121,7 @@ def test_the_first_signal_waits_for_the_running_routine_then_exits_0(tmp_path: P
     graph = compile_flow(tmp_path, FLOW)
     log = tmp_path / "supervise.log"
     with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
-        folder = worker_folder(tmp_path, url)
+        folder = supervisor_folder(tmp_path, url)
         client.start("T-1")
         with started(["supervise", str(folder)], log) as process:
             wait_for(has_kind, client, "T-1", "task_claimed")
@@ -139,7 +139,7 @@ def test_the_second_signal_exits_1_while_the_routine_still_runs(tmp_path: Path) 
     graph = compile_flow(tmp_path, FLOW)
     log = tmp_path / "supervise.log"
     with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
-        folder = worker_folder(tmp_path, url)
+        folder = supervisor_folder(tmp_path, url)
         client.start("T-1")
         with started(["supervise", str(folder)], log) as process:
             wait_for(has_kind, client, "T-1", "task_claimed")
@@ -158,7 +158,7 @@ def test_the_second_signal_exits_1_when_a_routine_ignores_its_cancellation(
     graph = compile_flow(tmp_path, FLOW)
     log = tmp_path / "supervise.log"
     with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
-        folder = worker_folder(tmp_path, url, STUBBORN)
+        folder = supervisor_folder(tmp_path, url, STUBBORN)
         client.start("T-1")
         with started(["supervise", str(folder)], log) as process:
             wait_for(has_kind, client, "T-1", "task_claimed")
@@ -196,7 +196,7 @@ def serve_args(tmp_path: Path, graph: Path, port: int, folder: Path) -> list[str
 def released_folder(tmp_path: Path, graph: Path) -> Path:
     """A folder whose routine returns at once, made by `init` against another control plane."""
     with control_plane(graph, database(tmp_path, "init")) as init_url:
-        folder = worker_folder(tmp_path, init_url)
+        folder = supervisor_folder(tmp_path, init_url)
     (folder / "release").touch()
     return folder
 
@@ -278,7 +278,7 @@ def test_the_second_signal_exits_1_while_a_routine_waits_for_a_thread(tmp_path: 
     graph = compile_flow(tmp_path, FLOW)
     log = tmp_path / "supervise.log"
     with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
-        folder = worker_folder(tmp_path, url, IN_A_THREAD)
+        folder = supervisor_folder(tmp_path, url, IN_A_THREAD)
         client.start("T-1")
         with started(["supervise", str(folder)], log) as process:
             wait_for((folder / "in-thread").exists)

@@ -59,9 +59,9 @@ def test_many_pipelined_writes_and_long_queries_get_to_the_server() -> None:
 
     # A daemon thread: if it waits for ever, the test fails and the run goes on. The
     # session's teardown drops the database, and that ends the waiting backend.
-    worker = threading.Thread(target=rounds, daemon=True)
-    worker.start()
-    worker.join(timeout=LIMIT)
+    thread = threading.Thread(target=rounds, daemon=True)
+    thread.start()
+    thread.join(timeout=LIMIT)
 
     assert not errors, errors
     assert finished.is_set(), (

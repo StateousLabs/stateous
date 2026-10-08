@@ -1,4 +1,4 @@
-"""A stand-in for the PHD features that `examples/sdlc-worker/coding.py` uses.
+"""A stand-in for the PHD features that `examples/sdlc-supervisor/coding.py` uses.
 
 PHD is not a dependency of Stateous. The PHD author accepted these features on
 2026-10-06, but they are not released yet: `Dispatcher.run()`, `handle.session_id`,

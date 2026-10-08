@@ -1,4 +1,4 @@
-# sdlc-worker/coding.py: an agent, run by PHD (see the guide, "Agents, with PHD")
+# sdlc-supervisor/coding.py: an agent, run by PHD (see the guide, "Agents, with PHD")
 import phd
 
 from stateous import on_state

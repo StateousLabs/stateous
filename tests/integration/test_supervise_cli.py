@@ -34,7 +34,7 @@ flow.transition(in_progress, END, on=flow.event("passed"))
 
 def test_init_writes_a_folder_that_matches_the_control_plane(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
 
     with control_plane(graph, database(tmp_path)) as url, Client(url) as client:
         result = CliRunner().invoke(app, ["init", url, str(folder)])
@@ -53,7 +53,7 @@ def test_init_writes_a_folder_that_matches_the_control_plane(tmp_path: Path) -> 
 
 def test_init_again_replaces_the_contract_and_keeps_the_routines(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
 
     with control_plane(graph, database(tmp_path)) as url:
         init_folder(url, folder)
@@ -80,7 +80,7 @@ def test_init_refuses_an_unreachable_control_plane_in_one_sentence(tmp_path: Pat
 
 def test_supervise_refuses_a_contract_for_another_graph(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
-    folder = tmp_path / "sdlc-worker"
+    folder = tmp_path / "sdlc-supervisor"
 
     with control_plane(graph, database(tmp_path)) as url:
         init_folder(url, folder)

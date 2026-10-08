@@ -126,7 +126,7 @@ class Clock:
     """The control plane's clock (docs/design.md, section 7). Every `every` seconds it
     renews the hold on the database (`Store.keep_serving`) and then calls
     `engine.tick()` (due timers, timeouts, ended leases). Both are synchronous, so
-    they run on a worker thread. When another control plane took the hold, it sets
+    they run on a thread from the pool. When another control plane took the hold, it sets
     `lost`, logs one error line, calls `on_lost` (if set) once, and ends. A tick that
     fails, or a database that does not answer, is logged; the clock goes on."""
 
