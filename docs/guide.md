@@ -29,11 +29,12 @@ sdlc/                    the control plane's side: the workflow
   schemas.py             the context and payload models
   build/sdlc.json        written by `stateous compile`: the graph file
 
-sdlc-supervisor/             the supervisor's side, on any computer: no graph
+sdlc-supervisor/         the supervisor's side, on any computer: no graph
   contract.py            written by `stateous init`: states, their events, the models
   coding.py              @on_state(states.coding) ...
   testing.py             @on_state(states.testing) ...
   stateous.yaml          the control plane's URL, how many tasks at once
+  pyproject.toml         written by `stateous init` if absent: the folder is a Python project
 ```
 
 The supervisor's folder never holds `flow.py` or the graph file. Its routines import only `contract.py`.
@@ -163,20 +164,34 @@ stateous init http://cp.internal:8080 sdlc-supervisor
 
 - `contract.py`, always (it replaces the old file);
 - a stub `<state>.py` for each state that no file in the folder implements;
-- `stateous.yaml`, only if the folder does not have it.
+- `stateous.yaml`, only if the folder does not have it;
+- `pyproject.toml`, only if the folder does not have it.
 
-`init` never writes over a routine file or over `stateous.yaml`. A stub that would hide a Python module gets the name `<state>_routine.py`. For example, the state `queue` gets `queue_routine.py`. `init` prints one line for each file:
+`init` never writes over a routine file, over `stateous.yaml` or over `pyproject.toml`. A stub that would hide a Python module gets the name `<state>_routine.py`. For example, the state `queue` gets `queue_routine.py`. `init` prints one line for each file:
 
 ```text
 wrote    sdlc-supervisor/contract.py
 wrote    sdlc-supervisor/coding.py
 kept     the routine of 'testing'
 wrote    sdlc-supervisor/stateous.yaml
+wrote    sdlc-supervisor/pyproject.toml
 
 Write the routines, then run: stateous supervise sdlc-supervisor
 ```
 
 On Windows, the paths in these lines have `\` in place of `/`.
+
+The folder is a Python project of its own. Its `pyproject.toml` depends on Stateous. Add the packages that your routines import to `dependencies`. Then `uv sync` in the folder makes its environment, `.venv`.
+
+Stateous is not published yet. Until it is, give `init` the folder of a local Stateous checkout with `--stateous-path`:
+
+```bash
+stateous init http://cp.internal:8080 sdlc-supervisor --stateous-path ../stateous
+```
+
+Then `pyproject.toml` has a `[tool.uv.sources]` table that points `stateous` at that checkout. Delete the table when Stateous is published. `init` does not write the folder if the path is not a Stateous checkout.
+
+To edit the routines in VS Code, open the supervisor's folder and run `uv sync` in it. Then select `.venv` as the Python interpreter. VS Code then finds `stateous` and `contract.py`.
 
 Run `stateous init` again after each change to the workflow. `stateous supervise` does not start when `contract.py` does not agree with the control plane.
 
@@ -742,7 +757,7 @@ Stateous has five commands.
 |---|---|
 | `stateous compile FLOW [--out FILE]` | Check the workflow. Write the graph file. |
 | `stateous serve GRAPH [--db URL] [--listen HOST:PORT] [--supervise FOLDER]` | The control plane. `--supervise` also runs a supervisor in the same process, for development. |
-| `stateous init URL FOLDER` | Make a supervisor's folder: `contract.py`, a stub for each state, `stateous.yaml`. Run it again to update `contract.py`. |
+| `stateous init URL FOLDER [--stateous-path PATH]` | Make a supervisor's folder: `contract.py`, a stub for each state, `stateous.yaml`, `pyproject.toml`. Run it again to update `contract.py`. `--stateous-path` points the folder at a local Stateous checkout. |
 | `stateous supervise FOLDER` | The supervisor. |
 | `stateous token start ID [CONTEXT_JSON]` | Start a token. |
 | `stateous token fire ID EVENT [PAYLOAD_JSON] [--key K]` | Fire an event, with an optional idempotency key. |

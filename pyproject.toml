@@ -72,6 +72,7 @@ testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
 markers = [
     "e2e: the example as real processes, about 90 seconds; skip it with -m 'not e2e'",
+    "network: uv can need the package index; skip it offline with -m 'not network'",
 ]
 
 # ── Architecture ─────────────────────────────────────────────────────────

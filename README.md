@@ -26,8 +26,8 @@ stateous compile sdlc/flow.py                         # writes sdlc/build/sdlc.j
 stateous serve sdlc/build/sdlc.json --listen 0.0.0.0:8080
 
 # on the supervisor's computer
-stateous init http://cp.internal:8080 sdlc-supervisor     # contract.py, a stub per state, stateous.yaml
-stateous supervise sdlc-supervisor                        # runs the routines
+stateous init http://cp.internal:8080 sdlc-supervisor # contract.py, stubs, stateous.yaml, pyproject.toml
+stateous supervise sdlc-supervisor                    # runs the routines
 
 # anywhere
 stateous token start TICKET-1 '{"repo": "acme/api"}' --url http://cp.internal:8080

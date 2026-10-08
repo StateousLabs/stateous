@@ -94,13 +94,30 @@ def serve(
 def init(
     url: Annotated[str, typer.Argument(help="The control plane, e.g. http://127.0.0.1:8080.")],
     folder: Annotated[Path, typer.Argument(help="The supervisor's folder. Made if absent.")],
+    stateous_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--stateous-path",
+            help="A local Stateous checkout for the folder to depend on, until Stateous is "
+            "published.",
+        ),
+    ] = None,
 ) -> None:
     """Write a supervisor's folder: contract.py, a stub for each state with a routine
-    (of each workflow), stateous.yaml. Run it again to update contract.py."""
+    (of each workflow), stateous.yaml, pyproject.toml. Run it again to update
+    contract.py."""
+    from stateous.cli.errors import CommandError
+    from stateous.cli.project_file import checkout, write_pyproject
     from stateous.client.client import Client, ClientError
     from stateous.compiler.codegen import generate_contract, generate_stub, routine_states
     from stateous.supervisor.folder import write_folder
 
+    source: str | None = None
+    if stateous_path is not None:
+        try:
+            source = checkout(stateous_path)
+        except CommandError as error:
+            exit_with(str(error))
     try:
         with Client(url) as client:
             document = client.workflow()
@@ -115,6 +132,7 @@ def init(
         lines = write_folder(
             folder, url=url, contract=generate_contract(document), states=states, stub=stub
         )
+        lines.append(write_pyproject(folder, stateous_path=source))
     except OSError as error:
         exit_with(f"cannot write {folder}: {error.strerror or error}")
     for line in lines:

@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import time
+import tomllib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -274,6 +275,8 @@ def test_the_example_runs_as_real_processes(tmp_path: Path, processes: Processes
     assert (folder / "coding.py").is_file()  # a stub for the state with no routine
     settings = yaml.safe_load((folder / "stateous.yaml").read_text(encoding="utf-8"))
     assert settings["url"] == url
+    pyproject = tomllib.loads((folder / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["name"] == "sdlc-supervisor"
     (folder / "coding.py").unlink()  # nobody here runs `coding`: it is reported from outside
 
     # a contract that does not agree with the control plane: supervise refuses

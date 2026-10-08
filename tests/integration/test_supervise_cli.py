@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -12,6 +13,12 @@ from stateous.model.graph_file import checksum
 from stateous.supervisor.folder import load_folder
 
 from .supervising import compile_flow, control_plane, database, free_port, init_folder
+
+CHECKOUT = Path(__file__).resolve().parents[2]
+"""This repository: a Stateous checkout."""
+
+MINE = '[project]\nname = "mine"\n'
+"""A pyproject.toml that the user wrote."""
 
 FLOW = """
 from pydantic import BaseModel
@@ -49,6 +56,45 @@ def test_init_writes_a_folder_that_matches_the_control_plane(tmp_path: Path) -> 
     assert "@on_state(states.in_progress)" in (folder / "in_progress.py").read_text(
         encoding="utf-8"
     )
+    pyproject = tomllib.loads((folder / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["name"] == "sdlc-supervisor"
+    lines = result.output.splitlines()
+    assert lines.index(f"wrote    {folder / 'stateous.yaml'}") + 1 == lines.index(
+        f"wrote    {folder / 'pyproject.toml'}"
+    )
+
+
+def test_init_with_a_stateous_path_points_the_folder_at_that_checkout(tmp_path: Path) -> None:
+    graph = compile_flow(tmp_path, FLOW)
+    folder = tmp_path / "sdlc-supervisor"
+
+    with control_plane(graph, database(tmp_path)) as url:
+        result = CliRunner().invoke(
+            app, ["init", url, str(folder), "--stateous-path", str(CHECKOUT)]
+        )
+
+    assert result.exit_code == 0, result.output
+    pyproject = tomllib.loads((folder / "pyproject.toml").read_text(encoding="utf-8"))
+    source = pyproject["tool"]["uv"]["sources"]["stateous"]
+    assert source == {"path": CHECKOUT.as_posix(), "editable": True}
+
+
+def test_init_refuses_a_stateous_path_that_is_no_checkout_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    graph = compile_flow(tmp_path, FLOW)
+    folder = tmp_path / "sdlc-supervisor"
+
+    with control_plane(graph, database(tmp_path)) as url:
+        result = CliRunner().invoke(
+            app, ["init", url, str(folder), "--stateous-path", str(tmp_path)]
+        )
+
+    assert result.exit_code == 1
+    assert f"--stateous-path {tmp_path} is not a Stateous checkout" in result.output
+    assert len(result.output.strip().splitlines()) == 1
+    assert "Traceback" not in result.output
+    assert not folder.exists()
 
 
 def test_init_again_replaces_the_contract_and_keeps_the_routines(tmp_path: Path) -> None:
@@ -60,11 +106,15 @@ def test_init_again_replaces_the_contract_and_keeps_the_routines(tmp_path: Path)
         (folder / "contract.py").write_text("old\n", encoding="utf-8")
         mine = (folder / "coding.py").read_text(encoding="utf-8") + "# mine\n"
         (folder / "coding.py").write_text(mine, encoding="utf-8")
+        (folder / "pyproject.toml").write_text(MINE, encoding="utf-8")
         result = CliRunner().invoke(app, ["init", url, str(folder)])
 
     assert result.exit_code == 0, result.output
     assert "__checksum__" in (folder / "contract.py").read_text(encoding="utf-8")
     assert (folder / "coding.py").read_text(encoding="utf-8") == mine
+    pyproject = (folder / "pyproject.toml").read_text(encoding="utf-8")
+    assert pyproject == MINE
+    assert f"kept     {folder / 'pyproject.toml'}" in result.output
 
 
 def test_init_refuses_an_unreachable_control_plane_in_one_sentence(tmp_path: Path) -> None:
