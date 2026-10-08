@@ -5,13 +5,19 @@ from datetime import UTC, datetime
 import pytest
 
 from stateous.control.engine import (
+    AttemptOver,
+    ChildToken,
     Engine,
+    EngineError,
     EventNotAllowed,
     InvalidArgument,
     InvalidContext,
     InvalidPayload,
+    InvalidTokenId,
     TaskNotFound,
     TaskNotHeld,
+    TokenNotActive,
+    TokenNotFound,
 )
 from stateous.model.wire import EventRecord, Outcome, TaskGrant
 
@@ -481,6 +487,70 @@ def test_a_note_or_memory_from_an_old_attempt_is_refused() -> None:
     engine.note(grant.task, "now", attempt=2)
     engine.set_memory(grant.task, "dev", "s-2", attempt=2)
     assert memory_of(engine, "T-1", "coding") == {"dev": "s-2"}
+
+
+def test_a_request_for_an_old_attempt_raises_attempt_over() -> None:
+    """The request is for an attempt that is over: `AttemptOver`, a `TaskNotHeld`,
+    so the code `except TaskNotHeld` still catches it."""
+    engine = new_engine()
+    grant = requeued(engine)
+
+    with pytest.raises(AttemptOver) as report:
+        engine.report(grant.task, done(), supervisor="box-1", attempt=1)
+    with pytest.raises(AttemptOver):
+        engine.note(grant.task, "late", attempt=1)
+    with pytest.raises(AttemptOver):
+        engine.set_memory(grant.task, "dev", "s-1", attempt=1)
+
+    assert isinstance(report.value, TaskNotHeld)
+    assert report.value.code == "attempt_over"
+
+
+def test_a_request_for_an_attempt_that_did_not_start_is_not_attempt_over() -> None:
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+
+    with pytest.raises(TaskNotHeld) as caught:
+        engine.report(grant.task, done(), supervisor="box-1", attempt=2)
+
+    assert not isinstance(caught.value, AttemptOver)
+    assert caught.value.code == "task_not_held"
+
+
+def test_a_request_for_a_task_that_is_not_held_is_task_not_held() -> None:
+    engine = new_engine()
+    engine.start("T-1", TICKET)
+    grant = claimed(engine)
+
+    with pytest.raises(TaskNotHeld) as other:
+        engine.report(grant.task, done(), supervisor="box-2")
+    engine.report(grant.task, done(), supervisor="box-1")
+    with pytest.raises(TaskNotHeld) as ended:
+        engine.note(grant.task, "late")
+
+    assert (other.value.code, ended.value.code) == ("task_not_held", "task_not_held")
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (TokenNotFound, "token_not_found"),
+        (TaskNotFound, "task_not_found"),
+        (InvalidArgument, "invalid_argument"),
+        (InvalidContext, "invalid_context"),
+        (InvalidPayload, "invalid_payload"),
+        (InvalidTokenId, "invalid_token_id"),
+        (EventNotAllowed, "event_not_allowed"),
+        (TokenNotActive, "token_not_active"),
+        (ChildToken, "child_token"),
+        (TaskNotHeld, "task_not_held"),
+        (AttemptOver, "attempt_over"),
+    ],
+)
+def test_each_engine_error_declares_its_code(error: type[EngineError], code: str) -> None:
+    assert error.code == code
+    assert error("x").code == code
 
 
 def test_a_report_without_an_attempt_is_taken_as_before() -> None:

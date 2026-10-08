@@ -51,7 +51,10 @@ def test_a_parent_query_that_is_too_long_is_422(http: TestClient) -> None:
     answer = http.get("/tokens", params={"parent": "x" * 129})
 
     assert answer.status_code == 422
-    assert answer.json() == {"error": "'parent' is a token id of 1 to 128 characters"}
+    assert answer.json() == {
+        "error": "'parent' is a token id of 1 to 128 characters",
+        "code": "invalid_argument",
+    }
 
 
 @pytest.mark.parametrize("action", ["pause", "resume", "cancel"])
@@ -59,6 +62,7 @@ def test_a_child_cannot_be_steered_alone_409(http: TestClient, action: str) -> N
     answer = http.post(f"/tokens/{SECURITY}/{action}")
 
     assert answer.status_code == 409
+    assert answer.json()["code"] == "child_token"
     error = answer.json()["error"]
     assert "it is part of its parent's work" in error
     assert error.endswith(f"{action} 'T-1' instead")

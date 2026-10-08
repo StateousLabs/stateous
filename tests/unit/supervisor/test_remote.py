@@ -193,15 +193,29 @@ def test_the_backoff_grows_to_30_seconds_and_stays_there() -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "answer", "message"),
+    ("status", "answer", "message", "code"),
     [
-        (409, {"error": "task 7 is not this supervisor's"}, "task 7 is not this supervisor's"),
-        (422, {"error": "text is empty"}, "text is empty"),
-        (404, None, "Not Found"),
-        (500, None, "the control plane answered 500"),
+        (
+            409,
+            {"error": "task 7 is not this supervisor's", "code": "task_not_held"},
+            "task 7 is not this supervisor's",
+            "task_not_held",
+        ),
+        (
+            422,
+            {"error": "text is empty", "code": "invalid_payload"},
+            "text is empty",
+            "invalid_payload",
+        ),
+        (422, {"error": "text is empty"}, "text is empty", None),
+        (409, {"error": "no", "code": ["attempt_over"]}, "no", None),
+        (404, None, "Not Found", None),
+        (500, None, "the control plane answered 500", None),
     ],
 )
-def test_a_refusal_is_not_tried_again(status: int, answer: Any, message: str) -> None:
+def test_a_refusal_is_not_tried_again(
+    status: int, answer: Any, message: str, code: str | None
+) -> None:
     delays: list[float] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -220,6 +234,7 @@ def test_a_refusal_is_not_tried_again(status: int, answer: Any, message: str) ->
         asyncio.run(scenario())
 
     assert (refused.value.status, refused.value.message, delays) == (status, message, [])
+    assert refused.value.code == code
 
 
 def test_a_claim_that_waits_to_try_again_gives_up_when_stop_is_set() -> None:

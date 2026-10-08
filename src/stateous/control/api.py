@@ -2,8 +2,10 @@
 
 There are no keys and no tenants: a caller that reaches the port may call every
 route. `stateous serve` listens on 127.0.0.1 by default. Every refusal is
-`{"error": "<one plain sentence>"}`. The engine is synchronous and does one
-transaction for each call, so each call runs on a thread from the pool."""
+`{"error": "<one plain sentence>", "code": "<code>"}` (design section 5.4). The
+sentence is for people and can change; the code is stable, and clients read it.
+The engine is synchronous and does one transaction for each call, so each call
+runs on a thread from the pool."""
 
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ from stateous.control.engine import (
     REQUEST_PATTERN,
     ChildToken,
     Engine,
+    EngineError,
     Entry,
     EventNotAllowed,
     InvalidArgument,
@@ -83,11 +86,14 @@ Handler = Callable[[Request, Exception], Awaitable[Response]]
 
 
 class Problem(Exception):
-    """A request that the API refuses, with the status and one plain sentence."""
+    """A request that the API refuses, with the status, one plain sentence and the
+    code of the refusal (design section 5.4). The code is `bad_request` when the
+    request names none."""
 
-    def __init__(self, status: int, message: str) -> None:
+    def __init__(self, status: int, message: str, code: str = "bad_request") -> None:
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 def create_app(engine: Engine) -> Starlette:
@@ -98,7 +104,7 @@ def create_app(engine: Engine) -> Starlette:
     async def start(request: Request) -> Response:
         body = await body_of(request)
         token = token_id(body.get("token"))
-        context = _object(body.get("context"), "context") or {}
+        context = _object(body.get("context"), "context", "invalid_context") or {}
         existed = await run_in_threadpool(lambda: _exists(engine, token))
         started = await run_in_threadpool(lambda: engine.start(token, context))
         return JSONResponse(token_json(started), status_code=200 if existed else 201)
@@ -106,7 +112,7 @@ def create_app(engine: Engine) -> Starlette:
     async def list_tokens(request: Request) -> Response:
         status = request.query_params.get("status")
         if status is not None and status not in STATUSES:
-            raise Problem(422, f"'status' is one of: {', '.join(STATUSES)}")
+            raise Problem(422, f"'status' is one of: {', '.join(STATUSES)}", "invalid_argument")
         limit = _limit(request.query_params.get("limit"))
         parent = _parent(request.query_params.get("parent"))
         found = await run_in_threadpool(
@@ -126,7 +132,8 @@ def create_app(engine: Engine) -> Starlette:
     async def fire(request: Request) -> Response:
         token: str = request.path_params["token"]
         event: str = request.path_params["event"]
-        payload = _object((await body_of(request)).get("payload"), "payload")
+        body = await body_of(request)
+        payload = _object(body.get("payload"), "payload", "invalid_payload")
         key = request.headers.get("idempotency-key")
         if key is not None:
             _check_key(key)
@@ -149,7 +156,7 @@ def create_app(engine: Engine) -> Starlette:
 
     async def claim(request: Request) -> Response:
         body = await body_of(request)
-        supervisor = _name(body.get("supervisor"), "supervisor", MAX_SUPERVISOR)
+        supervisor = _supervisor(body.get("supervisor"))
         states = _names(body.get("states"), "states")
         request_id = _request_id(body.get("request"))
         grant = await run_in_threadpool(
@@ -163,14 +170,14 @@ def create_app(engine: Engine) -> Starlette:
         task = _task(request)
         body = await body_of(request)
         named = body.pop("supervisor", None)
-        supervisor = None if named is None else _name(named, "supervisor", MAX_SUPERVISOR)
+        supervisor = None if named is None else _supervisor(named)
         outcome = Outcome.from_json(body)
         fired = await run_in_threadpool(lambda: engine.report(task, outcome, supervisor=supervisor))
         return JSONResponse(token_json(fired.token))
 
     async def heartbeat(request: Request) -> Response:
         body = await body_of(request)
-        supervisor = _name(body.get("supervisor"), "supervisor", MAX_SUPERVISOR)
+        supervisor = _supervisor(body.get("supervisor"))
         tasks = _task_ids(body.get("tasks"))
         lost = await run_in_threadpool(lambda: engine.heartbeat(supervisor, tasks))
         return JSONResponse({"lost": lost})
@@ -185,9 +192,9 @@ def create_app(engine: Engine) -> Starlette:
     async def memory(request: Request) -> Response:
         task = _task(request)
         body = await body_of(request)
-        key = _name(body.get("key"), "key")
+        key = _name(body.get("key"), "key", code="invalid_payload")
         if "value" not in body:
-            raise Problem(422, "memory needs a 'value'; null deletes the key")
+            raise Problem(422, "memory needs a 'value'; null deletes the key", "invalid_body")
         value, attempt = body["value"], _attempt(body.get("attempt"))
         await run_in_threadpool(lambda: engine.set_memory(task, key, value, attempt=attempt))
         return Response(status_code=204)
@@ -251,7 +258,7 @@ def token_id(value: Any) -> str:
     """`value` as a new token's id; 422 if it is not a string. The engine checks the
     id's form and the case-folded clash, and raises `InvalidTokenId` (422)."""
     if not isinstance(value, str):
-        raise Problem(422, "'token' is the token's id: a string")
+        raise Problem(422, "'token' is the token's id: a string", "invalid_token_id")
     return value
 
 
@@ -263,12 +270,13 @@ def _exists(engine: Engine, token: str) -> bool:
     return True
 
 
-def _object(value: Any, what: str) -> dict[str, Any] | None:
-    """A JSON object from a body, or None when it is absent or null."""
+def _object(value: Any, what: str, code: str) -> dict[str, Any] | None:
+    """A JSON object from a body, or None when it is absent or null. Else 422 with
+    `code`."""
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise Problem(422, f"'{what}' must be a JSON object, or null")
+        raise Problem(422, f"'{what}' must be a JSON object, or null", code)
     return cast("dict[str, Any]", value)
 
 
@@ -277,47 +285,54 @@ def _limit(value: str | None) -> int:
         return 100
     wrong = f"'limit' is a whole number from 1 to {MAX_LIMIT}"
     if not value.isdecimal() or len(value) > MAX_DIGITS:
-        raise Problem(422, wrong)
+        raise Problem(422, wrong, "invalid_argument")
     limit = int(value)
     if not 1 <= limit <= MAX_LIMIT:
-        raise Problem(422, wrong)
+        raise Problem(422, wrong, "invalid_argument")
     return limit
 
 
 def _parent(value: str | None) -> str | None:
     """The `parent` of a listing: a token id; None when the query names none."""
     if value is not None and not 1 <= len(value) <= MAX_TOKEN:
-        raise Problem(422, f"'parent' is a token id of 1 to {MAX_TOKEN} characters")
+        raise Problem(
+            422, f"'parent' is a token id of 1 to {MAX_TOKEN} characters", "invalid_argument"
+        )
     return value
 
 
 def _check_key(key: str) -> None:
     if not 1 <= len(key) <= MAX_KEY:
-        raise Problem(422, f"an idempotency key has 1 to {MAX_KEY} characters")
+        raise Problem(422, f"an idempotency key has 1 to {MAX_KEY} characters", "invalid_payload")
     if any(ord(c) < 32 or ord(c) == 127 for c in key):
-        raise Problem(422, "an idempotency key has no control characters")
+        raise Problem(422, "an idempotency key has no control characters", "invalid_payload")
 
 
 def _task(request: Request) -> int:
     """The task id in the path. An id that no database integer holds is not there."""
     task: int = request.path_params["task"]
     if task > MAX_TASK:
-        raise Problem(404, f"there is no task {task}")
+        raise Problem(404, f"there is no task {task}", "task_not_found")
     return task
 
 
-def _name(value: Any, what: str, limit: int = MAX_NAME) -> str:
+def _name(value: Any, what: str, limit: int = MAX_NAME, *, code: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= limit:
-        raise Problem(422, f"'{what}' is a string of 1 to {limit} characters")
+        raise Problem(422, f"'{what}' is a string of 1 to {limit} characters", code)
     return value
+
+
+def _supervisor(value: Any) -> str:
+    """A supervisor's name, as the engine takes it; else 422 `invalid_argument`."""
+    return _name(value, "supervisor", MAX_SUPERVISOR, code="invalid_argument")
 
 
 def _names(value: Any, what: str) -> list[str]:
     items = cast("list[Any]", value) if isinstance(value, list) else None
     if items is None or not all(isinstance(i, str) and 1 <= len(i) <= MAX_STATE for i in items):
-        raise Problem(422, f"'{what}' is a list of state names")
+        raise Problem(422, f"'{what}' is a list of state names", "invalid_body")
     if len(items) > MAX_ITEMS:
-        raise Problem(422, f"'{what}' has at most {MAX_ITEMS} state names")
+        raise Problem(422, f"'{what}' has at most {MAX_ITEMS} state names", "invalid_argument")
     return cast("list[str]", items)
 
 
@@ -326,7 +341,9 @@ def _request_id(value: Any) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not re.fullmatch(REQUEST_PATTERN, value):
-        raise Problem(422, "'request' is 1 to 64 letters, digits, '.', '_' or '-'")
+        raise Problem(
+            422, "'request' is 1 to 64 letters, digits, '.', '_' or '-'", "invalid_argument"
+        )
     return value
 
 
@@ -335,9 +352,9 @@ def _task_ids(value: Any) -> list[int]:
     if items is None or not all(
         isinstance(i, int) and not isinstance(i, bool) and 0 < i <= MAX_TASK for i in items
     ):
-        raise Problem(422, "'tasks' is a list of task ids")
+        raise Problem(422, "'tasks' is a list of task ids", "invalid_body")
     if len(items) > MAX_ITEMS:
-        raise Problem(422, f"'tasks' has at most {MAX_ITEMS} task ids")
+        raise Problem(422, f"'tasks' has at most {MAX_ITEMS} task ids", "invalid_argument")
     return cast("list[int]", items)
 
 
@@ -346,14 +363,16 @@ def _attempt(value: Any) -> int | None:
     if value is None:
         return None
     if type(value) is not int or not 1 <= value <= MAX_TASK:
-        raise Problem(422, "'attempt' is a whole number of 1 or more")
+        raise Problem(422, "'attempt' is a whole number of 1 or more", "invalid_argument")
     return value
 
 
 def _note(value: Any) -> str:
     text = value.strip() if isinstance(value, str) else ""
     if not 1 <= len(text) <= MAX_NOTE:
-        raise Problem(422, f"a note needs a 'text' of 1 to {MAX_NOTE} characters")
+        raise Problem(
+            422, f"a note needs a 'text' of 1 to {MAX_NOTE} characters", "invalid_payload"
+        )
     return text
 
 
@@ -367,7 +386,7 @@ async def body_of(request: Request) -> dict[str, Any]:
     except ValueError as error:
         raise Problem(400, f"the body is not JSON: {error}") from None
     if not isinstance(body, dict):
-        raise Problem(422, "the body must be a JSON object")
+        raise Problem(422, "the body must be a JSON object", "invalid_body")
     return cast("dict[str, Any]", body)
 
 
@@ -424,7 +443,7 @@ class BodyLimit:
         chunked = b"transfer-encoding" in headers
         too_long = len(declared) > MAX_DIGITS
         if not chunked and declared.isdigit() and (too_long or int(declared) > self.limit):
-            await _send_json(send, 413, {"error": self._too_large()})
+            await _send_json(send, 413, self._too_large())
             return
         arrived: list[Message] = []
         seen = 0
@@ -435,7 +454,7 @@ class BodyLimit:
                 break  # the client went away: the route sees that
             seen += len(cast("bytes", message.get("body", b"")))
             if seen > self.limit:
-                await _send_json(send, 413, {"error": self._too_large()})
+                await _send_json(send, 413, self._too_large())
                 return
             if not message.get("more_body", False):
                 break
@@ -445,8 +464,11 @@ class BodyLimit:
 
         await self.app(scope, replayed, send)
 
-    def _too_large(self) -> str:
-        return f"the body is larger than {_size(self.limit)}, the most this API reads"
+    def _too_large(self) -> dict[str, str]:
+        """The refusal of a body that is too large. The table of codes has no row for
+        it: `bad_request` is the nearest, with the status of the problem (413)."""
+        error = f"the body is larger than {_size(self.limit)}, the most this API reads"
+        return {"error": error, "code": "bad_request"}
 
 
 def _size(limit: int) -> str:
@@ -472,43 +494,55 @@ async def _send_json(send: Send, status: int, content: dict[str, Any]) -> None:
 # ── refusals ────────────────────────────────────────────────────────────
 
 
-def refusal(status: int, message: str) -> JSONResponse:
-    return JSONResponse({"error": message}, status_code=status)
+def refusal(status: int, message: str, code: str) -> JSONResponse:
+    """A refusal: `{"error": message, "code": code}` with `status`."""
+    return JSONResponse({"error": message, "code": code}, status_code=status)
 
 
 async def _problem(request: Request, error: Exception) -> Response:
-    return refusal(error.status if isinstance(error, Problem) else 400, str(error))
+    if isinstance(error, Problem):
+        return refusal(error.status, str(error), error.code)
+    return refusal(400, str(error), "bad_request")
 
 
 async def _http_error(request: Request, error: Exception) -> Response:
-    """Starlette's own refusals (no such path, a wrong method) as JSON."""
+    """Starlette's own refusals (no such path, a wrong method) as JSON. Another
+    status is `bad_request` below 500, else `unexpected`."""
     status = error.status_code if isinstance(error, HTTPException) else 500
     if status == 404:
-        return refusal(404, f"this API has no {request.url.path}")
+        return refusal(404, f"this API has no {request.url.path}", "not_found")
     if status == 405:
-        return refusal(405, f"{request.url.path} does not take {request.method}")
+        message = f"{request.url.path} does not take {request.method}"
+        return refusal(405, message, "method_not_allowed")
     detail = error.detail if isinstance(error, HTTPException) else "the request failed"
-    return refusal(status, str(detail))
+    return refusal(status, str(detail), "unexpected" if status >= 500 else "bad_request")
 
 
-def _answer(status: int) -> Handler:
-    """An exception handler that answers `status` with the error's one sentence."""
+def _answer(status: int, code: str | None = None) -> Handler:
+    """An exception handler that answers `status` with the error's one sentence. The
+    code is `code`; without it, the code that the engine error declares."""
 
     async def handle(request: Request, error: Exception) -> Response:
         message = str(error.args[0]) if error.args else type(error).__name__
-        return refusal(status, message)
+        if code is not None:
+            named = code
+        elif isinstance(error, EngineError):
+            named = error.code
+        else:
+            named = "unexpected"
+        return refusal(status, message, named)
 
     return handle
 
 
 async def _database_busy(request: Request, error: Exception) -> Response:
     """The database could not finish the transaction. One sentence; no detail."""
-    return refusal(503, "the database cannot take this request now; try again")
+    return refusal(503, "the database cannot take this request now; try again", "database_busy")
 
 
 async def _unexpected(request: Request, error: Exception) -> Response:
     """Anything no handler above names: one sentence, never a traceback in the body."""
-    return refusal(500, "the request failed unexpectedly")
+    return refusal(500, "the request failed unexpectedly", "unexpected")
 
 
 _HANDLERS: dict[Any, Handler] = {
@@ -524,7 +558,7 @@ _HANDLERS: dict[Any, Handler] = {
     ChildToken: _answer(409),
     TaskNotFound: _answer(404),
     TaskNotHeld: _answer(409),
-    WireError: _answer(422),
+    WireError: _answer(422, "invalid_body"),
     OperationalError: _database_busy,
     Exception: _unexpected,
 }

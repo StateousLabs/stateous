@@ -113,7 +113,7 @@ def test_report_with_an_attempt_is_refused_for_an_attempt_that_is_over(
     with pytest.raises(Refused) as refused:
         client.report(again.task, "done", attempt=1)
 
-    assert refused.value.status == 409
+    assert (refused.value.status, refused.value.code) == (409, "attempt_over")
     assert client.get("T-1")["state"] == "coding"
     assert client.report(again.task, "done", attempt=2)["state"] == "testing"
 
@@ -127,6 +127,7 @@ def test_an_unknown_token_is_not_found(client: Client) -> None:
         client.get("NOPE")
 
     assert caught.value.status == 404
+    assert caught.value.code == "token_not_found"
     assert caught.value.message
     assert "(404)" in str(caught.value)
 
@@ -143,6 +144,7 @@ def test_a_refusal_carries_the_status_and_the_reason(client: Client) -> None:
         client.fire("T-1", "passed", {"passed": 1, "failed": 0})
 
     assert caught.value.status == 409
+    assert caught.value.code == "event_not_allowed"
     assert not isinstance(caught.value, NotFound)
     assert caught.value.message in str(caught.value)
 
@@ -166,6 +168,22 @@ def test_a_refusal_that_is_not_json_keeps_its_text() -> None:
         client.get("T-1")
 
     assert (caught.value.status, caught.value.message) == (502, "bad gateway")
+    assert caught.value.code is None
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        ('{"error": "no", "code": "task_not_held"}', "task_not_held"),
+        ('{"error": "no"}', None),
+        ('{"error": "no", "code": 7}', None),
+    ],
+)
+def test_a_refusal_carries_the_code_of_its_body(body: str, code: str | None) -> None:
+    with answering(409, body) as client, pytest.raises(Refused) as caught:
+        client.get("T-1")
+
+    assert (caught.value.status, caught.value.message, caught.value.code) == (409, "no", code)
 
 
 def test_a_url_that_is_not_a_url_is_one_client_error() -> None:

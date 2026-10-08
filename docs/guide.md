@@ -438,7 +438,7 @@ c.close()
 
 `Client` is also a context manager: `with Client(url) as c: ...`.
 
-A routine that returns `None` leaves its task waiting. The outside actor then calls `c.report(task, event, payload)` with the task's id. With `attempt=N`, the control plane refuses the report (409) when the task is not on attempt N. The client raises `Refused` (from `stateous.client`) when the control plane refuses a call. `Refused` has `.status` and `.message`. It raises `Unreachable` when the control plane does not answer.
+A routine that returns `None` leaves its task waiting. The outside actor then calls `c.report(task, event, payload)` with the task's id. With `attempt=N`, the control plane refuses the report (409) when the task is not on attempt N. The client raises `Refused` (from `stateous.client`) when the control plane refuses a call. `Refused` has `.status`, `.message` and `.code`. `.code` is the code of the refusal, for example `attempt_over` (see [The HTTP API](#the-http-api)). It is `None` when the answer has no code, for example an answer from a proxy. Use `.code` in your program. `.message` is for people, and it can change. The client raises `Unreachable` when the control plane does not answer.
 
 ## Agents, with PHD
 
@@ -723,16 +723,33 @@ The supervisor runs the tests, and the token completes. This takes a few seconds
 
 ## The HTTP API
 
-The API has no prefix. Bodies are JSON. An error is `{"error": "<one sentence>"}`, with one of these statuses:
+The API has no prefix. Bodies are JSON. An error has a sentence and a code:
 
-- 400: the body is not JSON;
-- 404: there is no such token, task or path;
-- 409: the token or the task cannot do this now, for example an event that the state does not allow;
-- 405: the path does not take this method;
-- 413: the body is larger than 1 MiB;
-- 422: a value is not correct, for example a context that does not agree with its model;
-- 500: an unexpected failure;
-- 503: the database cannot take the request now.
+```json
+{"error": "task 7 is at attempt 2, not attempt 1", "code": "attempt_over"}
+```
+
+The sentence is for people, and it can change. The code does not change: a program reads the code, never the sentence.
+
+| Code | Status | Meaning |
+|---|---|---|
+| `token_not_found` | 404 | No token has this id. |
+| `task_not_found` | 404 | No task has this id. |
+| `not_found` | 404 | The API has no such path. |
+| `method_not_allowed` | 405 | The path does not take this method. |
+| `bad_request` | 400 (or the status of the problem, for example 413 for a body larger than 1 MiB) | The request cannot be read: bad JSON, a bad header. |
+| `invalid_argument` | 422 | A supervisor name, a request id, a limit or an attempt is out of range. |
+| `invalid_context` | 422 | A context or a context change does not agree with its model. |
+| `invalid_payload` | 422 | A payload, a schedule, a note, a memory write or an idempotency key is not valid. |
+| `invalid_token_id` | 422 | A token id breaks the pattern, or differs only in case from an existing one. |
+| `invalid_body` | 422 | The body does not have the shape of the request. |
+| `event_not_allowed` | 409 | The event cannot move the token in its state. |
+| `token_not_active` | 409 | The token's status does not allow the request. |
+| `child_token` | 409 | The token is a child of a parallel state; steer its top token. |
+| `task_not_held` | 409 | The task is not this supervisor's, or no one works on it now. |
+| `attempt_over` | 409 | The request is for an attempt of the task that is over: the task moved to a new attempt. |
+| `database_busy` | 503 | The database cannot take the request now; try again. |
+| `unexpected` | 500 | The request failed for a reason that no code above names. |
 
 | Method and path | What it does |
 |---|---|
@@ -756,7 +773,7 @@ A report from outside, for a waiting task, has no `supervisor`. A supervisor's o
 
 `request` in a claim is a request id: 1 to 64 letters, digits, `.`, `_` or `-`. The control plane keeps the last request id of each supervisor, and the task that it got. A claim with the same id gets the same task again, if the supervisor still holds it. Else the claim takes a new task. The supervisor makes a new id after each answer.
 
-`attempt` is optional in a report, a note and a memory write. It names the attempt of the task that the request is for. When the task is on a different attempt, the control plane refuses the request with 409. So a late report of an old attempt cannot land on a new attempt. The supervisor always sends the attempt of its grant. A request without `attempt`, for example from CI or a person, is for the current attempt.
+`attempt` is optional in a report, a note and a memory write. It names the attempt of the task that the request is for. When the task is on a different attempt, the control plane refuses the request with 409. The code is `attempt_over` when the task moved to a new attempt. So a late report of an old attempt cannot land on a new attempt. The supervisor always sends the attempt of its grant. A request without `attempt`, for example from CI or a person, is for the current attempt.
 
 ## The commands
 

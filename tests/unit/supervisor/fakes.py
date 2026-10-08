@@ -104,7 +104,7 @@ class FakeApi:
         if self.refusals:
             raise self.refusals.pop(0)
         if self.refuse_reports:
-            raise Refused(409, f"task {task} is not this supervisor's")
+            raise Refused(409, f"task {task} is not this supervisor's", code="task_not_held")
         self.reports[task] = outcome
 
     async def heartbeat(
@@ -125,7 +125,7 @@ class FakeApi:
         self.attempts.append(("note", task, attempt))
         await asyncio.sleep(self.note_delay)
         if self.refuse_notes:
-            raise Refused(409, f"task {task} is not this supervisor's")
+            raise Refused(409, f"task {task} is not this supervisor's", code="task_not_held")
         self.calls.append(("note", task, text))
 
     async def set_memory(

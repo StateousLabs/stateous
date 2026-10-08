@@ -28,10 +28,9 @@ import typer
 import uvicorn
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from stateous.control.api import create_app
+from stateous.control.api import create_app, refusal
 from stateous.control.engine import Engine, RecordedGraph
 from stateous.control.graph import Graph
 from stateous.control.store import DatabaseHeld, ForeignDatabase, Store
@@ -204,7 +203,8 @@ class Clock:
 class ClockedApp:
     """The API as `serve` runs it. Its ASGI lifespan runs the clock while the server
     serves: the clock starts when the server starts, and the server's stop waits for
-    the tick in progress. After a lost hold, each request gets 503 and `LOST`."""
+    the tick in progress. After a lost hold, each request gets 503, `LOST` and the
+    code `database_busy`."""
 
     def __init__(self, api: ASGIApp, clock: Clock) -> None:
         self.api = api
@@ -214,7 +214,9 @@ class ClockedApp:
         if scope["type"] == "lifespan":
             await self._lifespan(receive, send)
         elif self.clock.lost and scope["type"] == "http":
-            await JSONResponse({"error": LOST}, status_code=503)(scope, receive, send)
+            # The table of codes has no row for a lost hold: `database_busy` (503) is
+            # the nearest.
+            await refusal(503, LOST, "database_busy")(scope, receive, send)
         else:
             await self.api(scope, receive, send)
 

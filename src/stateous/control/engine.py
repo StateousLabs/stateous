@@ -32,7 +32,7 @@ from collections.abc import Callable, Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, ParamSpec, TypeVar, cast
+from typing import Any, ClassVar, Literal, ParamSpec, TypeVar, cast
 
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -104,54 +104,85 @@ def _retried(call: Callable[_P, _R]) -> Callable[_P, _R]:
 
 
 class EngineError(Exception):
-    """The base of every error that the engine raises for a request."""
+    """The base of every error that the engine raises for a request. `code` is the
+    stable code of the refusal (docs/design.md, section 5.4): the API sends it, and
+    clients read it, never the sentence."""
+
+    code: ClassVar[str] = "unexpected"
 
 
 class TokenNotFound(EngineError, LookupError):
     """No token has this id."""
 
+    code: ClassVar[str] = "token_not_found"
+
 
 class TaskNotFound(EngineError, LookupError):
     """No task has this id."""
+
+    code: ClassVar[str] = "task_not_found"
 
 
 class InvalidContext(EngineError, ValueError):
     """A context, or a routine's changes to it, breaks the workflow's context schema;
     or no transition from START holds on the starting context."""
 
+    code: ClassVar[str] = "invalid_context"
+
 
 class InvalidPayload(EngineError, ValueError):
     """A payload breaks its event's schema; or a schedule, a note, a memory key or
     value, or an idempotency key is not valid."""
+
+    code: ClassVar[str] = "invalid_payload"
 
 
 class InvalidArgument(EngineError, ValueError):
     """A supervisor name, a claim's request id or a listing limit is out of its range;
     or a report's `attempt` argument and its outcome's `attempt` differ."""
 
+    code: ClassVar[str] = "invalid_argument"
+
 
 class InvalidTokenId(EngineError, ValueError):
     """A token id does not match the allowed pattern, or differs only in case from
     an existing one."""
+
+    code: ClassVar[str] = "invalid_token_id"
 
 
 class EventNotAllowed(EngineError, ValueError):
     """The event cannot move the token: the workflow does not declare it, it is
     Stateous's own, the state has no transition on it, or no guard holds."""
 
+    code: ClassVar[str] = "event_not_allowed"
+
 
 class TokenNotActive(EngineError, ValueError):
     """The token is in a status that does not allow the request."""
 
+    code: ClassVar[str] = "token_not_active"
+
 
 class TaskNotHeld(EngineError, ValueError):
-    """The task is not this supervisor's, no one works on it any more, or the
-    request is for an attempt of it that is over."""
+    """The task is not this supervisor's, or no one works on it now (or on the
+    attempt that the request names)."""
+
+    code: ClassVar[str] = "task_not_held"
+
+
+class AttemptOver(TaskNotHeld):
+    """The request is for an attempt of the task that is over: the task moved to a
+    new attempt. It is a `TaskNotHeld`, so `except TaskNotHeld` also catches it."""
+
+    code: ClassVar[str] = "attempt_over"
 
 
 class ChildToken(EngineError, ValueError):
     """The token is a child of a parallel state: it is part of its parent's work. It
     cannot be paused, resumed or cancelled on its own; steer its top token."""
+
+    code: ClassVar[str] = "child_token"
 
 
 @dataclass(frozen=True)
@@ -736,7 +767,11 @@ class Engine:
         if task is None:
             raise TaskNotFound(f"there is no task {task_id}")
         if attempt is not None and attempt != task.attempt:
-            raise TaskNotHeld(f"task {task_id} is at attempt {task.attempt}, not attempt {attempt}")
+            # A request for an old attempt: that attempt is over. A request for an
+            # attempt that did not start: no one works on that attempt.
+            over = attempt < task.attempt
+            refused = AttemptOver if over else TaskNotHeld
+            raise refused(f"task {task_id} is at attempt {task.attempt}, not attempt {attempt}")
         if task.status not in WORKED_ON:
             raise TaskNotHeld(f"task {task_id} is {task.status}; no one works on it now")
         if supervisor is not None and (task.status != "claimed" or task.claimed_by != supervisor):

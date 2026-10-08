@@ -270,7 +270,7 @@ def test_an_unnamed_engine_error_is_500_with_one_sentence(
     answer = bare.post("/tasks/claim", json={"supervisor": "box-1", "states": ["coding"]})
 
     assert answer.status_code == 500
-    assert answer.json() == {"error": "the request failed unexpectedly"}
+    assert answer.json() == {"error": "the request failed unexpectedly", "code": "unexpected"}
 
 
 def test_a_database_outage_is_503_with_one_sentence(
@@ -285,7 +285,10 @@ def test_a_database_outage_is_503_with_one_sentence(
     answer = bare.post("/tasks/claim", json={"supervisor": "box-1", "states": ["coding"]})
 
     assert answer.status_code == 503
-    assert answer.json() == {"error": "the database cannot take this request now; try again"}
+    assert answer.json() == {
+        "error": "the database cannot take this request now; try again",
+        "code": "database_busy",
+    }
 
 
 def test_a_claim_of_more_than_1000_states_is_422(http: TestClient) -> None:
@@ -393,6 +396,7 @@ def test_a_late_report_note_or_memory_from_an_old_attempt_is_409(http: TestClien
     memory = http.put(f"/tasks/{task}/memory", json={"key": "dev", "value": 1, "attempt": 1})
 
     assert (report.status_code, note.status_code, memory.status_code) == (409, 409, 409)
+    assert {a.json()["code"] for a in (report, note, memory)} == {"attempt_over"}
     assert "attempt 2" in report.json()["error"]
     assert "attempt 1" in report.json()["error"]
     assert http.get("/tokens/T-1").json()["state"] == "coding"

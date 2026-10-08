@@ -8,7 +8,8 @@ their history over the control plane's HTTP API (docs/design.md, section 5.3).
         client.fire("TICKET-1", "done", key="gh-delivery-81231")
 
 Every failure is a `ClientError` with one plain sentence: `Unreachable` (no
-answer), or `Refused` with the HTTP status (`NotFound` for 404). It imports nothing
+answer), or `Refused` with the HTTP status and the refusal's code (`NotFound` for
+404). Read the code, never the sentence: the sentence can change. It imports nothing
 of the control plane: it speaks only HTTP."""
 
 from __future__ import annotations
@@ -28,13 +29,16 @@ class Unreachable(ClientError):
 
 
 class Refused(ClientError):
-    """The control plane answered no. `status` is the HTTP status, and `message` is
-    the reason it gave."""
+    """The control plane answered no. `status` is the HTTP status, `message` is the
+    reason it gave, for people, and `code` is the stable code of the refusal
+    (docs/design.md, section 5.4). `code` is None when the answer has no code, for
+    example an answer from a proxy."""
 
-    def __init__(self, status: int, message: str, *, url: str) -> None:
+    def __init__(self, status: int, message: str, *, url: str, code: str | None = None) -> None:
         super().__init__(f"the control plane at {url} refused ({status}): {message}")
         self.status = status
         self.message = message
+        self.code = code
 
 
 class NotFound(Refused):
@@ -181,13 +185,15 @@ class Client:
             answer: Any = response.json()
         except ValueError:
             answer = None
-        error = cast("dict[str, Any]", answer).get("error") if isinstance(answer, dict) else None
+        body = cast("dict[str, Any]", answer) if isinstance(answer, dict) else {}
+        error, code = body.get("error"), body.get("code")
         if isinstance(error, str):
             message = error
         else:
             message = response.text[:200].strip() or response.reason_phrase
         kind = NotFound if response.status_code == 404 else Refused
-        return kind(response.status_code, message, url=self.url)
+        named = code if isinstance(code, str) else None
+        return kind(response.status_code, message, url=self.url, code=named)
 
     def _not_ours(self) -> str:
         return f"the control plane at {self.url} sent an answer of the wrong shape; check the URL"

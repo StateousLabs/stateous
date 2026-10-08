@@ -7,6 +7,7 @@ import pytest
 
 from stateous.control import engine as engine_module
 from stateous.control.engine import (
+    AttemptOver,
     ChildToken,
     EngineError,
     EventNotAllowed,
@@ -36,6 +37,7 @@ def test_every_engine_error_is_an_engine_error_and_keeps_its_base() -> None:
         EventNotAllowed: ValueError,
         TokenNotActive: ValueError,
         TaskNotHeld: ValueError,
+        AttemptOver: TaskNotHeld,
         InvalidArgument: ValueError,
         ChildToken: ValueError,
     }
@@ -55,7 +57,7 @@ def test_the_test_above_names_every_error_of_the_engine() -> None:
     }
     assert errors == {
         TokenNotFound, TaskNotFound, InvalidContext, InvalidPayload, InvalidTokenId,
-        EventNotAllowed, TokenNotActive, TaskNotHeld, InvalidArgument, ChildToken,
+        EventNotAllowed, TokenNotActive, TaskNotHeld, AttemptOver, InvalidArgument, ChildToken,
     }  # fmt: skip
 
 

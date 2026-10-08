@@ -5,7 +5,8 @@ A call that does not reach the control plane is tried again after 1, 2, 4, 8, 16
 then every 30 seconds, with one log line for each failure, until it gets an
 answer. An answer 502, 503 or 504 counts as "not reached" (a proxy, or a control
 plane that restarts). Any other answer of 400 or more is a refusal: `Refused`,
-and no new try.
+and no new try. A refusal has the code that the answer gives (design section 5.4);
+read the code, never the sentence.
 
 A call can get a `stop` event. When it is set, a call that waits to try again
 gives up: a claim returns None, and a report, a note, a memory write or a
@@ -33,12 +34,16 @@ UNAVAILABLE = frozenset({502, 503, 504})
 
 
 class Refused(Exception):
-    """The control plane answered with an error."""
+    """The control plane answered with an error. `status` is the HTTP status,
+    `message` the sentence, for people, and `code` the stable code of the refusal.
+    `code` is None when the answer has no code, for example an answer from a proxy,
+    or an answer that the supervisor cannot read."""
 
-    def __init__(self, status: int, message: str) -> None:
+    def __init__(self, status: int, message: str, *, code: str | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.message = message
+        self.code = code
 
 
 class ControlPlaneApi:
@@ -145,7 +150,8 @@ class ControlPlaneApi:
                 if response.status_code in UNAVAILABLE:
                     problem = f"it answered {response.status_code}"
                 elif response.status_code >= 400:
-                    raise Refused(response.status_code, _error_of(response))
+                    message, code = _error_of(response)
+                    raise Refused(response.status_code, message, code=code)
                 else:
                     return response
             if stop is not None and stop.is_set():
@@ -183,18 +189,20 @@ class GaveUp(Exception):
     event is set."""
 
 
-def _error_of(response: httpx2.Response) -> str:
-    """The `error` sentence of an error answer, else its text, on one line."""
+def _error_of(response: httpx2.Response) -> tuple[str, str | None]:
+    """The `error` sentence of an error answer, else its text, on one line; and the
+    answer's `code`, or None when it has none."""
     try:
         data: Any = response.json()
     except ValueError:
         data = None
-    if isinstance(data, dict):
-        error = cast("dict[str, Any]", data).get("error")
-        if isinstance(error, str) and error:
-            return error
+    body = cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+    error, code = body.get("error"), body.get("code")
+    named = code if isinstance(code, str) else None
+    if isinstance(error, str) and error:
+        return error, named
     text = " ".join(response.text.split())[:200]
-    return text or f"the control plane answered {response.status_code}"
+    return text or f"the control plane answered {response.status_code}", named
 
 
 def _body(response: httpx2.Response) -> Any:

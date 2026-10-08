@@ -101,8 +101,12 @@ def test_a_task_granted_again_while_its_old_routine_cleans_up_runs_and_is_report
 @pytest.mark.parametrize(
     "refusal",
     [
-        Refused(422, "the context changes break the schema: count: not an integer"),
-        Refused(409, "'coding' may not emit 'done'; it may emit: stuck"),
+        Refused(
+            422,
+            "the context changes break the schema: count: not an integer",
+            code="invalid_context",
+        ),
+        Refused(409, "'coding' may not emit 'done'; it may emit: stuck", code="event_not_allowed"),
     ],
 )
 def test_a_refused_report_fails_the_task_at_once_with_the_refusal(refusal: Refused) -> None:
@@ -127,7 +131,13 @@ def test_the_failure_report_after_a_refusal_carries_the_grants_attempt() -> None
         return done()
 
     api = FakeApi(grant(1, "coding", attempt=3))
-    api.refusals = [Refused(422, "the context changes break the schema: count: not an integer")]
+    api.refusals = [
+        Refused(
+            422,
+            "the context changes break the schema: count: not an integer",
+            code="invalid_context",
+        )
+    ]
 
     asyncio.run(run_until(make(api, coding), api.reported, 1))
 
@@ -142,7 +152,7 @@ def test_a_report_refused_because_the_task_is_gone_is_dropped(
         return done()
 
     api = FakeApi(grant(1, "coding"))
-    api.refusals = [Refused(404, "there is no task 1")]
+    api.refusals = [Refused(404, "there is no task 1", code="task_not_found")]
     supervisor = make(api, coding)
 
     async def scenario() -> int:
@@ -166,7 +176,7 @@ class NotHeldApi(FakeApi):
         if not self.lost:
             self.lost = {task}
             self.calls.append(("report", task, outcome.kind))
-            raise Refused(409, f"task {task} is not held by 'box-1'")
+            raise Refused(409, f"task {task} is not held by 'box-1'", code="task_not_held")
         await super().report(task, outcome, supervisor=supervisor, stop=stop)
 
 
@@ -190,22 +200,23 @@ def test_a_report_refused_because_the_task_is_not_held_is_dropped() -> None:
 
 
 class WrongAttemptApi(FakeApi):
-    """Refuses every report with 409: the task moved to a new attempt. The task is
-    not lost (another attempt, maybe this supervisor's, still holds it), so a
-    heartbeat would say it is still held. A failure report for the old attempt
-    would be refused the same way."""
+    """Refuses every report with 409 `attempt_over`: the task moved to a new
+    attempt. The task is not lost (another attempt, maybe this supervisor's, still
+    holds it), so a heartbeat would say it is still held. A failure report for the
+    old attempt would be refused the same way. The sentence does not name the
+    attempt: the supervisor reads the code, never the sentence."""
 
     async def report(
         self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
     ) -> None:
         self.calls.append(("report", task, outcome.kind))
-        raise Refused(409, f"task {task} is at attempt 2, not attempt 1")
+        raise Refused(409, "a sentence that can change", code="attempt_over")
 
 
 def test_a_report_refused_because_the_task_moved_to_a_new_attempt_is_dropped() -> None:
-    """A late report of an old attempt is refused 409, naming the attempt. The
-    supervisor does not send a failure report for that old attempt: it would be
-    refused again, for the same reason."""
+    """A late report of an old attempt is refused 409 `attempt_over`. The supervisor
+    drops it without a heartbeat, and does not send a failure report for that old
+    attempt: it would be refused again, for the same reason."""
 
     @on_state(CODING)
     async def coding(ctx: Context[Any]) -> done:
@@ -224,6 +235,41 @@ def test_a_report_refused_because_the_task_moved_to_a_new_attempt_is_dropped() -
     assert asyncio.run(scenario()) == 0
     assert api.sends(1) == [("report", 1, "event")]
     assert not any(call[0] == "heartbeat" for call in api.calls)
+
+
+class SentenceApi(FakeApi):
+    """Refuses the first report with 409 `task_not_held`, with a sentence that says
+    "is at attempt". The supervisor must not read the sentence: it checks the task
+    with a heartbeat."""
+
+    async def report(
+        self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
+    ) -> None:
+        if not self.lost:
+            self.lost = {task}
+            self.calls.append(("report", task, outcome.kind))
+            raise Refused(409, f"task {task} is at attempt 2, not attempt 3", code="task_not_held")
+        await super().report(task, outcome, supervisor=supervisor, stop=stop)
+
+
+def test_a_refusal_is_read_by_its_code_not_by_its_sentence() -> None:
+    @on_state(CODING)
+    async def coding(ctx: Context[Any]) -> done:
+        return done()
+
+    api = SentenceApi(grant(1, "coding"))
+    supervisor = make(api, coding)
+
+    async def scenario() -> int:
+        running = asyncio.create_task(supervisor.run())
+        await until(api.called, "report", 1, "event")
+        await until(nothing_runs, supervisor)
+        supervisor.on_signal()
+        return await asyncio.wait_for(running, 5.0)
+
+    assert asyncio.run(scenario()) == 0
+    assert ("heartbeat", (1,)) in api.calls
+    assert api.sends(1) == [("report", 1, "event")]
 
 
 def test_a_failure_report_that_is_refused_too_is_logged_and_dropped(

@@ -600,19 +600,18 @@ class Supervisor:
 
     async def _still_held(self, task: int, token: str, refusal: Refused) -> bool:
         """After a refused report: is the task still this supervisor's, on this
-        attempt? 404: the task is gone. 409 that names the attempt: the task moved
-        to a new attempt, so this one is over, even if the task id is still this
-        supervisor's. 409 for another reason: the task is not ours, or the event is
-        not allowed. The answer has no code, so a heartbeat tells the rest.
+        attempt? The refusal's code tells (design section 5.4), never its sentence.
+        `task_not_found` (or another 404): the task is gone. `attempt_over`: the
+        task moved to a new attempt, so this one is over, even if the task id is
+        still this supervisor's. Another 409: the task is not ours, or the event is
+        not allowed; a heartbeat tells which.
 
         When the heartbeat does not reach the control plane before the stop, it
         raises `GaveUp`: nothing is decided, and the report stays in the outbox."""
-        if refusal.status == 404:
+        if refusal.code in ("task_not_found", "attempt_over") or refusal.status == 404:
             return False
         if refusal.status != 409:
             return True
-        if _names_another_attempt(refusal.message):
-            return False
         try:
             return task not in await self.api.heartbeat(self.name, [task], stop=self._stopping)
         except GaveUp:
@@ -640,13 +639,6 @@ REFUSAL = "the control plane refused the report: "
 def _is_refusal(outcome: Outcome) -> bool:
     """True for a failure report that a refused report caused."""
     return outcome.error is not None and outcome.error.startswith(REFUSAL)
-
-
-def _names_another_attempt(message: str) -> bool:
-    """True for a 409 refusal that names the task's attempt (see `TaskNotHeld` in
-    `stateous.control.engine`): "task 7 is at attempt 2, not attempt 3". Other 409
-    refusals do not say "is at attempt"."""
-    return "is at attempt" in message
 
 
 def outcome_of(state: StateRef[Any], value: object, ctx: Context[Any]) -> Outcome:
