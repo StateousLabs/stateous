@@ -14,6 +14,7 @@ from stateous.control.api import create_app
 from stateous.control.engine import Engine
 from stateous.control.graph import Graph
 from stateous.control.store import Store
+from stateous.control.store.migrations import no_statement_limit
 from stateous.control.store.store import POSTGRES_LOCK_WAIT, TOKEN_LOCK, database_url
 
 from ..conftest import fresh_postgres_database, needs_postgres
@@ -80,3 +81,13 @@ def test_a_request_that_waits_for_a_held_lock_answers_database_busy(url: str, st
     assert (status, code) == (503, "database_busy")
     assert took >= POSTGRES_LOCK_WAIT - 1  # it waited for the lock, once
     assert engine.get("T-1").status == "active"
+
+
+def test_a_migration_has_no_statement_limit_and_keeps_the_lock_limit(store: Store) -> None:
+    """Only for the migration's own transaction: the next one has the limit again."""
+    with store.engine.begin() as connection:
+        no_statement_limit(connection)
+        assert connection.scalar(text("SHOW statement_timeout")) == "0"
+        assert connection.scalar(text("SHOW lock_timeout")) == "10s"
+    with store.engine.connect() as connection:
+        assert connection.scalar(text("SHOW statement_timeout")) == "30s"

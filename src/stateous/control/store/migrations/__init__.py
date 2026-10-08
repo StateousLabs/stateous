@@ -48,6 +48,7 @@ def migrate(engine: Engine, *, script_location: Path | None = None) -> None:
     migrations."""
     location = script_location or HERE
     with engine.begin() as connection:
+        no_statement_limit(connection)
         _lock(connection)
         context = MigrationContext.configure(connection, opts={"version_table": VERSION_TABLE})
         current = context.get_current_revision()
@@ -81,6 +82,14 @@ def migrate(engine: Engine, *, script_location: Path | None = None) -> None:
             )
         if current != newest:
             command.upgrade(_config(location, connection), "head")
+
+
+def no_statement_limit(connection: Connection) -> None:
+    """On Postgres, turn off the statement limit for the rest of this transaction
+    only: a big upgrade can take longer than the limit that requests have. The lock
+    limit stays. Other databases: nothing."""
+    if connection.dialect.name == "postgresql":
+        connection.execute(text("SET LOCAL statement_timeout = 0"))
 
 
 def head() -> str:
