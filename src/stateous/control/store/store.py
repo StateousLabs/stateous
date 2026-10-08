@@ -45,6 +45,26 @@ SQLITE_WAIT = 30.0
 """Seconds a SQLite transaction waits for the write lock of another process, before
 it fails with "database is locked". The driver's default is five."""
 
+POSTGRES_CONNECT_WITHIN = 10
+"""Postgres: seconds to make a connection, before the attempt fails."""
+
+POSTGRES_STATEMENT_WITHIN = 30
+"""Postgres: seconds for one statement. Then the server stops it (SQLSTATE 57014)."""
+
+POSTGRES_LOCK_WAIT = 10
+"""Postgres: seconds that a statement waits for a lock, a token's advisory lock too.
+Then the server stops it (SQLSTATE 55P03)."""
+
+POSTGRES_KEEPALIVES: dict[str, int] = {
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+}
+"""Postgres: TCP keepalives. After 30 s with no traffic, a probe every 10 s; after 3
+probes with no answer, the connection is dead. So a dead connection is found in
+about a minute, and a statement on it fails and does not wait for ever."""
+
 TOKEN_LOCK = "token:"
 """The start of each token's advisory-lock key: `token:<id in lower case>`."""
 
@@ -78,20 +98,44 @@ def open_engine(url: str) -> Engine:
     On SQLite, SQLAlchemy (not the driver) says BEGIN, so that one transaction also
     covers schema changes: a migration that fails halfway changes nothing. It is
     BEGIN IMMEDIATE: the transaction takes the write lock at its start, so another
-    process on the same file waits for its turn and does not fail at once."""
+    process on the same file waits for its turn and does not fail at once.
+
+    On Postgres, each connection and statement has a time limit (docs/design.md,
+    section 7): `POSTGRES_CONNECT_WITHIN`, `POSTGRES_STATEMENT_WITHIN`,
+    `POSTGRES_LOCK_WAIT` and `POSTGRES_KEEPALIVES`. They are set for each session, so
+    the migrations have them too. A pooled connection is checked before use."""
     url = database_url(url)
     sqlite = url.startswith("sqlite")
+    postgres = url.startswith("postgresql")
     in_memory = url in ("sqlite://", "sqlite:///:memory:")
+    connect_args: dict[str, Any] = {}
+    if sqlite:
+        connect_args = {"check_same_thread": False, "timeout": SQLITE_WAIT}
+    elif postgres:
+        connect_args = _postgres_limits()
     engine = create_engine(
         url,
         # An in-memory SQLite database lives in one connection; share it.
         poolclass=StaticPool if in_memory else None,
-        connect_args={"check_same_thread": False, "timeout": SQLITE_WAIT} if sqlite else {},
+        connect_args=connect_args,
+        pool_pre_ping=postgres,
     )
     if sqlite:
         event.listen(engine, "connect", _no_implicit_transactions)
         event.listen(engine, "begin", _begin)
     return engine
+
+
+def _postgres_limits() -> dict[str, Any]:
+    """The libpq parameters of each Postgres connection: its time limits."""
+    return {
+        "connect_timeout": POSTGRES_CONNECT_WITHIN,
+        **POSTGRES_KEEPALIVES,
+        "options": (
+            f"-c statement_timeout={POSTGRES_STATEMENT_WITHIN * 1000} "
+            f"-c lock_timeout={POSTGRES_LOCK_WAIT * 1000}"
+        ),
+    }
 
 
 def _no_implicit_transactions(dbapi_connection: Any, _record: Any) -> None:

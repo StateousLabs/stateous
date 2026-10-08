@@ -97,9 +97,19 @@ def test_a_second_deadlock_is_raised(monkeypatch: pytest.MonkeyPatch) -> None:
     assert engine.get(TOP).status == "active"
 
 
-def test_another_database_error_is_not_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    error = database_error(psycopg.errors.AdminShutdown("the server shuts down"))
-    engine, stopping = at_reviews(monkeypatch, error, times=1)
+@pytest.mark.parametrize(
+    "driver_error",
+    [
+        psycopg.errors.AdminShutdown("the server shuts down"),
+        psycopg.errors.QueryCanceled("canceling statement due to statement timeout"),
+        psycopg.errors.LockNotAvailable("canceling statement due to lock timeout"),
+    ],
+)
+def test_another_database_error_is_not_tried_again(
+    monkeypatch: pytest.MonkeyPatch, driver_error: Exception
+) -> None:
+    """A timeout too: the request answers 503 at once, and the client sends it again."""
+    engine, stopping = at_reviews(monkeypatch, database_error(driver_error), times=1)
 
     with pytest.raises(OperationalError):
         engine.cancel(TOP)

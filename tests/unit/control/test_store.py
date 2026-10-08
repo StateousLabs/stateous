@@ -2,11 +2,22 @@
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 from stateous.control.store import Store, tables
-from stateous.control.store.store import database_url, utc
+from stateous.control.store.store import (
+    POSTGRES_CONNECT_WITHIN,
+    POSTGRES_KEEPALIVES,
+    POSTGRES_LOCK_WAIT,
+    POSTGRES_STATEMENT_WITHIN,
+    database_url,
+    open_engine,
+    utc,
+)
 
 NOW = datetime(2026, 10, 6, 9, 0, tzinfo=UTC)
 
@@ -193,6 +204,62 @@ def test_a_new_database_has_one_empty_control_plane_row() -> None:
 )
 def test_postgres_urls_as_people_write_them_are_understood(given: str, used: str) -> None:
     assert database_url(given) == used
+
+
+class _Stopped(Exception):
+    """Stops a connection before the driver is called."""
+
+
+def connect_parameters(engine: Engine) -> dict[str, Any]:
+    """The keyword arguments that the engine gives the driver for a new connection.
+    Nothing connects: the `do_connect` hook stops the connection first."""
+    seen: dict[str, Any] = {}
+
+    def stop(_dialect: Any, _record: Any, _args: Any, kwargs: dict[str, Any]) -> None:
+        seen.update(kwargs)
+        raise _Stopped
+
+    event.listen(engine, "do_connect", stop)
+    with pytest.raises(_Stopped):
+        engine.connect()
+    return seen
+
+
+def test_the_postgres_time_limits_have_the_values_of_the_design() -> None:
+    assert POSTGRES_CONNECT_WITHIN == 10
+    assert POSTGRES_STATEMENT_WITHIN == 30
+    assert POSTGRES_LOCK_WAIT == 10
+    assert POSTGRES_KEEPALIVES == {
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+    }
+
+
+def test_each_postgres_connection_has_time_limits_and_keepalives() -> None:
+    engine = open_engine("postgresql://u:p@db.invalid/flows")
+
+    parameters = connect_parameters(engine)
+
+    assert parameters["connect_timeout"] == 10
+    assert parameters["keepalives"] == 1
+    assert parameters["keepalives_idle"] == 30
+    assert parameters["keepalives_interval"] == 10
+    assert parameters["keepalives_count"] == 3
+    assert parameters["options"] == "-c statement_timeout=30000 -c lock_timeout=10000"
+    assert engine.pool._pre_ping  # pyright: ignore[reportPrivateUsage]
+    engine.dispose()
+
+
+def test_a_sqlite_connection_has_no_postgres_limits() -> None:
+    engine = open_engine("sqlite://")
+
+    parameters = connect_parameters(engine)
+
+    assert parameters == {"check_same_thread": False, "timeout": 30.0}
+    assert not engine.pool._pre_ping  # pyright: ignore[reportPrivateUsage]
+    engine.dispose()
 
 
 def test_a_closed_store_lets_go_of_its_connections() -> None:

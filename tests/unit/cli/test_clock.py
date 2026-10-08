@@ -6,7 +6,9 @@ import asyncio
 import time
 from collections.abc import Callable
 
+import psycopg.errors
 import pytest
+from sqlalchemy.exc import OperationalError
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
@@ -98,6 +100,22 @@ def test_a_database_that_does_not_answer_does_not_stop_the_clock(
     run_until(clock, lambda: ticks.count >= 2)
 
     assert "cannot renew" in caplog.text
+    assert not clock.lost
+
+
+def test_a_database_timeout_in_the_renewal_does_not_stop_the_clock(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    timeout = OperationalError(
+        "SELECT 1", {}, psycopg.errors.QueryCanceled("canceling statement due to lock timeout")
+    )
+    ticks = Ticks()
+    clock = Clock(ticks, Hold([timeout, True]), every=0.01)
+
+    run_until(clock, lambda: ticks.count >= 2)
+
+    assert "cannot renew" in caplog.text
+    assert "Traceback" not in caplog.text
     assert not clock.lost
 
 

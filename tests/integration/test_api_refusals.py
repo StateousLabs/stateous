@@ -3,8 +3,10 @@
 
 from typing import Any
 
+import psycopg
+import psycopg.errors
 import pytest
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from starlette.exceptions import HTTPException
 from starlette.testclient import TestClient
 
@@ -177,3 +179,32 @@ def test_a_failure_that_no_route_names_has_a_code(
 
     assert answer.status_code == status
     assert answer.json()["code"] == code
+
+
+@pytest.mark.parametrize(
+    "driver_error",
+    [
+        psycopg.errors.QueryCanceled("canceling statement due to statement timeout"),
+        psycopg.errors.LockNotAvailable("canceling statement due to lock timeout"),
+    ],
+)
+def test_a_postgres_timeout_is_database_busy_503(
+    http: TestClient, engine: Engine, monkeypatch: pytest.MonkeyPatch, driver_error: Exception
+) -> None:
+    """The error as SQLAlchemy wraps the driver's error: `DBAPIError.instance` picks
+    the class (OperationalError for SQLSTATE 57014 and 55P03)."""
+    wrapped = DBAPIError.instance("SELECT 1", {}, driver_error, psycopg.Error)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise wrapped
+
+    monkeypatch.setattr(engine, "claim", boom)
+    bare = TestClient(http.app, raise_server_exceptions=False)
+
+    answer = bare.post("/tasks/claim", json={"supervisor": "box-1", "states": ["coding"]})
+
+    assert answer.status_code == 503
+    assert answer.json() == {
+        "error": "the database cannot take this request now; try again",
+        "code": "database_busy",
+    }
