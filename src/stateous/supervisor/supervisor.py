@@ -12,6 +12,13 @@ carries the routine's context writes and its timers (`ctx.schedule`). The
 report, each note and each memory write name the attempt of the grant, so the
 control plane refuses them when the task is on a new attempt.
 
+Each report, note and memory write goes to the outbox first, then to the control
+plane (`stateous.supervisor.outbox`). It leaves the outbox when the control plane
+answers it for good: it accepts it, or it refuses it. When the control plane
+cannot be reached, the message stays, and the later messages of that task stay
+after it. At start, before the first claim, the supervisor sends the messages
+left in the outbox, in order.
+
 Every `heartbeat_every` seconds, the supervisor names the tasks it still works
 on. The control plane answers with the tasks it took back: the token left the
 state, the token was cancelled, or the lease ended. The supervisor cancels their
@@ -25,8 +32,11 @@ ends.
 
 The first stop signal stops the claims and waits for the running routines. A
 claim request in flight is not cut: when it gets a task, that routine runs too.
-A claim that waits to try again gives up. The second signal (or `stop_now`)
-cancels the routines and the claim, and `run` returns 1.
+A claim that waits to try again gives up. After the first signal, a message has
+one try. When the control plane cannot be reached, the message stays in the
+outbox for the next start: the stop does not wait for the control plane. The
+second signal (or `stop_now`) cancels the routines and the claim, and `run`
+returns 1.
 """
 
 from __future__ import annotations
@@ -42,7 +52,7 @@ import uuid
 from collections.abc import Callable, Collection, Generator
 from dataclasses import dataclass, replace
 from types import FrameType
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel
 
@@ -51,8 +61,16 @@ from stateous.model.contract import StateRef
 from stateous.model.events import Occurrence
 from stateous.model.wire import Outcome, TaskGrant
 from stateous.supervisor.folder import CONTRACT, Folder
+from stateous.supervisor.outbox import (
+    Kind,
+    Message,
+    Outbox,
+    OutboxBusy,
+    OutboxError,
+    outbox_path,
+)
 from stateous.supervisor.registry import Registry, Routine
-from stateous.supervisor.remote import Refused
+from stateous.supervisor.remote import GaveUp, Refused
 
 log = logging.getLogger("stateous.supervisor")
 
@@ -87,89 +105,91 @@ class Api(Protocol):
         request: str | None = None,
     ) -> TaskGrant | None: ...
 
-    async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None: ...
+    async def report(
+        self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
+    ) -> None: ...
 
     async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]: ...
 
-    async def note(self, task: int, text: str, *, attempt: int) -> None: ...
+    async def note(
+        self, task: int, text: str, *, attempt: int, stop: asyncio.Event | None = None
+    ) -> None: ...
 
-    async def set_memory(self, task: int, key: str, value: Any, *, attempt: int) -> None: ...
-
-
-@dataclass(frozen=True)
-class _Send:
-    kind: Literal["memory", "note"]
-    key: str
-    """The memory key, or the note's text."""
-    value: Any = None
+    async def set_memory(
+        self,
+        task: int,
+        key: str,
+        value: Any,
+        *,
+        attempt: int,
+        stop: asyncio.Event | None = None,
+    ) -> None: ...
 
 
 class _Sends:
-    """One task's memory writes and notes, sent to the control plane in order.
+    """One grant's memory writes, notes and report: each is written to the outbox,
+    then sent to the control plane, in order.
 
     The routine adds them from the loop (an async routine) or from its thread (a
     def routine). A send from the thread goes to the loop with
     `call_soon_threadsafe`. The thread's result goes to the loop the same way and
-    later, so its sends are in the queue before the result arrives."""
+    later, so its sends are in the queue before the result arrives. The outbox is
+    written on the loop only."""
 
-    def __init__(self, api: Api, task: int, attempt: int) -> None:
-        self._api = api
-        self._task = task
-        self._attempt = attempt
+    def __init__(self, supervisor: Supervisor, grant: TaskGrant) -> None:
+        self._supervisor = supervisor
+        self._grant = grant
         self._loop = asyncio.get_running_loop()
         self._loop_thread = threading.get_ident()
-        self._queue: asyncio.Queue[_Send] = asyncio.Queue()
+        self._queue: asyncio.Queue[Message] = asyncio.Queue()
         self._closed = False
+        self._held = False
+        """A message did not reach the control plane. The later messages stay in the
+        outbox after it, so their order is kept."""
 
     def memory(self, key: str, value: Any) -> None:
-        self._add(_Send("memory", key, value))
+        self._add("memory", {"key": key, "value": value})
 
     def note(self, text: str) -> None:
-        self._add(_Send("note", text))
+        self._add("note", {"text": text})
+
+    def report(self, outcome: Outcome) -> None:
+        """Add the report. Call it on the loop."""
+        self._put("report", outcome.to_json())
 
     def close(self) -> None:
         """Drop all later sends: the task is over for this supervisor."""
         self._closed = True
 
     async def deliver(self) -> None:
-        """Send the queued items one at a time, until cancelled."""
+        """Send the queued messages one at a time, until cancelled."""
         while True:
-            send = await self._queue.get()
+            message = await self._queue.get()
             try:
-                if send.kind == "memory":
-                    await self._api.set_memory(
-                        self._task, send.key, send.value, attempt=self._attempt
-                    )
-                else:
-                    await self._api.note(self._task, send.key, attempt=self._attempt)
-            except Refused as error:
-                log.warning(
-                    "task %d: the control plane refused a %s: %s",
-                    self._task,
-                    send.kind,
-                    error.message,
-                )
-            except Exception:
-                log.exception("task %d: could not send a %s", self._task, send.kind)
+                if not self._held:
+                    self._held = not await self._supervisor.send(message)
             finally:
                 self._queue.task_done()
 
     async def flush(self) -> None:
-        """Wait until every queued item is sent."""
+        """Wait until each queued message is sent, or stays in the outbox."""
         await self._queue.join()
 
-    def _add(self, send: _Send) -> None:
+    def _add(self, kind: Kind, body: dict[str, Any]) -> None:
         if self._closed:
             return
         if threading.get_ident() == self._loop_thread:
-            self._queue.put_nowait(send)
+            self._put(kind, body)
             return
         with contextlib.suppress(RuntimeError):  # the loop has closed
-            self._loop.call_soon_threadsafe(self._put, send)
+            self._loop.call_soon_threadsafe(self._put, kind, body)
 
-    def _put(self, send: _Send) -> None:
-        if not self._closed:
-            self._queue.put_nowait(send)
+    def _put(self, kind: Kind, body: dict[str, Any]) -> None:
+        if self._closed:
+            return
+        grant = self._grant
+        message = self._supervisor.outbox.append(grant.task, grant.attempt, grant.token, kind, body)
+        self._queue.put_nowait(message)
 
 
 @dataclass(eq=False)
@@ -198,7 +218,9 @@ class Supervisor:
         heartbeat_every: float = HEARTBEAT_EVERY,
         idle: float = IDLE,
         cancel_wait: float = CANCEL_WAIT,
+        outbox: Outbox | None = None,
     ) -> None:
+        """`outbox`: the outbox of the folder. None: an outbox in memory (for tests)."""
         if tasks < 1:
             raise ValueError("tasks must be 1 or more")
         self.api = api
@@ -208,6 +230,7 @@ class Supervisor:
         self.heartbeat_every = heartbeat_every
         self.idle = idle
         self.cancel_wait = cancel_wait
+        self.outbox = outbox if outbox is not None else Outbox.in_memory()
         self._running: set[_Running] = set()
         self._stopping = asyncio.Event()
         self._forced = asyncio.Event()
@@ -306,13 +329,19 @@ class Supervisor:
             idle.cancel()
             forced.cancel()
 
+    def close(self) -> None:
+        """Close the outbox, and release its lock. Call it after `run`."""
+        self.outbox.close()
+
     async def _claim_forever(self) -> None:
-        """Claim tasks until the stop. The stop does not cut a claim request in flight.
+        """Send the messages left in the outbox. Then claim tasks until the stop. The
+        stop does not cut a claim request in flight.
 
         Each claim has a random request id. A claim that failed with no answer is
         sent again with the same id: if the control plane granted a task but its
         answer was lost, the claim gets that task again. After an answer (a task,
         no task, or a refusal), the next claim gets a new id."""
+        await self._send_left()
         served = self.registry.served
         request = uuid.uuid4().hex
         while not self._stopping.is_set():
@@ -393,7 +422,7 @@ class Supervisor:
         )
         running = _Running(grant)
         running.job = asyncio.create_task(
-            self._do(running, _Sends(self.api, grant.task, grant.attempt)),
+            self._do(running, _Sends(self, grant)),
             name=f"stateous-task-{grant.task}",
         )
         self._running.add(running)
@@ -408,7 +437,8 @@ class Supervisor:
             if running.lost or self._forced.is_set():
                 return
             running.reporting = True
-            await self._report(grant, outcome)
+            sends.report(replace(outcome, attempt=grant.attempt))
+            await sends.flush()
         except asyncio.CancelledError:
             raise
         except Exception:  # a fault of the supervisor; the task fails when its lease ends
@@ -416,6 +446,8 @@ class Supervisor:
         finally:
             sends.close()
             delivering.cancel()
+            if running.lost:  # the control plane refuses the messages of this attempt now
+                self.outbox.drop(grant.task, grant.attempt)
             self._running.discard(running)
             self._freed.set()
             if not self._running:
@@ -440,29 +472,91 @@ class Supervisor:
         except BaseException as error:  # also SystemExit and KeyboardInterrupt
             return Outcome(kind="failed", error=f"{type(error).__name__}: {error}")
 
-    async def _report(self, grant: TaskGrant, outcome: Outcome) -> None:
-        """Report the outcome for the grant's attempt: a late report of an old
-        attempt cannot land on a new one."""
-        outcome = replace(outcome, attempt=grant.attempt)
+    async def _send_left(self) -> None:
+        """Send the messages that an earlier run left in the outbox, in order. A
+        message that does not reach the control plane stays, with the later
+        messages of its task. After a stop, the rest stays for the next start."""
+        left = self.outbox.pending()
+        if not left:
+            return
+        log.info("sending %d message(s) left in the outbox", len(left))
+        held: set[int] = set()
+        for message in left:
+            if message.task in held:
+                continue
+            if not await self.send(message):
+                held.add(message.task)
+                if self._stopping.is_set():
+                    return
+
+    async def send(self, message: Message) -> bool:
+        """Send one message of the outbox. Remove it when the control plane answered
+        it for good. Returns False when it stays in the outbox: the control plane
+        could not be reached before the stop."""
         try:
-            await self.api.report(grant.task, outcome, supervisor=self.name)
+            if message.kind == "report":
+                return await self._send_report(message)
+            if message.kind == "memory":
+                key, value = message.body["key"], message.body["value"]
+                await self.api.set_memory(
+                    message.task, key, value, attempt=message.attempt, stop=self._stopping
+                )
+            else:
+                text = message.body["text"]
+                await self.api.note(
+                    message.task, text, attempt=message.attempt, stop=self._stopping
+                )
+        except GaveUp:
+            log.warning(
+                "task %d of %s: the control plane cannot be reached; "
+                "the %s stays in the outbox for the next start",
+                message.task,
+                message.token,
+                message.kind,
+            )
+            return False
         except Refused as error:
             log.warning(
-                "task %d of %s: the control plane refused the report: %s",
-                grant.task,
-                grant.token,
+                "task %d: the control plane refused a %s: %s",
+                message.task,
+                message.kind,
                 error.message,
             )
-            if outcome.kind != "failed" and await self._still_held(grant, error):
-                await self._report_refusal(grant, error)
-            return
-        except Exception:
-            log.exception("task %d of %s: could not report", grant.task, grant.token)
-            return
-        said = outcome.event if outcome.kind == "event" else outcome.kind
-        log.info("task %d of %s: reported %s", grant.task, grant.token, said)
+        except Exception:  # sent again, it fails again
+            log.exception("task %d: could not send a %s", message.task, message.kind)
+        self.outbox.remove(message.id)
+        return True
 
-    async def _still_held(self, grant: TaskGrant, refusal: Refused) -> bool:
+    async def _send_report(self, message: Message) -> bool:
+        """Send a report of the outbox. A refusal of an event or of waiting can add
+        a failure report to the outbox and send it (`_report_refusal`). Returns as
+        `send`."""
+        task, token = message.task, message.token
+        outcome = replace(Outcome.from_json(message.body), attempt=message.attempt)
+        try:
+            await self.api.report(task, outcome, supervisor=self.name, stop=self._stopping)
+        except Refused as error:
+            again = outcome.kind == "failed" and _is_refusal(outcome)
+            log.warning(
+                "task %d of %s: the control plane refused %s: %s",
+                task,
+                token,
+                "the failure report too" if again else "the report",
+                error.message,
+            )
+            if outcome.kind != "failed" and await self._still_held(task, token, error):
+                return await self._report_refusal(message, error)
+        except GaveUp:
+            raise
+        except Exception:
+            log.exception("task %d of %s: could not report", task, token)
+        else:
+            said = outcome.event if outcome.kind == "event" else outcome.kind
+            log.info("task %d of %s: reported %s", task, token, said)
+        self.outbox.remove(message.id)
+        return True
+
+    async def _still_held(self, task: int, token: str, refusal: Refused) -> bool:
         """After a refused report: is the task still this supervisor's, on this
         attempt? 404: the task is gone. 409 that names the attempt: the task moved
         to a new attempt, so this one is over, even if the task id is still this
@@ -475,32 +569,30 @@ class Supervisor:
         if _names_another_attempt(refusal.message):
             return False
         try:
-            return grant.task not in await self.api.heartbeat(self.name, [grant.task])
+            return task not in await self.api.heartbeat(self.name, [task])
         except Exception:
-            log.exception("task %d of %s: could not check the task", grant.task, grant.token)
+            log.exception("task %d of %s: could not check the task", task, token)
             return False
 
-    async def _report_refusal(self, grant: TaskGrant, refusal: Refused) -> None:
-        """Fail the task with the refusal, once, so it does not wait for its lease."""
-        failed = Outcome(
-            kind="failed",
-            error=f"the control plane refused the report: {refusal.message}",
-            attempt=grant.attempt,
+    async def _report_refusal(self, refused: Message, refusal: Refused) -> bool:
+        """Fail the task with the refusal, once, so it does not wait for its lease.
+        The failure report goes to the outbox before the refused report leaves it.
+        Returns as `send`."""
+        failed = Outcome(kind="failed", error=REFUSAL + refusal.message, attempt=refused.attempt)
+        message = self.outbox.append(
+            refused.task, refused.attempt, refused.token, "report", failed.to_json()
         )
-        try:
-            await self.api.report(grant.task, failed, supervisor=self.name)
-        except Refused as error:
-            log.warning(
-                "task %d of %s: the control plane refused the failure report too: %s",
-                grant.task,
-                grant.token,
-                error.message,
-            )
-            return
-        except Exception:
-            log.exception("task %d of %s: could not report", grant.task, grant.token)
-            return
-        log.info("task %d of %s: reported failed", grant.task, grant.token)
+        self.outbox.remove(refused.id)
+        return await self.send(message)
+
+
+REFUSAL = "the control plane refused the report: "
+"""The start of the error of a failure report that a refused report causes."""
+
+
+def _is_refusal(outcome: Outcome) -> bool:
+    """True for a failure report that a refused report caused."""
+    return outcome.error is not None and outcome.error.startswith(REFUSAL)
 
 
 def _names_another_attempt(message: str) -> bool:
@@ -585,7 +677,29 @@ async def open_supervisor(
 ) -> Supervisor:
     """The supervisor of `folder`, checked against the control plane: its
     `contract.py` must be for the graph the control plane serves, and the folder
-    must have routines. An unreachable control plane is tried again with backoff."""
+    must have routines. An unreachable control plane is tried again with backoff.
+
+    It opens the folder's outbox first. Another supervisor on the folder holds the
+    outbox: then this one does not start."""
+    path = outbox_path(folder.path)
+    try:
+        outbox = Outbox.open(path)
+    except OutboxBusy:
+        raise SupervisorError(
+            f"another supervisor runs on {folder.path} now: stop it, or use another folder"
+        ) from None
+    except OutboxError as error:
+        raise SupervisorError(str(error)) from None
+    try:
+        return await _checked(folder, api, outbox, heartbeat_every=heartbeat_every, idle=idle)
+    except BaseException:
+        outbox.close()
+        raise
+
+
+async def _checked(
+    folder: Folder, api: Api, outbox: Outbox, *, heartbeat_every: float, idle: float
+) -> Supervisor:
     try:
         health = await api.health()
     except Refused as error:
@@ -618,6 +732,7 @@ async def open_supervisor(
         tasks=folder.config.tasks,
         heartbeat_every=heartbeat_every,
         idle=idle,
+        outbox=outbox,
     )
 
 

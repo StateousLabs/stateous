@@ -13,8 +13,9 @@ from pydantic import BaseModel
 from stateous.model.contract import StateRef
 from stateous.model.events import Occurrence
 from stateous.model.wire import Outcome, TaskGrant
+from stateous.supervisor.outbox import Outbox
 from stateous.supervisor.registry import Registry, Routine
-from stateous.supervisor.remote import Refused
+from stateous.supervisor.remote import GaveUp, Refused
 from stateous.supervisor.supervisor import Supervisor
 
 
@@ -61,6 +62,11 @@ class FakeApi:
         """The request id of each claim, in order."""
         self.claim_errors: list[Exception] = []
         """The next claims raise these, in order, as if their answers were lost."""
+        self.down = False
+        """When true: reports, notes and memory writes do not reach the control
+        plane. They try again until `down` is false, or give up when `stop` is set."""
+        self.tries = 0
+        """The sends that did not reach the control plane."""
 
     async def health(self) -> dict[str, Any]:
         return {"workflow": "demo", "checksum": self.checksum}
@@ -85,7 +91,10 @@ class FakeApi:
                 self.claim_waits -= 1
         return self.grants.pop(0) if self.grants else None
 
-    async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
+    async def report(
+        self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
+    ) -> None:
+        await self._reach(stop)
         self.calls.append(("report", task, outcome.kind))
         self.attempts.append(("report", task, outcome.attempt))
         outcome = replace(outcome, attempt=None)
@@ -99,16 +108,37 @@ class FakeApi:
         self.calls.append(("heartbeat", tuple(sorted(tasks))))
         return sorted(self.lost & set(tasks))
 
-    async def note(self, task: int, text: str, *, attempt: int) -> None:
+    async def note(
+        self, task: int, text: str, *, attempt: int, stop: asyncio.Event | None = None
+    ) -> None:
+        await self._reach(stop)
         self.attempts.append(("note", task, attempt))
         await asyncio.sleep(self.note_delay)
         if self.refuse_notes:
             raise Refused(409, f"task {task} is not this supervisor's")
         self.calls.append(("note", task, text))
 
-    async def set_memory(self, task: int, key: str, value: Any, *, attempt: int) -> None:
+    async def set_memory(
+        self,
+        task: int,
+        key: str,
+        value: Any,
+        *,
+        attempt: int,
+        stop: asyncio.Event | None = None,
+    ) -> None:
+        await self._reach(stop)
         self.attempts.append(("memory", task, attempt))
         self.calls.append(("memory", task, key, value))
+
+    async def _reach(self, stop: asyncio.Event | None) -> None:
+        """As `ControlPlaneApi`: a send that does not reach the control plane tries
+        again, and gives up when `stop` is set."""
+        while self.down:
+            self.tries += 1
+            if stop is not None and stop.is_set():
+                raise GaveUp
+            await asyncio.sleep(0.01)
 
     def reported(self, task: int) -> bool:
         return task in self.reports
@@ -145,7 +175,13 @@ def grant(
     )
 
 
-def make(api: FakeApi, *routines: Routine, tasks: int = 4, cancel_wait: float = 0.5) -> Supervisor:
+def make(
+    api: FakeApi,
+    *routines: Routine,
+    tasks: int = 4,
+    cancel_wait: float = 0.5,
+    outbox: Outbox | None = None,
+) -> Supervisor:
     module = ModuleType("routines")
     for number, routine in enumerate(routines):
         setattr(module, f"routine_{number}", routine)
@@ -157,6 +193,7 @@ def make(api: FakeApi, *routines: Routine, tasks: int = 4, cancel_wait: float = 
         heartbeat_every=0.05,
         idle=0.01,
         cancel_wait=cancel_wait,
+        outbox=outbox,
     )
 
 

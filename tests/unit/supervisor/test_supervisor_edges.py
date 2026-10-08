@@ -158,12 +158,14 @@ def test_a_report_refused_because_the_task_is_gone_is_dropped(
 class NotHeldApi(FakeApi):
     """Refuses the first report with 409: the task is no longer this supervisor's."""
 
-    async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
+    async def report(
+        self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
+    ) -> None:
         if not self.lost:
             self.lost = {task}
             self.calls.append(("report", task, outcome.kind))
             raise Refused(409, f"task {task} is not held by 'box-1'")
-        await super().report(task, outcome, supervisor=supervisor)
+        await super().report(task, outcome, supervisor=supervisor, stop=stop)
 
 
 def test_a_report_refused_because_the_task_is_not_held_is_dropped() -> None:
@@ -191,7 +193,9 @@ class WrongAttemptApi(FakeApi):
     heartbeat would say it is still held. A failure report for the old attempt
     would be refused the same way."""
 
-    async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
+    async def report(
+        self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
+    ) -> None:
         self.calls.append(("report", task, outcome.kind))
         raise Refused(409, f"task {task} is at attempt 2, not attempt 1")
 

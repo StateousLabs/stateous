@@ -10,7 +10,7 @@ import httpx2
 import pytest
 
 from stateous.model.wire import Outcome, Schedule, TaskGrant
-from stateous.supervisor.remote import ControlPlaneApi, Refused
+from stateous.supervisor.remote import ControlPlaneApi, GaveUp, Refused
 
 GRANT = TaskGrant(
     task=7,
@@ -270,3 +270,48 @@ def test_a_claim_does_not_try_again_after_stop_is_set() -> None:
 
     assert asyncio.run(scenario()) is None
     assert (requests, delays) == (["/tasks/claim"], [])
+
+
+@pytest.mark.parametrize("call", ["report", "note", "memory"])
+def test_a_send_after_stop_has_one_try_and_then_raises_gave_up(call: str) -> None:
+    requests: list[str] = []
+    delays: list[float] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request.url.path)
+        return httpx2.Response(503)
+
+    async def scenario() -> None:
+        api = api_with(handler, delays)
+        stop = asyncio.Event()
+        stop.set()
+        try:
+            if call == "report":
+                await api.report(7, Outcome(kind="waiting"), supervisor="box-1", stop=stop)
+            elif call == "note":
+                await api.note(7, "one", attempt=1, stop=stop)
+            else:
+                await api.set_memory(7, "dev", "s-1", attempt=1, stop=stop)
+        finally:
+            await api.aclose()
+
+    with pytest.raises(GaveUp):
+        asyncio.run(scenario())
+    assert len(requests) == 1
+    assert delays == []
+
+
+def test_a_send_that_reaches_the_control_plane_after_stop_is_not_given_up() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(204)
+
+    async def scenario() -> None:
+        api = api_with(handler)
+        stop = asyncio.Event()
+        stop.set()
+        try:
+            await api.note(7, "one", attempt=1, stop=stop)
+        finally:
+            await api.aclose()
+
+    asyncio.run(scenario())

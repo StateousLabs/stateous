@@ -7,9 +7,10 @@ answer. An answer 502, 503 or 504 counts as "not reached" (a proxy, or a control
 plane that restarts). Any other answer of 400 or more is a refusal: `Refused`,
 and no new try.
 
-A claim can get a `stop` event. When it is set, a claim that waits to try again
-gives up and returns None. A request in flight is not cut: the control plane can
-grant a task in it, and the supervisor must run that task."""
+A call can get a `stop` event. When it is set, a call that waits to try again
+gives up: a claim returns None, and a report, a note or a memory write raises
+`GaveUp`. A call made after the stop has one try. A request in flight is not cut:
+the control plane can grant a task in it, and the supervisor must run that task."""
 
 from __future__ import annotations
 
@@ -80,7 +81,7 @@ class ControlPlaneApi:
             body["request"] = request
         try:
             response = await self._call("POST", "/tasks/claim", body, stop=stop)
-        except _GaveUp:
+        except GaveUp:
             return None
         if response.status_code == 204:
             return None
@@ -89,10 +90,12 @@ class ControlPlaneApi:
         except ValueError as error:
             raise Refused(response.status_code, f"the claimed task is not valid: {error}") from None
 
-    async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:
+    async def report(
+        self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
+    ) -> None:
         """Report a task. The outcome names the attempt it is for."""
         body = {**outcome.to_json(), "supervisor": supervisor}
-        await self._call("POST", f"/tasks/{task}/report", body)
+        await self._call("POST", f"/tasks/{task}/report", body, stop=stop)
 
     async def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
         """The ids among `tasks` that this supervisor no longer holds."""
@@ -106,15 +109,26 @@ class ControlPlaneApi:
             raise Refused(200, "the heartbeat answer has no list of lost tasks")
         return [int(task) for task in cast("list[Any]", lost)]
 
-    async def note(self, task: int, text: str, *, attempt: int) -> None:
+    async def note(
+        self, task: int, text: str, *, attempt: int, stop: asyncio.Event | None = None
+    ) -> None:
         """One line of progress, for that attempt of the task."""
-        await self._call("POST", f"/tasks/{task}/note", {"text": text, "attempt": attempt})
+        body = {"text": text, "attempt": attempt}
+        await self._call("POST", f"/tasks/{task}/note", body, stop=stop)
 
-    async def set_memory(self, task: int, key: str, value: Any, *, attempt: int) -> None:
+    async def set_memory(
+        self,
+        task: int,
+        key: str,
+        value: Any,
+        *,
+        attempt: int,
+        stop: asyncio.Event | None = None,
+    ) -> None:
         """Save one key of the routine's memory, for that attempt of the task. `None`
         deletes the key."""
         body = {"key": key, "value": value, "attempt": attempt}
-        await self._call("PUT", f"/tasks/{task}/memory", body)
+        await self._call("PUT", f"/tasks/{task}/memory", body, stop=stop)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -136,7 +150,7 @@ class ControlPlaneApi:
                 else:
                     return response
             if stop is not None and stop.is_set():
-                raise _GaveUp
+                raise GaveUp
             delay = self._backoff[min(failures, len(self._backoff) - 1)]
             failures += 1
             log.warning(
@@ -148,7 +162,7 @@ class ControlPlaneApi:
             await self._wait(delay, stop)
 
     async def _wait(self, delay: float, stop: asyncio.Event | None) -> None:
-        """Sleep `delay` seconds. Raise `_GaveUp` when `stop` is set first."""
+        """Sleep `delay` seconds. Raise `GaveUp` when `stop` is set first."""
         if stop is None:
             await self._sleep(delay)
             return
@@ -161,12 +175,13 @@ class ControlPlaneApi:
             if not sleeping.done():
                 sleeping.cancel()
         if stop.is_set():
-            raise _GaveUp
+            raise GaveUp
         await sleeping
 
 
-class _GaveUp(Exception):
-    """A call stopped to wait for its next try: its `stop` event is set."""
+class GaveUp(Exception):
+    """A call did not reach the control plane, and stopped to try again: its `stop`
+    event is set."""
 
 
 def _error_of(response: httpx2.Response) -> str:

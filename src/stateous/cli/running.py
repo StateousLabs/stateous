@@ -190,8 +190,11 @@ async def supervise_folder(folder: Folder) -> int:
     api = ControlPlaneApi(folder.config.url)
     try:
         supervisor = await open_supervisor(folder, api)
-        with stop_on_signals(supervisor):
-            return await supervisor.run()
+        try:
+            with stop_on_signals(supervisor):
+                return await supervisor.run()
+        finally:
+            supervisor.close()
     finally:
         await api.aclose()
 
@@ -270,3 +273,4 @@ async def supervise_beside(server: SupervisedServer, folder: Folder, api: Contro
         return await supervisor.run()
     finally:
         server.supervisor = None  # later signals stop the server: a hung request can be forced
+        supervisor.close()

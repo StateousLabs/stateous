@@ -35,9 +35,12 @@ sdlc-supervisor/         the supervisor's side, on any computer: no graph
   testing.py             @on_state(states.testing) ...
   stateous.yaml          the control plane's URL, how many tasks at once
   pyproject.toml         written by `stateous init` if absent: the folder is a Python project
+  .stateous/outbox.db    made by `stateous supervise`: messages not yet delivered
 ```
 
 The supervisor's folder never holds `flow.py` or the graph file. Its routines import only `contract.py`.
+
+`.stateous/` holds the local state of the supervisor. Do not commit it: add `.stateous/` to the folder's `.gitignore`.
 
 ## Install
 
@@ -331,11 +334,14 @@ To stop the supervisor, press Ctrl-C or send SIGTERM. It takes no new tasks, and
 
 If the supervisor cannot reach the control plane, its routines continue. It tries again after 1, 2, 4, 8 and 16 seconds, then every 30 seconds.
 
+The supervisor keeps an outbox, `.stateous/outbox.db` in its folder. It writes each report, note and memory write to the outbox first. Then it sends it. The message leaves the outbox when the control plane accepts it or refuses it. When the control plane cannot be reached, the message stays. At start, the supervisor sends the messages that are left, in order. Then it claims new tasks. A message for a task that moved on is refused, and the supervisor drops it with one log line.
+
 `stateous supervise` does not start in these cases:
 
 - `contract.py` is for a different graph. Run `stateous init` again.
 - The folder has no routine, or two routines for one state.
 - A file of the folder cannot be imported.
+- Another supervisor runs on the same folder. Two supervisors cannot share one outbox.
 
 ## Act on tokens
 
@@ -560,6 +566,7 @@ Install PHD in the supervisor's environment. Without PHD, the supervisor cannot 
 The running agents of a supervisor are its child processes.
 
 - **A graceful stop** (Ctrl-C, SIGTERM): the supervisor takes no new tasks, and waits for its running routines. A second signal stops it at once. A deploy loses nothing.
+- **The control plane cannot be reached at the stop:** the supervisor does not wait for it. The reports, notes and memory writes stay in the outbox. The next `stateous supervise` sends them.
 - **A crash** (or `kill -9`): today, PHD runs each agent in its own process group. So the agent does not stop with the supervisor. It can change the repository and spend money until it next writes output.
 - PHD batch 1 ties the agent to its caller: a Windows Job Object, `PR_SET_PDEATHSIG` on Linux, a watchdog on macOS. After that, the agents stop with the supervisor.
 - The leases of a dead supervisor end after 2 minutes. Then the tasks are tried again. With `ctx.memory`, the retry resumes the agent's session.
@@ -567,7 +574,7 @@ The running agents of a supervisor are its child processes.
 
 ## Reliability
 
-Six mechanisms keep tokens safe:
+Seven mechanisms keep tokens safe:
 
 | Mechanism | What it protects |
 |---|---|
@@ -576,6 +583,7 @@ Six mechanisms keep tokens safe:
 | **The clock** | It fires timeouts and timers. A timeout is a timer that the state sets when a token enters it. |
 | **Idempotency keys** | A webhook that comes two times is applied one time. The second delivery with the same key gets the answer "duplicate". |
 | **The routine's memory** | An agent's session stays after a crash and a retry. |
+| **The supervisor's outbox** | A report, a note or a memory write goes to the outbox (`.stateous/outbox.db`) first, then to the control plane. It leaves the outbox only when the control plane accepts it or refuses it. When the control plane cannot be reached, nothing that a routine finished is lost. At start, `stateous supervise` sends what is left, in order, before it claims new tasks. Attempt numbers make an old message safe: the control plane refuses it, and the supervisor drops it. |
 | **Pause and resume** | A paused token does not move. Its events wait, its tasks wait, and its timers stop. On resume, the waiting events apply in order. Events that no longer fit are refused and recorded. |
 
 Also, one token moves one step at a time, because each change locks the token. One control plane serves one database. A second control plane does not start.

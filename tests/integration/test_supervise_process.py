@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from sqlalchemy import create_engine, update
@@ -291,3 +291,67 @@ def test_the_second_signal_exits_1_while_a_routine_waits_for_a_thread(tmp_path: 
     assert took < 10, text_of(log)
     assert "stopping now" in text_of(log)
     assert "Traceback" not in text_of(log)
+
+
+FINISHING = """
+import time
+from pathlib import Path
+
+from contract import events, states
+
+from stateous import Context, on_state
+
+
+@on_state(states.slow)
+def slow(ctx: Context) -> events.done:
+    here = Path(__file__).parent
+    while not (here / "release").exists():
+        time.sleep(0.05)
+    (here / "finished").touch()
+    return events.done()
+"""
+
+
+def test_a_report_made_while_the_control_plane_is_down_arrives_after_a_restart(
+    tmp_path: Path,
+) -> None:
+    """The control plane stops while a routine runs. The routine finishes, and its
+    report stays in the outbox. The supervisor stops. The control plane and then
+    the supervisor start again: the report arrives, and the token moves."""
+    graph = compile_flow(tmp_path, FLOW)
+    port = free_port()
+    url = f"http://127.0.0.1:{port}"
+    serve = ["serve", str(graph), "--db", database(tmp_path), "--listen", f"127.0.0.1:{port}"]
+    first_log, second_log = tmp_path / "supervise-1.log", tmp_path / "supervise-2.log"
+    with ExitStack() as stack:
+        first_plane = stack.enter_context(started(serve, tmp_path / "serve-1.log"))
+        wait_for(answers, url)
+        folder = supervisor_folder(tmp_path, url, FINISHING)
+        client = stack.enter_context(Client(url))
+        client.start("T-1")
+        first = stack.enter_context(started(["supervise", str(folder)], first_log))
+        wait_for(has_kind, client, "T-1", "task_claimed")
+
+        interrupt(first_plane)
+        assert first_plane.wait(timeout=30) == 0
+        (folder / "release").touch()
+        wait_for((folder / "finished").exists)
+        wait_for(says, first_log, "cannot reach the control plane")
+        interrupt(first)
+        assert first.wait(timeout=30) == 0, text_of(first_log)
+        assert (folder / ".stateous" / "outbox.db").is_file()
+
+        second_plane = stack.enter_context(started(serve, tmp_path / "serve-2.log"))
+        wait_for(answers, url)
+        assert status_is(client, "T-1", "active")
+        second = stack.enter_context(started(["supervise", str(folder)], second_log))
+        wait_for(status_is, client, "T-1", "completed")
+
+        interrupt(second)
+        assert second.wait(timeout=30) == 0, text_of(second_log)
+        interrupt(second_plane)
+        assert second_plane.wait(timeout=30) == 0
+
+    assert "the report stays in the outbox for the next start" in text_of(first_log)
+    assert "sending 1 message(s) left in the outbox" in text_of(second_log)
+    assert "Traceback" not in text_of(first_log) + text_of(second_log)

@@ -29,6 +29,9 @@ class FakeSupervisor:
     async def run(self) -> int:
         return 0
 
+    def close(self) -> None:
+        self.calls.append("close")
+
 
 def server() -> running.SupervisedServer:
     return running.SupervisedServer(uvicorn.Config(Starlette()))
@@ -76,4 +79,4 @@ def test_after_the_supervisor_ran_signals_stop_the_server_and_a_second_forces_it
     assert supervised.should_exit and not supervised.force_exit
     supervised.handle_exit(signal.SIGINT, None)
     assert supervised.force_exit
-    assert fake.calls == []
+    assert fake.calls == ["close"]

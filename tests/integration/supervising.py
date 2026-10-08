@@ -106,7 +106,10 @@ def supervising(folder: Path) -> Generator[Supervisor]:
             supervisor = await open_supervisor(loaded, api, heartbeat_every=0.2, idle=0.05)
             found.append(supervisor)
             ready.set()
-            await supervisor.run()
+            try:
+                await supervisor.run()
+            finally:
+                supervisor.close()
         except Exception as error:
             failed.append(error)
         finally:

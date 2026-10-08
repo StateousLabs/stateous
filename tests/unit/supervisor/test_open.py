@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from stateous.supervisor.folder import Folder, FolderConfig
+from stateous.supervisor.outbox import Outbox, outbox_path
 from stateous.supervisor.supervisor import (
     Supervisor,
     SupervisorError,
@@ -40,10 +41,53 @@ def test_a_folder_that_matches_the_control_plane_gives_a_supervisor(tmp_path: Pa
     folder = folder_at(tmp_path / "w1")
 
     supervisor = asyncio.run(open_supervisor(folder, FakeApi(checksum=CHECKSUM)))
+    supervisor.close()
 
     assert (supervisor.name, supervisor.tasks) == ("box-1", 2)
     assert supervisor.registry.served == ["coding"]
     assert supervisor.heartbeat_every == 30.0
+
+
+def test_the_supervisor_makes_its_outbox_in_the_folder(tmp_path: Path) -> None:
+    folder = folder_at(tmp_path / "w5")
+
+    supervisor = asyncio.run(open_supervisor(folder, FakeApi(checksum=CHECKSUM)))
+    try:
+        assert (folder.path / ".stateous" / "outbox.db").is_file()
+        supervisor.outbox.append(1, 1, "T-1", "note", {"text": "one"})
+    finally:
+        supervisor.close()
+
+    with Outbox.open(outbox_path(folder.path)) as outbox:
+        assert [message.body for message in outbox.pending()] == [{"text": "one"}]
+
+
+def test_a_second_supervisor_on_the_same_folder_is_refused_in_one_sentence(
+    tmp_path: Path,
+) -> None:
+    folder = folder_at(tmp_path / "w6")
+    first = asyncio.run(open_supervisor(folder, FakeApi(checksum=CHECKSUM)))
+    try:
+        with pytest.raises(SupervisorError) as refused:
+            asyncio.run(open_supervisor(folder, FakeApi(checksum=CHECKSUM)))
+    finally:
+        first.close()
+
+    assert str(refused.value) == (
+        f"another supervisor runs on {folder.path} now: stop it, or use another folder"
+    )
+    second = asyncio.run(open_supervisor(folder, FakeApi(checksum=CHECKSUM)))
+    second.close()  # the first one stopped: the folder is free
+
+
+def test_a_refused_start_releases_the_outbox(tmp_path: Path) -> None:
+    folder = folder_at(tmp_path / "w7", routine=None)
+
+    with pytest.raises(SupervisorError, match="has no routine"):
+        asyncio.run(open_supervisor(folder, FakeApi(checksum=CHECKSUM)))
+
+    with Outbox.open(outbox_path(folder.path)) as outbox:
+        assert outbox.pending() == []
 
 
 def test_a_contract_for_another_graph_is_refused(tmp_path: Path) -> None:

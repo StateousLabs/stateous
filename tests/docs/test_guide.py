@@ -80,6 +80,7 @@ MECHANISMS = [
     "**The clock**",
     "**Idempotency keys**",
     "**The routine's memory**",
+    "**The supervisor's outbox**",
     "**Pause and resume**",
 ]
 
@@ -238,7 +239,7 @@ def test_the_guide_names_every_ctx_field() -> None:
     assert 'ctx["key"]' in routine
 
 
-def test_the_guide_names_the_six_mechanisms() -> None:
+def test_the_guide_names_the_seven_mechanisms() -> None:
     reliability = section(read(GUIDE), "## Reliability")
 
     for mechanism in MECHANISMS:
