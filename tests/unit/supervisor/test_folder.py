@@ -198,6 +198,16 @@ def test_a_file_with_the_stubs_name_is_never_written_over(tmp_path: Path) -> Non
         ("http://:8080", "url: 'http://:8080' has no host"),
         ("http://127.0.0.1:99999", "url: 'http://127.0.0.1:99999' has the port 99999"),
         ("http://127.0.0.1:0", "url: 'http://127.0.0.1:0' has the port 0"),
+        (
+            "http://my host:8000",
+            "url: 'http://my host:8000' has a host that is not valid: a host has only "
+            "letters, digits, '-' and '.', or is an IP address",
+        ),
+        (
+            "http://local%host:8000",
+            "url: 'http://local%host:8000' has a host that is not valid: a host has only "
+            "letters, digits, '-' and '.', or is an IP address",
+        ),
     ],
 )
 def test_a_url_that_cannot_be_reached_is_refused_in_one_sentence(
@@ -214,6 +224,19 @@ def test_a_url_that_cannot_be_reached_is_refused_in_one_sentence(
 
 def test_an_ipv6_url_with_a_port_is_taken() -> None:
     assert FolderConfig(url="https://[::1]:8443/").url == "https://[::1]:8443"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://[::1]:8000",
+        "http://my_host:8000",  # '_' is not RFC 1123, but Docker uses it: allowed
+    ],
+)
+def test_a_url_with_a_valid_host_is_taken(url: str) -> None:
+    assert FolderConfig(url=url).url == url
 
 
 @pytest.mark.parametrize("state", ["contract", "stateous", "json", "asyncio", "typing"])

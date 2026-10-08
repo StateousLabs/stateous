@@ -128,6 +128,31 @@ def test_init_refuses_an_unreachable_control_plane_in_one_sentence(tmp_path: Pat
     assert not (tmp_path / "w").exists()
 
 
+def test_init_refuses_a_url_with_a_bad_host_in_one_sentence(tmp_path: Path) -> None:
+    url = "http://my host:8000"
+
+    result = CliRunner().invoke(app, ["init", url, str(tmp_path / "w")])
+
+    assert result.exit_code == 1
+    assert "has a host that is not valid" in result.output
+    assert "Traceback" not in result.output
+    assert not (tmp_path / "w").exists()
+
+
+def test_supervise_refuses_a_bad_host_without_retrying(tmp_path: Path) -> None:
+    folder = tmp_path / "w"
+    folder.mkdir()
+    checksum_line = "sha256:" + "a" * 64
+    (folder / "contract.py").write_text(f'__checksum__ = "{checksum_line}"\n', encoding="utf-8")
+    (folder / "stateous.yaml").write_text("url: http://my host:8000\n", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["supervise", str(folder)])
+
+    assert result.exit_code == 1
+    assert "has a host that is not valid" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_supervise_refuses_a_contract_for_another_graph(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
     folder = tmp_path / "sdlc-supervisor"

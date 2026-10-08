@@ -20,6 +20,8 @@ import httpx2
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from stateous.model.host import host_problem
+
 CONFIG = "stateous.yaml"
 CONTRACT = "contract.py"
 DEFAULT_TASKS = 4
@@ -63,6 +65,9 @@ class FolderConfig(BaseModel):
             ) from None
         if not parsed.host:
             raise ValueError(f"url: {url!r} has no host")
+        problem = host_problem(parsed.host)
+        if problem is not None:
+            raise ValueError(f"url: {url!r} has a host that is not valid: {problem}")
         if parsed.port is not None and not 0 < parsed.port <= 65535:
             raise ValueError(f"url: {url!r} has the port {parsed.port}; a port is 1 to 65535")
         return url.rstrip("/")

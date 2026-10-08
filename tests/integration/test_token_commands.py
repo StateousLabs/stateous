@@ -124,3 +124,12 @@ def test_a_url_that_is_not_a_url_is_one_sentence() -> None:
     assert "http://[::1 is not a URL" in result.output
     assert "Traceback" not in result.output
     assert len(result.output.strip().splitlines()) == 1
+
+
+def test_a_url_with_a_host_that_is_not_valid_is_one_sentence() -> None:
+    result = run("token", "show", "--url", "http://my host:8000")
+
+    assert result.exit_code == 1
+    assert "has a host that is not valid" in result.output
+    assert "Traceback" not in result.output
+    assert len(result.output.strip().splitlines()) == 1

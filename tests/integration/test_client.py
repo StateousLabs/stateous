@@ -194,6 +194,37 @@ def test_a_url_that_is_not_a_url_is_one_client_error() -> None:
     assert "\n" not in str(caught.value)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://my host:8000",  # a space
+        "http://local%host:8000",  # a '%'
+    ],
+)
+def test_a_url_with_a_host_that_is_not_valid_is_one_client_error(url: str) -> None:
+    with pytest.raises(ClientError) as caught:
+        Client(url)
+
+    assert str(caught.value) == (
+        f"{url} has a host that is not valid: a host has only letters, digits, '-' and "
+        "'.', or is an IP address"
+    )
+    assert "\n" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://[::1]:8000",
+        "http://my_host:8000",  # '_' is not RFC 1123, but Docker uses it: allowed
+    ],
+)
+def test_a_url_with_a_valid_host_is_taken(url: str) -> None:
+    Client(url).close()
+
+
 def test_a_request_url_that_cannot_be_built_is_one_client_error() -> None:
     with Client(nowhere()) as client, pytest.raises(ClientError) as caught:
         client.get("a" * 70_000)  # longer than a URL can be

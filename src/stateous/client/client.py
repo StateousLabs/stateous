@@ -19,6 +19,8 @@ from urllib.parse import quote
 
 import httpx2
 
+from stateous.model.host import host_problem
+
 
 class ClientError(Exception):
     """Something the control plane could not do, or could not be asked."""
@@ -51,9 +53,13 @@ class Client:
     def __init__(self, url: str, *, timeout: float = 30.0) -> None:
         self.url = url.rstrip("/")
         try:
-            self._http = httpx2.Client(base_url=self.url, timeout=timeout)
+            http = httpx2.Client(base_url=self.url, timeout=timeout)
         except httpx2.InvalidURL as error:
             raise ClientError(_not_a_url(self.url, error)) from None
+        problem = host_problem(http.base_url.host)
+        if problem is not None:
+            raise ClientError(_bad_host(self.url, problem))
+        self._http = http
 
     def start(self, token: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start a token. A token that exists is returned as it is."""
@@ -203,6 +209,13 @@ def _not_a_url(url: str, error: Exception) -> str:
     """One sentence for a URL that httpx2 cannot build. A long URL is cut short."""
     shown = url if len(url) <= 100 else f"{url[:100]}..."
     return f"{shown} is not a URL: {' '.join(str(error).split())}"
+
+
+def _bad_host(url: str, problem: str) -> str:
+    """One sentence for a URL whose host `host_problem` refuses. A long URL is cut
+    short."""
+    shown = url if len(url) <= 100 else f"{url[:100]}..."
+    return f"{shown} has a host that is not valid: {problem}"
 
 
 def _segment(name: str) -> str:
