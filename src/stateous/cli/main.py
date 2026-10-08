@@ -9,8 +9,9 @@ from __future__ import annotations
 import errno
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, TextIO, cast
 
 import typer
 
@@ -156,24 +157,63 @@ app.add_typer(token_app, name="token")
 
 def main() -> None:
     """The `stateous` command. Output to a closed pipe (`stateous token show | head -1`)
-    ends the command quietly, with exit code 1: no traceback."""
+    ends the command quietly, with exit code 1: no traceback. Any other error shows as
+    usual, also an EINVAL that did not come from a write to stdout."""
+    stdout = _Stdout(sys.stdout)
+    sys.stdout = cast("TextIO", stdout)
     try:
         try:
             app(prog_name="stateous")
         finally:
             sys.stdout.flush()
     except OSError as error:
-        if not _closed_pipe(error):
+        if not _closed_pipe(error, stdout.failure):
             raise
         # Python flushes stdout again at exit: send it to nothing, so that flush cannot fail.
         nothing = os.open(os.devnull, os.O_WRONLY)
         os.dup2(nothing, sys.stdout.fileno())
         sys.exit(1)
+    finally:
+        sys.stdout = stdout.stream
 
 
-def _closed_pipe(error: OSError) -> bool:
+class _Stdout:
+    """Stdout, which keeps the error of a write or a flush that failed. All else goes
+    to the stream."""
+
+    def __init__(self, stream: TextIO) -> None:
+        self.stream = stream
+        self.failure: OSError | None = None
+
+    def write(self, text: str) -> int:
+        try:
+            return self.stream.write(text)
+        except OSError as error:
+            self.failure = error
+            raise
+
+    def writelines(self, lines: Iterable[str]) -> None:
+        try:
+            self.stream.writelines(lines)
+        except OSError as error:
+            self.failure = error
+            raise
+
+    def flush(self) -> None:
+        try:
+            self.stream.flush()
+        except OSError as error:
+            self.failure = error
+            raise
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.stream, name)
+
+
+def _closed_pipe(error: OSError, stdout_failure: OSError | None) -> bool:
     """True when `error` is a write to a pipe that the reader closed. On Windows, the
-    error is EINVAL, not EPIPE."""
+    error is EINVAL, not EPIPE; but EINVAL also comes from other calls (for example
+    `open('a?b.py')`), so it counts only when a write or a flush of stdout raised it."""
     if isinstance(error, BrokenPipeError) or error.errno == errno.EPIPE:
         return True
-    return sys.platform == "win32" and error.errno == errno.EINVAL
+    return sys.platform == "win32" and error.errno == errno.EINVAL and error is stdout_failure
