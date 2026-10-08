@@ -48,7 +48,10 @@ every 10 seconds; the clock calls it on each tick."""
 SHUTDOWN_WITHIN = 5
 """Seconds a graceful stop waits for the requests in progress."""
 
-LOST = "another control plane took this database; this control plane does no more work; stop it"
+LOST = (
+    "another control plane took this database; this control plane does no more work; "
+    "trying again does not help: stop this server"
+)
 """The error line of a lost hold, and the answer (503) to each request after it."""
 
 _IN_USE: frozenset[int] = frozenset(
@@ -204,7 +207,7 @@ class ClockedApp:
     """The API as `serve` runs it. Its ASGI lifespan runs the clock while the server
     serves: the clock starts when the server starts, and the server's stop waits for
     the tick in progress. After a lost hold, each request gets 503, `LOST` and the
-    code `database_busy`."""
+    code `not_serving`."""
 
     def __init__(self, api: ASGIApp, clock: Clock) -> None:
         self.api = api
@@ -214,9 +217,7 @@ class ClockedApp:
         if scope["type"] == "lifespan":
             await self._lifespan(receive, send)
         elif self.clock.lost and scope["type"] == "http":
-            # The table of codes has no row for a lost hold: `database_busy` (503) is
-            # the nearest.
-            await refusal(503, LOST, "database_busy")(scope, receive, send)
+            await refusal(503, LOST, "not_serving")(scope, receive, send)
         else:
             await self.api(scope, receive, send)
 

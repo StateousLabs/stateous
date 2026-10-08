@@ -749,6 +749,7 @@ The sentence is for people, and it can change. The code does not change: a progr
 | `task_not_held` | 409 | The task is not this supervisor's, or no one works on it now. |
 | `attempt_over` | 409 | The request is for an attempt of the task that is over: the task moved to a new attempt. |
 | `database_busy` | 503 | The database cannot take the request now; try again. |
+| `not_serving` | 503 | This control plane no longer holds the database (another one took it). Trying again does not help: stop this server. A supervisor still tries again, because another control plane can take over at the same URL; its log line gives this code. |
 | `unexpected` | 500 | The request failed for a reason that no code above names. |
 
 | Method and path | What it does |

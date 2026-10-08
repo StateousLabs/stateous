@@ -3,10 +3,12 @@ async, over httpx2.
 
 A call that does not reach the control plane is tried again after 1, 2, 4, 8, 16,
 then every 30 seconds, with one log line for each failure, until it gets an
-answer. An answer 502, 503 or 504 counts as "not reached" (a proxy, or a control
-plane that restarts). Any other answer of 400 or more is a refusal: `Refused`,
-and no new try. A refusal has the code that the answer gives (design section 5.4);
-read the code, never the sentence.
+answer. An answer 502, 503 or 504 counts as "not reached" (a proxy, a control
+plane that restarts, or a control plane that is `not_serving`: another one can take
+over at the same URL); the log line gives its code and sentence, if it has them.
+Any other answer of 400 or more is a refusal: `Refused`, and no new try. A refusal
+has the code that the answer gives (design section 5.4); read the code, never the
+sentence.
 
 A call can get a `stop` event. When it is set, a call that waits to try again
 gives up: a claim returns None, and a report, a note, a memory write or a
@@ -148,7 +150,7 @@ class ControlPlaneApi:
                 problem = str(error) or type(error).__name__
             else:
                 if response.status_code in UNAVAILABLE:
-                    problem = f"it answered {response.status_code}"
+                    problem = _unavailable(response)
                 elif response.status_code >= 400:
                     message, code = _error_of(response)
                     raise Refused(response.status_code, message, code=code)
@@ -203,6 +205,17 @@ def _error_of(response: httpx2.Response) -> tuple[str, str | None]:
         return error, named
     text = " ".join(response.text.split())[:200]
     return text or f"the control plane answered {response.status_code}", named
+
+
+def _unavailable(response: httpx2.Response) -> str:
+    """Why an answer 502, 503 or 504 counts as "not reached". When the answer has a
+    code, the line gives the code and the sentence: `not_serving` (another control
+    plane took the database) is not an outage, but another control plane can take
+    over at the same URL, so the supervisor tries again."""
+    message, code = _error_of(response)
+    if code is None:
+        return f"it answered {response.status_code}"
+    return f"it answered {response.status_code}, {code}: {message}"
 
 
 def _body(response: httpx2.Response) -> Any:

@@ -170,6 +170,33 @@ def test_an_unreachable_control_plane_is_tried_again_with_one_log_line_each_time
     assert "it answered 503" in lines[1]
 
 
+def test_a_control_plane_that_is_not_serving_is_tried_again_and_the_log_names_why(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Another control plane can take over on the same URL: the supervisor tries
+    again, as for an outage, but its log line gives the code and the sentence."""
+    caplog.set_level(logging.WARNING, logger="stateous.supervisor")
+    lost = {"error": "another control plane took this database", "code": "not_serving"}
+    answers = [httpx2.Response(503, json=lost), httpx2.Response(204)]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return answers.pop(0)
+
+    async def scenario() -> None:
+        api = api_with(handler, [])
+        try:
+            await api.note(7, "still here", attempt=1)
+        finally:
+            await api.aclose()
+
+    asyncio.run(scenario())
+
+    lines = [r.getMessage() for r in caplog.records if "cannot reach" in r.getMessage()]
+    assert len(lines) == 1
+    assert "not_serving" in lines[0]
+    assert "another control plane took this database" in lines[0]
+
+
 def test_the_backoff_grows_to_30_seconds_and_stays_there() -> None:
     delays: list[float] = []
     calls = [0]

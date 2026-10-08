@@ -130,7 +130,9 @@ def test_after_a_lost_hold_each_request_is_503() -> None:
 
     assert answer.status_code == 503
     assert "another control plane took this database" in answer.json()["error"]
-    assert answer.json()["code"] == "database_busy"
+    assert "stop this server" in answer.json()["error"]
+    assert "try again" not in answer.json()["error"]
+    assert answer.json()["code"] == "not_serving"
 
 
 def test_a_lost_hold_calls_on_lost_once_after_the_line(caplog: pytest.LogCaptureFixture) -> None:
