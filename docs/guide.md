@@ -475,6 +475,8 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
             ctx.note(ev.summary)  # progress in the token's history (PHD request 6)
         result = await handle.wait()
     if result.status != "succeeded":
+        if result.error and result.error.kind == "session" and "dev" in ctx.memory:
+            del ctx.memory["dev"]  # the session cannot be resumed: the retry starts fresh
         raise RuntimeError(result.error)  # a failed attempt
     return states.coding.outcome(result.structured_output)
 ```
@@ -537,6 +539,8 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
     if result.session_id:
         ctx.memory["dev"] = result.session_id
     if result.status != "succeeded":
+        if result.error and result.error.kind == "session" and "dev" in ctx.memory:
+            del ctx.memory["dev"]  # the session cannot be resumed: the retry starts fresh
         raise RuntimeError(result.error)
     return states.coding.outcome(result.structured_output)
 ```

@@ -121,6 +121,36 @@ def test_a_failed_run_fails_the_attempt(on_path: None) -> None:
         asyncio.run(coding.code(context(Sent())))
 
 
+def test_a_session_that_cannot_be_resumed_is_dropped_so_the_retry_starts_fresh(
+    on_path: None,
+) -> None:
+    phd, _, coding = modules()
+    error = phd.RunError(kind="session", message="session-0 is not in the run ledger")
+    phd.Dispatcher.script = phd.Script(
+        summaries=(), result=phd.RunResult(status="failed", error=error)
+    )
+    sent = Sent()
+
+    with pytest.raises(RuntimeError, match="session"):
+        asyncio.run(coding.code(context(sent, memory={"dev": "session-0"})))
+
+    assert sent.memory == [("dev", None)]  # deleted: the next attempt has no session id
+
+
+def test_another_failure_keeps_the_session(on_path: None) -> None:
+    phd, _, coding = modules()
+    error = phd.RunError(kind="idle", message="no event for 900 s")
+    phd.Dispatcher.script = phd.Script(
+        summaries=(), result=phd.RunResult(status="timed_out", error=error)
+    )
+    sent = Sent()
+
+    with pytest.raises(RuntimeError, match="idle"):
+        asyncio.run(coding.code(context(sent, memory={"dev": "session-0"})))
+
+    assert sent.memory == []  # the retry resumes the same session
+
+
 def test_an_answer_with_an_event_the_state_cannot_emit_is_refused(on_path: None) -> None:
     phd, _, coding = modules()
     answer = {"event": "passed", "payload": {"passed": 1, "failed": 0}}
