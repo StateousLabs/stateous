@@ -13,3 +13,7 @@ try.db
 
 # Planning documents (kept locally, not versioned)
 docs/superpowers/
+
+# Correspondence with PHD (kept locally, not versioned)
+docs/phd.md
+docs/PHD_ANSWERS.md
