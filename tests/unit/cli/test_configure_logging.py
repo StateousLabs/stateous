@@ -1,4 +1,4 @@
-"""`configure_logging`: the `stateous` logger stays at INFO, because phase 4's
+"""`configure_logging`: the `stateous` logger stays at INFO, because the
 supervisor reads INFO lines from `serve`."""
 
 import logging

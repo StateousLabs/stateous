@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from stateous.model.events import Occurrence
 
 F = TypeVar("F", bound=Callable[..., Any])
-O = TypeVar("O", bound=Occurrence[Any])  # noqa: E741 — contract section 18, R4, names it O
+O = TypeVar("O", bound=Occurrence[Any])  # noqa: E741 — the convention for this parameter is O
 """The events of one state: the union of its occurrence classes."""
 _LABEL = "__stateous_implements__"
 _DEFS = "#/$defs/"

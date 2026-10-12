@@ -1,4 +1,4 @@
-"""A workflow -> the graph document (contract section 6)."""
+"""A workflow -> the graph document."""
 
 from typing import Any, Generic, TypeVar
 

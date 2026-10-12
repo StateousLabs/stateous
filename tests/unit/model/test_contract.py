@@ -1,4 +1,4 @@
-"""The types that a generated contract.py is built from (contract section 8)."""
+"""The types that a generated contract.py is built from."""
 
 import json
 from typing import Any, assert_type

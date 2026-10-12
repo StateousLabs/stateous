@@ -1,4 +1,4 @@
-"""The graph document -> contract.py and a stub per state (contract section 7)."""
+"""The graph document -> contract.py and a stub per state."""
 
 import importlib.util
 import json
@@ -197,7 +197,7 @@ def test_strict_pyright_checks_what_a_routine_returns(
     assert errors[0].startswith("wrong.py:11: ")
     assert "failed" in errors[0]
 
-    # A list of an Enum made by `default_factory` is typed too (phase 1's final review).
+    # A list of an Enum made by `default_factory` is typed too.
     shelf = tmp_path / "shelf"
     shelf.mkdir()
     (shelf / "contract.py").write_text(generate_contract(shelf_document()), encoding="utf-8")

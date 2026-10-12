@@ -124,7 +124,7 @@ def test_searching_a_value_that_is_not_a_list_cannot_be_proven() -> None:
     assert "`in` searches payload.score, which is not a list" in problem
 
 
-# ── what the review of phase 1 found ──────────────────────────────────────
+# ── enum fields, lists and negative literals ──────────────────────────────
 
 
 class Sev(Enum):
@@ -220,7 +220,7 @@ def test_a_negative_literal_in_a_list_is_tried() -> None:
     assert "ctx['delta'] = -2" in problem or "ctx['delta'] = -1" in problem
 
 
-# ── what the final review of phase 1 found ────────────────────────────────
+# ── empty collections, and models without a schema ───────────────────────
 
 
 @pytest.mark.parametrize(

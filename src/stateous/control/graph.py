@@ -1,7 +1,7 @@
 """The control plane's view of the compiled workflow.
 
-Made from the graph document (contract section 6), never from the Python
-definition. Guards are parsed again from their text. Payloads and the context
+Made from the graph document, never from the Python definition. Guards are
+parsed again from their text. Payloads and the context
 are checked against the JSON Schemas in the document.
 """
 

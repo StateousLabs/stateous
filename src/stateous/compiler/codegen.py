@@ -62,7 +62,7 @@ body (`context`, `states`, `events`, `transitions`)."""
 
 
 def generate_contract(document: dict[str, Any]) -> str:
-    """The text of `contract.py`: the models, `events`, `states` (contract section 7)."""
+    """The text of `contract.py`: the models, `events`, `states`."""
     workflow = cast("str", document["workflow"])
     schemas = cast("dict[str, dict[str, Any]]", document.get("schemas", {}))
     bodies = _bodies(document)

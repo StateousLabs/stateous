@@ -1,4 +1,4 @@
-"""The graph file: JSON text, its checksum and its structure (contract section 6)."""
+"""The graph file: JSON text, its checksum and its structure."""
 
 import copy
 import hashlib

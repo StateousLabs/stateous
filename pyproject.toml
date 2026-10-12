@@ -55,7 +55,7 @@ known-first-party = ["stateous"]
 known-local-folder = ["contract", "schemas"]
 
 [tool.ruff.lint.per-file-ignores]
-# Generated (contract §7): `class events:` and `class done(...)` are lower case on purpose
+# Generated: `class events:` and `class done(...)` are lower case on purpose
 "examples/*/contract.py" = ["N801", "RUF003"]
 
 [tool.pyright]

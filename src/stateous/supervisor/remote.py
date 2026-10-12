@@ -1,5 +1,5 @@
-"""The control plane's HTTP API (contract section 13), as the supervisor calls it:
-async, over httpx2.
+"""The control plane's HTTP API (see the guide, "The HTTP API"), as the supervisor
+calls it: async, over httpx2.
 
 A call that does not reach the control plane is tried again after 1, 2, 4, 8, 16,
 then every 30 seconds, with one log line for each failure, until it gets an

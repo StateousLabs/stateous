@@ -1,4 +1,4 @@
-"""The public names: contract section 3, as far as phase 1 makes them."""
+"""The public names that `stateous.__all__` exports."""
 
 import stateous
 

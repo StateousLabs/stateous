@@ -42,8 +42,8 @@ LOCAL_HOSTS = ("127.0.0.1", "::1", "localhost")
 """The hosts that only this computer reaches: no warning."""
 
 TICK_EVERY = 1.0
-"""Seconds between two ticks of the clock. Phase 2 needs `keep_serving` at least
-every 10 seconds; the clock calls it on each tick."""
+"""Seconds between two ticks of the clock. `keep_serving` must run at least every
+10 seconds; the clock calls it on each tick."""
 
 SHUTDOWN_WITHIN = 5
 """Seconds a graceful stop waits for the requests in progress."""
@@ -269,10 +269,10 @@ class Serving:
 
 
 def prepare_serve(graph: Path, db: str, listen: str) -> Serving:
-    """Do each check of contract section 15 before the server starts, in this order:
-    `--listen`, the graph file, the port, the database and its hold, the structure on
-    record. Each refusal is a `ServeRefused` with one sentence, and leaves no port and
-    no database open. Then print the warning line for a wide `--listen`."""
+    """Do each check before the server starts, in this order: `--listen`, the graph
+    file, the port, the database and its hold, the structure on record. Each refusal
+    is a `ServeRefused` with one sentence, and leaves no port and no database open.
+    Then print the warning line for a wide `--listen`."""
     host, port = host_and_port(listen)
     workflow = _load(graph)
     listener = _listen(host, port)
@@ -309,7 +309,7 @@ class GracefulServer(uvicorn.Server):
 
 
 def configure_logging() -> None:
-    """Set up logging for `serve`. The `stateous` logger stays at INFO: phase 4's
+    """Set up logging for `serve`. The `stateous` logger stays at INFO: the
     supervisor reads these lines. Each line goes to stderr, one line each."""
     if not logging.getLogger().handlers:
         logging.basicConfig(format="%(asctime)s %(name)s: %(message)s")
@@ -346,7 +346,7 @@ def _listen(host: str, port: int) -> socket.socket:
 
 
 def _open(db: str) -> Store:
-    """The store, with this control plane's hold on the database (phase 2)."""
+    """The store, with this control plane's hold on the database."""
     try:
         return Store(db, hold=True)
     except DatabaseHeld as error:
@@ -358,7 +358,7 @@ def _open(db: str) -> Store:
 
 
 def _check_structure(engine: Engine) -> None:
-    """Contract section 15. A stored structure that differs, while tokens are active
+    """A stored structure that differs, while tokens are active
     or paused: refuse. Else put this graph on record, if it is not there yet (a new
     database, a new structure, or the same structure with another checksum)."""
     graph = engine.graph

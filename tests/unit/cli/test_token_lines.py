@@ -23,7 +23,7 @@ def test_a_token_line_names_the_id_the_state_and_the_status() -> None:
     ("kind", "data", "text"),
     [
         # Every shape below is the real one the engine writes (control/engine.py's
-        # `tx.append(...)` calls), not a shape from the plan.
+        # `tx.append(...)` calls), not a guessed one.
         ("started", {"context": {"repo": "a"}}, "started"),
         ("started", {"context": {"repo": "a"}, "parent": "T-1"}, "started by T-1"),
         (

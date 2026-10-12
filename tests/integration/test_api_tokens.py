@@ -185,7 +185,7 @@ def test_the_workflow_and_the_health_come_from_the_graph(
 
     assert served == sdlc
     assert health == {"workflow": "sdlc", "checksum": engine.graph.checksum}
-    assert health["checksum"] == checksum(served)  # contract section 18, R6
+    assert health["checksum"] == checksum(served)
 
 
 @pytest.mark.parametrize(

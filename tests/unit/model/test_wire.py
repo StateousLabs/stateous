@@ -1,4 +1,4 @@
-"""What crosses the network between the control plane and a supervisor (contract section 10)."""
+"""What crosses the network between the control plane and a supervisor."""
 
 import json
 from typing import Any

@@ -39,7 +39,7 @@ EXAMPLE_FILES = {
     "sdlc-supervisor/testing.py",
     "sdlc-supervisor/coding.py",
 }
-ROUTES = [  # contract §13
+ROUTES = [  # the HTTP API's routes
     "POST /tokens",
     "GET /tokens",
     "GET /tokens/{id}",

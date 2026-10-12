@@ -1,4 +1,4 @@
-"""What a routine gets as `ctx` (see the guide, "Write a routine"; contract section 9)."""
+"""What a routine gets as `ctx` (see the guide, "Write a routine")."""
 
 import math
 from datetime import UTC, datetime
