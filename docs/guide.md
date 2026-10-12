@@ -44,7 +44,7 @@ The supervisor's folder never holds `flow.py` or the graph file. Its routines im
 
 ## Install
 
-Stateous needs Python 3.11 or newer. It is not on PyPI yet. Add it to your project from a copy of its repository:
+Stateous needs Python 3.12 or newer. It is not on PyPI yet. Add it to your project from a copy of its repository:
 
 ```bash
 uv add --editable path/to/stateous

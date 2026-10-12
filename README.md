@@ -8,7 +8,7 @@ You write the graph in Python. A control plane keeps every token and chooses eac
 
 ## Install
 
-Stateous needs Python 3.11 or newer. It is not on PyPI yet. Add it to your project from a copy of this repository:
+Stateous needs Python 3.12 or newer. It is not on PyPI yet. Add it to your project from a copy of this repository:
 
 ```bash
 uv add --editable path/to/stateous

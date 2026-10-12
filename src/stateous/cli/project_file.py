@@ -75,7 +75,7 @@ def pyproject_text(name: str, stateous_path: str | None) -> str:
         "[project]",
         f"name = {_toml_string(name)}",
         'version = "0.1.0"',
-        'requires-python = ">=3.11"',
+        'requires-python = ">=3.12"',
         f"dependencies = [{_toml_string(requirement())}]",
     ]
     if stateous_path is not None:

@@ -29,7 +29,7 @@ def test_it_depends_on_the_stateous_that_wrote_it(tmp_path: Path) -> None:
     assert data["project"] == {
         "name": "sdlc-supervisor",
         "version": "0.1.0",
-        "requires-python": ">=3.11",
+        "requires-python": ">=3.12",
         "dependencies": [f"stateous>={version('stateous')}"],
     }
     assert "tool" not in data

@@ -4,7 +4,7 @@ version = "0.1.0.dev0"
 description = "A process as a graph of states. A control plane keeps every token durable."
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.6,<3",
     "typer>=0.12",
@@ -17,6 +17,10 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pyyaml>=6,<7",
 ]
+
+[project.optional-dependencies]
+# Agents in routines: PHD runs them (see the guide, "Agents, with PHD").
+phd = ["poly-harness-dispatcher>=0.1"]
 
 [project.scripts]
 stateous = "stateous.cli.main:main"
@@ -57,12 +61,13 @@ exclude = ["**/__pycache__", "**/*.pyc", "examples/**/.stateous"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF"]
 # Errors keep their domain names, without an "Error" suffix.
-ignore = ["N818"]
+# UP046/UP047: keep TypeVar generics; the PEP 695 syntax would change public classes for no gain.
+ignore = ["N818", "UP046", "UP047"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["stateous"]
@@ -75,7 +80,7 @@ known-local-folder = ["contract", "schemas"]
 
 [tool.pyright]
 include = ["src", "tests", "examples"]
-pythonVersion = "3.11"
+pythonVersion = "3.12"
 typeCheckingMode = "strict"
 executionEnvironments = [
     { root = "examples/sdlc" },

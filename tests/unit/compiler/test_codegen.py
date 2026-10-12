@@ -99,7 +99,7 @@ def ruff_formatted(path: Path) -> subprocess.CompletedProcess[str]:
 
 def pyright_errors(folder: Path) -> list[str]:
     """Strict pyright on the files in `folder`: one `file:line: message` per error."""
-    config = {"typeCheckingMode": "strict", "pythonVersion": "3.11"}
+    config = {"typeCheckingMode": "strict", "pythonVersion": "3.12"}
     (folder / "pyrightconfig.json").write_text(json.dumps(config), encoding="utf-8")
     command = [sys.executable, "-m", "pyright", "--outputjson", "--pythonpath", sys.executable]
     result = subprocess.run(
