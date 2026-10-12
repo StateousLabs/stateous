@@ -10,9 +10,3 @@ stateous.db
 try/
 try.db
 .stateous/
-
-# Local notes (not versioned)
-docs/superpowers/
-docs/phd.md
-docs/PHD_ANSWERS.md
-docs/design.md

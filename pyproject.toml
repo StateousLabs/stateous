@@ -38,6 +38,21 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/stateous"]
 
+# Only these go into the source package. A list, not the .gitignore files: the build
+# does not read a .gitignore inside a folder, so local notes would go in.
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/stateous",
+    "tests",
+    "examples",
+    "docs/guide.md",
+    "scripts/check.py",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+]
+exclude = ["**/__pycache__", "**/*.pyc", "examples/**/.stateous"]
+
 # ── Quality ──────────────────────────────────────────────────────────────
 
 [tool.ruff]
