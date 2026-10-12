@@ -41,7 +41,6 @@ To try the example on one computer, follow [the guide](docs/guide.md#try-it-on-o
 ## Learn more
 
 - [`docs/guide.md`](docs/guide.md): the guide, on one page.
-- [`docs/design.md`](docs/design.md): the design. It sets the scope.
 - [`examples/`](examples/): the example.
 
 ## Licence

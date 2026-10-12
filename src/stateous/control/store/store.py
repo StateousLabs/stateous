@@ -100,8 +100,8 @@ def open_engine(url: str) -> Engine:
     BEGIN IMMEDIATE: the transaction takes the write lock at its start, so another
     process on the same file waits for its turn and does not fail at once.
 
-    On Postgres, each connection and statement has a time limit (docs/design.md,
-    section 7): `POSTGRES_CONNECT_WITHIN`, `POSTGRES_STATEMENT_WITHIN`,
+    On Postgres, each connection and statement has a time limit:
+    `POSTGRES_CONNECT_WITHIN`, `POSTGRES_STATEMENT_WITHIN`,
     `POSTGRES_LOCK_WAIT` and `POSTGRES_KEEPALIVES`. They are set for each session, so
     the migrations have them too. A pooled connection is checked before use."""
     url = database_url(url)
@@ -300,8 +300,9 @@ class Transaction:
     On Postgres, many writers work at once. A transaction takes the lock of a token's
     family (`lock_token`) before it reads the token to change it, or appends to its
     ledger, and holds the lock until it ends. A family is a top token and the child
-    tokens below it (design section 8). A parallel state changes a parent and its
-    children in one transaction, so they share one lock: the lock of the top token.
+    tokens below it (see the guide, "Nested and parallel work"). A parallel state
+    changes a parent and its children in one transaction, so they share one lock:
+    the lock of the top token.
     So the changes to one family take turns: a token moves one step at a time. A
     transaction waits for at most one family's lock, and only while it holds no other,
     so two transactions never wait for each other in a circle. A new claim never

@@ -158,7 +158,7 @@ def test_a_first_claim_and_its_repeat_at_once_get_the_same_grant(engine: Engine)
         assert results[0] == results[1]
 
 
-# ── a family: a parent and its children (design section 8) ──────────────
+# ── a family: a parent and its children ──────────────────────────────────
 
 
 def parallel_engine() -> tuple[Engine, Store]:

@@ -185,7 +185,7 @@ def test_all_problems_are_reported_together() -> None:
     assert "no transition into END" in problem
 
 
-# ── child workflows (design section 8) ────────────────────────────────────
+# ── child workflows ────────────────────────────────────
 
 
 def with_child(child: Workflow, *, inputs: tuple[str, ...] = ("repo",)) -> Workflow:
@@ -346,7 +346,7 @@ def test_a_guard_on_joined_may_count_joined() -> None:
     validate(flow)
 
 
-# ── a parallel state's own exits (design section 8) ───────────────────────
+# ── a parallel state's own exits ───────────────────────
 
 
 def test_a_parallel_state_without_a_transition_on_joined_is_refused() -> None:

@@ -130,7 +130,7 @@ def test_retries_of_zero_or_more_are_read(sdlc_document: dict[str, Any]) -> None
     assert load_graph(json.dumps(sdlc_document))["states"]["testing"]["retries"] == 0
 
 
-# ── child workflows (design section 8) ────────────────────────────────────
+# ── child workflows ────────────────────────────────────
 
 
 def test_a_graph_file_with_child_workflows_round_trips() -> None:

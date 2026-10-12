@@ -35,7 +35,7 @@ class Tests(BaseModel):
 
 
 def sdlc_workflow() -> Workflow:
-    """The workflow of design section 4.1, as it is written there."""
+    """The sdlc example workflow: `coding` then `testing`."""
     flow = Workflow("sdlc", context=Ticket)
     coding = flow.state("coding", timeout="6h", retries=2)
     testing = flow.state("testing", timeout="1h")

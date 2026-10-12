@@ -94,7 +94,7 @@ def test_the_graph_knows_its_document_checksum_and_structure() -> None:
     )
 
 
-# ── child workflows (design section 8) ────────────────────────────────────
+# ── child workflows ────────────────────────────────────
 
 
 def test_a_parallel_state_keeps_its_workflows_join_and_inputs() -> None:

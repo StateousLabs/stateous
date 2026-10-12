@@ -296,7 +296,7 @@ def test_a_lease_ends_only_if_it_is_still_over_when_it_is_ended() -> None:
     assert leases == [None, utc(NOW)]
 
 
-# ── child tokens (design section 8) ───────────────────────────────────────
+# ── child tokens ───────────────────────────────────────
 
 
 def add_child(store: Store, token: str, parent: str, workflow: str, state: str) -> None:

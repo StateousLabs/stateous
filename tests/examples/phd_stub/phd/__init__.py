@@ -2,8 +2,8 @@
 
 PHD is not a dependency of Stateous. The PHD author accepted these features on
 2026-10-06, but they are not released yet: `Dispatcher.run()`, `handle.session_id`,
-`event.summary` and `Spec.idle_timeout_s` (docs/design.md, section 6 and N8). The
-names and shapes here follow that agreement. Pyright checks coding.py against this
+`event.summary` and `Spec.idle_timeout_s`. The names and shapes here follow that
+agreement. Pyright checks coding.py against this
 file, and tests/examples/test_coding.py runs coding.py with it. `Spec` needs the
 same fields as the real PHD `Spec`; a test compares them when the PHD source is there.
 

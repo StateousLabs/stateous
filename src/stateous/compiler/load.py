@@ -60,7 +60,8 @@ def load_workflow(path: Path) -> Workflow:
     found = list({id(flow): flow for flow in workflows}.values())  # one object, one workflow
     if not found:
         raise LoadError(f"{path} defines no Workflow at module level")
-    # The child workflows of parallel states are at module level too (design section 8).
+    # The child workflows of parallel states are at module level too (see the guide,
+    # "Nested and parallel work").
     # The workflow that no parallel state runs is the one to compile.
     run = {id(child) for flow in found for s in flow.states.values() for child in s.parallel}
     tops = [flow for flow in found if id(flow) not in run] or found

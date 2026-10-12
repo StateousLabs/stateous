@@ -4,7 +4,7 @@ Declaration already refuses what it can see line by line (`model/workflow.py`).
 These checks need the whole graph, so they run when compiling. They collect all
 problems and report them together, so one compile shows everything to fix. Each
 child workflow of a parallel state gets the same checks, and some of its own
-(design section 8).
+(see the guide, "Nested and parallel work").
 """
 
 from __future__ import annotations
@@ -185,7 +185,8 @@ def _inputs(flow: Workflow) -> Iterable[str]:
 
 def _parallel_exits(flow: Workflow) -> Iterable[str]:
     """A parallel state has no task, so only its join can move its token on. It
-    must leave on `joined`, and it can never leave on `error` (design section 8)."""
+    must leave on `joined`, and it can never leave on `error` (see the guide,
+    "The join")."""
     for state in flow.states.values():
         if not state.parallel:
             continue

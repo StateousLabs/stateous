@@ -600,7 +600,8 @@ class Supervisor:
 
     async def _still_held(self, task: int, token: str, refusal: Refused) -> bool:
         """After a refused report: is the task still this supervisor's, on this
-        attempt? The refusal's code tells (design section 5.4), never its sentence.
+        attempt? The refusal's code tells (see the guide, "The HTTP API"), never
+        its sentence.
         `task_not_found` (or another 404): the task is gone. `attempt_over`: the
         task moved to a new attempt, so this one is over, even if the task id is
         still this supervisor's. Another 409: the task is not ours, or the event is

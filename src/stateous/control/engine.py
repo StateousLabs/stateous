@@ -15,7 +15,8 @@ A token starts at START and leaves it at once, on `__started__`, along the one
 transition whose guard holds on its starting context. When it enters END, it is
 completed. It keeps the state it came from, so the history shows how it ended.
 
-A parallel state's work is its child workflows (design section 8). Entering it
+A parallel state's work is its child workflows (see the guide, "Nested and
+parallel work"). Entering it
 starts one child token for each, in the same transaction. When a child ends, the
 same transaction checks the parent's join, and fires `joined` on the parent when
 the join is met. When the parent leaves the state, its live children are cancelled.
@@ -105,8 +106,8 @@ def _retried(call: Callable[_P, _R]) -> Callable[_P, _R]:
 
 class EngineError(Exception):
     """The base of every error that the engine raises for a request. `code` is the
-    stable code of the refusal (docs/design.md, section 5.4): the API sends it, and
-    clients read it, never the sentence."""
+    stable code of the refusal (see the guide, "The HTTP API"): the API sends it,
+    and clients read it, never the sentence."""
 
     code: ClassVar[str] = "unexpected"
 
@@ -333,7 +334,8 @@ class Engine:
 
     def _resume(self, tx: Transaction, row: tables.Token) -> None:
         """Resume the token and each paused token below it. Then apply what they all
-        held, as one list in the order of arrival (design section 7)."""
+        held, as one list in the order of arrival (see the guide, "Pause and
+        resume")."""
         held: list[tuple[_Held, tables.Token]] = []
         for member in self._family(tx, row):
             if member.status != "paused":
@@ -360,8 +362,8 @@ class Engine:
     def _refuse_child(
         self, tx: Transaction, row: tables.Token, verb: Literal["pause", "resume", "cancel"]
     ) -> None:
-        """A child is part of its parent's work (design section 8): steer the top
-        token instead. `ChildToken` names it."""
+        """A child is part of its parent's work (see the guide, "Steer the parent"):
+        steer the top token instead. `ChildToken` names it."""
         if row.parent is None:
             return
         top = row
@@ -1242,7 +1244,8 @@ def _token(row: tables.Token) -> Token:
 
 def child_id(parent: str, state: str, visit: int, workflow: str) -> str:
     """The id of the child that `parent` starts for `workflow` on its visit `visit` of
-    the parallel state `state`: `TICKET-1.reviews.1.design-review` (design section 8)."""
+    the parallel state `state`: `TICKET-1.reviews.1.design-review` (see the guide,
+    "Child tokens")."""
     return f"{parent}.{state}.{visit}.{workflow}"
 
 

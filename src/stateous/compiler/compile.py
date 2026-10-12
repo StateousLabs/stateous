@@ -30,7 +30,8 @@ SCHEMA_REF = "#/schemas/{model}"
 
 def compile_workflow(flow: Workflow) -> dict[str, Any]:
     """Validate `flow` (`DefinitionError` lists every problem), then build its document.
-    The child workflows of its parallel states go under `workflows` (design section 8)."""
+    The child workflows of its parallel states go under `workflows` (see the guide,
+    "Nested and parallel work")."""
     validate(flow)
     children = nested_workflows(flow)
     schemas, names = _schemas([flow, *children])

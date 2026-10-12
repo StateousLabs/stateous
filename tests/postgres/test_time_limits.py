@@ -1,4 +1,4 @@
-"""Each Postgres connection and statement has a time limit (docs/design.md, section 7).
+"""Each Postgres connection and statement has a time limit.
 A request that waits for a lock that another connection holds answers 503
 `database_busy` after the lock wait, and does not wait for ever."""
 

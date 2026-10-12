@@ -11,7 +11,7 @@ from stateous.control.store import Store
 
 
 def sdlc() -> dict[str, Any]:
-    """The workflow of design.md section 4.1, as `stateous compile` writes it, with a
+    """The sdlc example workflow, as `stateous compile` writes it, with a
     `triage` state for urgent tickets. `coding` has transitions on `timeout` and
     `error`. `testing` has none: there, a timeout or a failed task fails the token."""
     return {

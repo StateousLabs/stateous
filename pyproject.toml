@@ -46,12 +46,12 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF"]
-# Errors keep the names docs/design.md gives them, without an "Error" suffix.
+# Errors keep their domain names, without an "Error" suffix.
 ignore = ["N818"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["stateous"]
-# The example's own modules, imported from their folder (design §3)
+# The example's own modules, imported from their folder
 known-local-folder = ["contract", "schemas"]
 
 [tool.ruff.lint.per-file-ignores]

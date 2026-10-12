@@ -1,4 +1,5 @@
-"""The API, the client and `stateous token` with child tokens (design section 8)."""
+"""The API, the client and `stateous token` with child tokens (see the guide,
+"Child tokens")."""
 
 from __future__ import annotations
 

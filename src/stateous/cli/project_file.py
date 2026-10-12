@@ -1,4 +1,4 @@
-"""The pyproject.toml that `stateous init` writes (docs/design.md, sections 3 and 5.5).
+"""The pyproject.toml that `stateous init` writes (see the guide, "Set up a supervisor").
 
 The supervisor's folder is a Python project of its own. It depends on Stateous and
 on what its routines import, so `uv sync` makes its environment (`.venv`), and

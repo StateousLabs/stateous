@@ -91,7 +91,7 @@ def test_state_id_turns_hyphens_into_underscores() -> None:
     assert state_id("awaiting-review") == "awaiting_review"
 
 
-# ── parallel states (design section 8) ────────────────────────────────────
+# ── parallel states ────────────────────────────────────
 
 
 def test_a_parallel_state_holds_its_workflows_as_regions() -> None:

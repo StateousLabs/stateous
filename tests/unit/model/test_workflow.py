@@ -314,7 +314,7 @@ def test_two_unguarded_ways_out_of_start_are_ambiguous() -> None:
         flow.transition(START, b)
 
 
-# ── parallel states (design section 8) ────────────────────────────────────
+# ── parallel states ────────────────────────────────────
 
 
 def test_a_parallel_state_runs_child_workflows_and_joins() -> None:

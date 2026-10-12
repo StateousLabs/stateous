@@ -162,7 +162,7 @@ def test_a_model_name_that_is_not_a_python_name_is_refused() -> None:
         compile_workflow(boxed(odd, Box[str]))
 
 
-# ── parallel states (design section 8) ────────────────────────────────────
+# ── parallel states ────────────────────────────────────
 
 
 def test_a_parallel_state_names_its_workflows_join_and_inputs_in_place_of_emits() -> None:

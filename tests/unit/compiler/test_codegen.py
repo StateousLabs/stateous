@@ -191,7 +191,7 @@ def test_strict_pyright_checks_what_a_routine_returns(
 
     errors = pyright_errors(tmp_path)
 
-    # The contract and design section 4.2's routine are clean. A routine typed
+    # The contract and the example's routine are clean. A routine typed
     # `-> events.passed` cannot return what `testing` may emit, `passed | failed`.
     assert len(errors) == 1, errors
     assert errors[0].startswith("wrong.py:11: ")
@@ -502,7 +502,7 @@ def test_a_model_name_that_is_not_in_the_schemas_is_refused(
         generate_contract(document)
 
 
-# ── child workflows (design section 8) ────────────────────────────────────
+# ── child workflows ────────────────────────────────────
 
 
 def test_each_child_workflow_is_a_class_in_events_and_states(tmp_path: Path) -> None:

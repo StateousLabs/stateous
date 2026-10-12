@@ -1,6 +1,6 @@
 # The Stateous guide
 
-This page tells you how to use Stateous. It uses one example from start to end: [`examples/sdlc/`](../examples/sdlc/) and [`examples/sdlc-supervisor/`](../examples/sdlc-supervisor/). The design is in [`design.md`](design.md).
+This page tells you how to use Stateous. It uses one example from start to end: [`examples/sdlc/`](../examples/sdlc/) and [`examples/sdlc-supervisor/`](../examples/sdlc-supervisor/).
 
 ## What Stateous does
 

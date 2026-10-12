@@ -257,7 +257,7 @@ def test_init_says_why_a_stub_has_another_name(tmp_path: Path) -> None:
     assert f"wrote    {folder / 'coding.py'}" in lines
 
 
-# ── child states (design section 8) ───────────────────────────────────────
+# ── child states ───────────────────────────────────────
 
 
 def test_child_states_are_found_without_importing_the_files(tmp_path: Path) -> None:

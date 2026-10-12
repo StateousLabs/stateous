@@ -1,5 +1,5 @@
 """`stateous token ...`: start, fire, show, pause, resume and cancel tokens over the
-control plane's HTTP API (docs/design.md, section 5.5). The output is ASCII."""
+control plane's HTTP API (see the guide, "Act on tokens"). The output is ASCII."""
 
 from __future__ import annotations
 

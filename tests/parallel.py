@@ -1,4 +1,5 @@
-"""A workflow with a parallel state (design section 8), shared by the tests of phase 6.
+"""A workflow with a parallel state (see the guide, "Nested and parallel work"),
+shared by the tests of phase 6.
 
 `sdlc` codes, then runs two reviews at the same time: a child token of the
 `security` workflow and one of the `design` workflow. A review ends in `approved` or

@@ -1,5 +1,5 @@
 """`stateous serve`: the control plane. It runs the HTTP API and the clock over one
-database (docs/design.md, sections 4.3, 5.5 and 9).
+database (see the guide, "Compile and serve").
 
 `prepare_serve` does each check before the server starts, and binds the port. Each
 refusal is a `ServeRefused` with one plain sentence. The app in `Serving.config`
@@ -125,7 +125,7 @@ class Holding(Protocol):
 
 
 class Clock:
-    """The control plane's clock (docs/design.md, section 7). Every `every` seconds it
+    """The control plane's clock. Every `every` seconds it
     renews the hold on the database (`Store.keep_serving`) and then calls
     `engine.tick()` (due timers, timeouts, ended leases). Both are synchronous, so
     they run on a thread from the pool. When another control plane took the hold, it sets

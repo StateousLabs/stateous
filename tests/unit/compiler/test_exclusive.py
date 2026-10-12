@@ -266,7 +266,7 @@ def test_guards_on_a_model_without_a_json_schema_are_refused_not_crashed() -> No
         validate(flow)
 
 
-# ── branches (design section 8) ───────────────────────────────────────────
+# ── branches ───────────────────────────────────────────
 
 
 def joined_checked(*guards: str) -> None:

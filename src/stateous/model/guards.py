@@ -1,6 +1,6 @@
 """The guard language: the `when=` conditions on transitions.
 
-Small on purpose (docs/design.md, sections 5.1 and 8). Python's `ast` module parses
+Small on purpose (see the guide, "Guards"). Python's `ast` module parses
 an expression; then each node is checked against the grammar below. Nothing goes to
 `eval`: an accepted guard is a tree of known nodes, and `evaluate` walks it.
 

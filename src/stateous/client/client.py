@@ -1,5 +1,5 @@
 """The client: a program outside starts tokens, fires events and reads tokens and
-their history over the control plane's HTTP API (docs/design.md, section 5.3).
+their history over the control plane's HTTP API (see the guide, "The HTTP API").
 
     from stateous import Client
 
@@ -33,7 +33,7 @@ class Unreachable(ClientError):
 class Refused(ClientError):
     """The control plane answered no. `status` is the HTTP status, `message` is the
     reason it gave, for people, and `code` is the stable code of the refusal
-    (docs/design.md, section 5.4). `code` is None when the answer has no code, for
+    (see the guide, "The HTTP API"). `code` is None when the answer has no code, for
     example an answer from a proxy."""
 
     def __init__(self, status: int, message: str, *, url: str, code: str | None = None) -> None:

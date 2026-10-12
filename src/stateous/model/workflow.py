@@ -32,7 +32,8 @@ ERROR = "error"
 """Fired when a task fails and has no retries left."""
 
 JOINED = "joined"
-"""Fired on a token in a parallel state when the state's join is met (design section 8)."""
+"""Fired on a token in a parallel state when the state's join is met (see the
+guide, "The join")."""
 
 RESERVED_EVENTS = (TIMEOUT, ERROR, JOINED, STARTED)
 """Events Stateous fires itself. Transitions use them by name; no one declares them."""
@@ -66,7 +67,8 @@ class Event:
 @dataclass(frozen=True, eq=False)
 class State:
     """A place a token can be. Entering it creates one task. Entering a parallel state
-    starts one child token for each of its workflows instead (design section 8)."""
+    starts one child token for each of its workflows instead (see the guide,
+    "Nested and parallel work")."""
 
     name: str
     workflow: str
@@ -144,7 +146,7 @@ class Workflow:
     ) -> State:
         """Declare a state. Entering it creates one task. With `parallel`, it is a
         parallel state: entering it starts one child token for each workflow, and it
-        has no task (design section 8).
+        has no task (see the guide, "Nested and parallel work").
 
         Args:
             name: Unique in the workflow.
@@ -162,7 +164,8 @@ class Workflow:
         Raises:
             DefinitionError: The name is not valid, taken, or Stateous's own; the
                 timeout is not a duration; retries is not a whole number, 0 or more;
-                `parallel`, `join` or `inputs` breaks a rule of design section 8.
+                `parallel`, `join` or `inputs` breaks a rule of a parallel state
+                (see the guide, "Nested and parallel work").
         """
         if name in (START.name, END.name):
             raise DefinitionError(

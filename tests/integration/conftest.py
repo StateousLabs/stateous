@@ -55,8 +55,8 @@ SDLC: dict[str, Any] = {
 
 @pytest.fixture
 def sdlc() -> dict[str, Any]:
-    """The example's graph document (docs/design.md, section 4.1), without guards.
-    A fresh copy: a test may change it."""
+    """The sdlc example's graph document, without guards. A fresh copy: a test may
+    change it."""
     return copy.deepcopy(SDLC)
 
 

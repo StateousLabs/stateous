@@ -2,7 +2,8 @@
 
 A pure function of the document: no database, no tokens. Edges carry their event
 and guard. START and END are Mermaid's own start and end points, `[*]`. A parallel
-state holds its child workflows as regions (design section 8). A token's current
+state holds its child workflows as regions (see the guide, "Nested and parallel
+work"). A token's current
 state can be lit. A finished token keeps the last state it was in; that state is
 drawn as finished, not lit.
 """

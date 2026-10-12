@@ -1,7 +1,7 @@
 """The `coding` routine of the example, run against the stand-in for PHD.
 
 PHD is not installed in the tests, and the features that coding.py uses are not
-released yet (docs/design.md, section 6 and N8). tests/examples/phd_stub has the
+released yet (see the guide, "Not released yet"). tests/examples/phd_stub has the
 same names and shapes. These tests check what Stateous's side does: the memory,
 the notes, the outcome, and a failed run.
 """
