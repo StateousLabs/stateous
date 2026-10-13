@@ -44,7 +44,7 @@ _OBJECT: dict[str, Any] = {"__object__": True}
 
 _BRANCHES = "a guard with branches.all or branches.any cannot be proven exclusive"
 """Why a pair with a branch quantifier cannot be decided: it reads a list of children
-of any length. stateous-flow refused it the same way."""
+of any length."""
 
 
 @dataclass(frozen=True)

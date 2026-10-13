@@ -99,8 +99,8 @@ def init(
         Path | None,
         typer.Option(
             "--stateous-path",
-            help="A local Stateous checkout for the folder to depend on, until Stateous is "
-            "published.",
+            help="A local Stateous checkout for the folder to depend on, to work on Stateous "
+            "itself.",
         ),
     ] = None,
 ) -> None:

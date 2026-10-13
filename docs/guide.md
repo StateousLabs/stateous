@@ -44,13 +44,14 @@ The supervisor's folder never holds `flow.py` or the graph file. Its routines im
 
 ## Install
 
-Stateous needs Python 3.12 or newer. It is not on PyPI yet. Add it to your project from a copy of its repository:
+Stateous needs Python 3.12 or newer.
 
 ```bash
-uv add --editable path/to/stateous
+pip install stateous            # or: uv add stateous
+pip install "stateous[phd]"     # also PHD, to run agents in routines ("Agents, with PHD")
 ```
 
-Run the `stateous` command in that environment, for example with `uv run stateous`. The control plane keeps its data in SQLite or in Postgres.
+Run the `stateous` command in that environment. The control plane keeps its data in SQLite or in Postgres.
 
 ## Write the workflow
 
@@ -186,13 +187,13 @@ On Windows, the paths in these lines have `\` in place of `/`.
 
 The folder is a Python project of its own. Its `pyproject.toml` depends on Stateous. Add the packages that your routines import to `dependencies`. Then `uv sync` in the folder makes its environment, `.venv`.
 
-Stateous is not published yet. Until it is, give `init` the folder of a local Stateous checkout with `--stateous-path`:
+The folder depends on Stateous from PyPI. To work on Stateous itself, give `init` the folder of a local Stateous checkout with `--stateous-path`:
 
 ```bash
 stateous init http://cp.internal:8080 sdlc-supervisor --stateous-path ../stateous
 ```
 
-Then `pyproject.toml` has a `[tool.uv.sources]` table that points `stateous` at that checkout. Delete the table when Stateous is published. `init` does not write the folder if the path is not a Stateous checkout.
+Then `pyproject.toml` has a `[tool.uv.sources]` table that points `stateous` at that checkout. Delete the table to use Stateous from PyPI again. `init` does not write the folder if the path is not a Stateous checkout.
 
 To edit the routines in VS Code, open the supervisor's folder and run `uv sync` in it. Then select `.venv` as the Python interpreter. VS Code then finds `stateous` and `contract.py`.
 
@@ -763,7 +764,7 @@ Stateous has five commands.
 |---|---|
 | `stateous compile FLOW [--out FILE]` | Check the workflow. Write the graph file. |
 | `stateous serve GRAPH [--db URL] [--listen HOST:PORT] [--supervise FOLDER]` | The control plane. `--supervise` also runs a supervisor in the same process, for development. |
-| `stateous init URL FOLDER [--stateous-path PATH]` | Make a supervisor's folder: `contract.py`, a stub for each state, `stateous.yaml`, `pyproject.toml`. Run it again to update `contract.py`. `--stateous-path` points the folder at a local Stateous checkout. |
+| `stateous init URL FOLDER [--stateous-path PATH]` | Make a supervisor's folder: `contract.py`, a stub for each state, `stateous.yaml`, `pyproject.toml`. Run it again to update `contract.py`. `--stateous-path` points the folder at a local Stateous checkout, to work on Stateous itself. |
 | `stateous supervise FOLDER` | The supervisor. |
 | `stateous token start ID [CONTEXT_JSON]` | Start a token. |
 | `stateous token fire ID EVENT [PAYLOAD_JSON] [--key K]` | Fire an event, with an optional idempotency key. |

@@ -4,21 +4,22 @@ Stateous runs a process as a graph of states, and keeps every token of it durabl
 
 You write the graph in Python. A control plane keeps every token and chooses each next state. A supervisor, on any computer, does the work and reports what happened. The supervisor never sees the graph. It knows only which states it serves, and which outcomes each state allows.
 
-> **Status:** pre-release. The API can change.
+> **Status:** alpha. The API can change before version 1.0.
 
 ## Install
 
-Stateous needs Python 3.12 or newer. It is not on PyPI yet. Add it to your project from a copy of this repository:
+Stateous needs Python 3.12 or newer.
 
 ```bash
-uv add --editable path/to/stateous
+pip install stateous            # or: uv add stateous
+pip install "stateous[phd]"     # also PHD, to run agents in routines
 ```
 
-Then run the `stateous` command in that environment, for example with `uv run stateous`. The control plane keeps its data in SQLite or in Postgres.
+Then run the `stateous` command in that environment. The control plane keeps its data in SQLite or in Postgres.
 
 ## The example
 
-[`examples/sdlc/`](examples/sdlc/) is a workflow with two states: `coding` and `testing`. [`examples/sdlc-supervisor/`](examples/sdlc-supervisor/) is the supervisor's folder for it.
+[`examples/sdlc/`](https://github.com/StateousLabs/stateous/tree/main/examples/sdlc) is a workflow with two states: `coding` and `testing`. [`examples/sdlc-supervisor/`](https://github.com/StateousLabs/stateous/tree/main/examples/sdlc-supervisor) is the supervisor's folder for it.
 
 ```bash
 # on the control plane's computer
@@ -36,13 +37,13 @@ stateous token show TICKET-1 --url http://cp.internal:8080
 
 Stateous has no authentication. Keep a control plane that listens on a wider address behind a VPN or a proxy.
 
-To try the example on one computer, follow [the guide](docs/guide.md#try-it-on-one-computer).
+To try the example on one computer, follow [the guide](https://github.com/StateousLabs/stateous/blob/main/docs/guide.md#try-it-on-one-computer).
 
 ## Learn more
 
-- [`docs/guide.md`](docs/guide.md): the guide, on one page.
-- [`examples/`](examples/): the example.
+- [`docs/guide.md`](https://github.com/StateousLabs/stateous/blob/main/docs/guide.md): the guide, on one page.
+- [`examples/`](https://github.com/StateousLabs/stateous/tree/main/examples): the example.
 
 ## Licence
 
-Apache License 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+Apache License 2.0. See [`LICENSE`](https://github.com/StateousLabs/stateous/blob/main/LICENSE) and [`NOTICE`](https://github.com/StateousLabs/stateous/blob/main/NOTICE).

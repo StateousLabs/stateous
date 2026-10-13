@@ -1,9 +1,7 @@
 """Parallel states in the engine: children, the join, and the refusals of an entry.
 
-Ported from stateous-flow `tests/unit/control/test_parallel.py` and the parts on
-branches of `tests/unit/control/test_start_end.py`, fitted to the small engine: the
-child id `<parent>.<state>.<visit>.<workflow>`, the event `joined`, and a `status`
-for each child."""
+The child id is `<parent>.<state>.<visit>.<workflow>`; the event `joined` gives a
+`status` for each child."""
 
 from __future__ import annotations
 

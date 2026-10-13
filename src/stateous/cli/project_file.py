@@ -2,7 +2,7 @@
 
 The supervisor's folder is a Python project of its own. It depends on Stateous and
 on what its routines import, so `uv sync` makes its environment (`.venv`), and
-editors find `stateous` there. Until Stateous is published, `--stateous-path`
+editors find `stateous` there. To work on Stateous itself, `--stateous-path`
 points the dependency at a local checkout, as an editable `[tool.uv.sources]` entry.
 
 The text is built in Python, as `stateous.compiler.codegen` builds `contract.py`."""
@@ -28,7 +28,7 @@ _HEADER = """\
 # Add what your routines import to `dependencies`.
 """
 
-_SOURCE_COMMENT = "# A local checkout of Stateous, until it is published: delete this table then."
+_SOURCE_COMMENT = "# A local checkout of Stateous: delete this table to use Stateous from PyPI."
 
 
 def checkout(path: Path) -> str:

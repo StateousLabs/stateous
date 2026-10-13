@@ -313,8 +313,26 @@ def test_sentences_are_short() -> None:
             assert words <= MOST_WORDS, f"{page.name}: {words} words: {sentence}"
 
 
+REPOSITORY = "https://github.com/StateousLabs/stateous"
+"""PyPI shows the README, so its links are absolute: a relative link breaks there."""
+
+
 def test_the_readme_leads_to_the_guide_and_the_example() -> None:
     readme = read(README)
 
-    for target in ("docs/guide.md", "examples/sdlc/", "examples/sdlc-supervisor/", "LICENSE"):
-        assert f"]({target}" in readme, target
+    for target in (
+        "blob/main/docs/guide.md",
+        "tree/main/examples/sdlc)",
+        "tree/main/examples/sdlc-supervisor)",
+        "blob/main/LICENSE",
+    ):
+        assert f"]({REPOSITORY}/{target}" in readme, target
+        path = target.split("/", 2)[2].rstrip(")")
+        assert (README.parent / path).exists(), path
+
+
+def test_the_readme_has_no_relative_links() -> None:
+    links = re.findall(r"\]\(([^)]+)\)", read(README))
+
+    assert links
+    assert all(link.startswith("https://") for link in links), links

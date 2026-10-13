@@ -52,7 +52,7 @@ def test_a_local_checkout_becomes_an_editable_source(tmp_path: Path) -> None:
     text = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
     source = read(tmp_path)["tool"]["uv"]["sources"]["stateous"]
     assert source == {"path": CHECKOUT.as_posix(), "editable": True}
-    assert "# A local checkout of Stateous, until it is published: delete this table then." in text
+    assert "# A local checkout of Stateous: delete this table to use Stateous from PyPI." in text
 
 
 def test_a_checkout_is_given_as_an_absolute_path_with_forward_slashes(

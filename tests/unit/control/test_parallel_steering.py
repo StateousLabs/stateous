@@ -1,8 +1,5 @@
 """Steering a parent: pause and resume go to its children, cancel ends them, and a
-child cannot be steered on its own (see the guide, "Steer the parent").
-
-Ported from stateous-flow `tests/unit/control/test_cancel.py` (lines 48-112),
-`test_pause.py` (lines 124-136) and `test_timers.py` (lines 260-305)."""
+child cannot be steered on its own (see the guide, "Steer the parent")."""
 
 from __future__ import annotations
 

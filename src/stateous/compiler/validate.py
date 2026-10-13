@@ -107,7 +107,7 @@ def _unreachable(flow: Workflow) -> Iterable[str]:
 
 
 def _fallbacks(flow: Workflow) -> Iterable[str]:
-    """stateous-flow's rule: next to guarded transitions, an unguarded one must be
+    """Next to guarded transitions, an unguarded one must be
     the marked fallback. A guarded group without a fallback is allowed; at run
     time, an event that no guard matches is refused."""
     groups: dict[tuple[str, str], list[bool]] = {}

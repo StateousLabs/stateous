@@ -82,8 +82,7 @@ def test_an_unguarded_transition_next_to_guards_must_say_otherwise() -> None:
 
 
 def test_a_guarded_group_without_a_fallback_compiles() -> None:
-    # stateous-flow's rule (contract change 1): at run time, an event no guard
-    # matches is refused.
+    # At run time, an event that no guard matches is refused.
     flow = Workflow("sdlc", context=Ticket)
     testing = flow.state("testing")
     failed = flow.event("failed")
