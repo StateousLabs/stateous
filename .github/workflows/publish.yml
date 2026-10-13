@@ -1,0 +1,56 @@
+# Publishes stateous to PyPI when a GitHub release is published.
+#
+# Trusted publishing: no token is stored anywhere. One-time setup by the owner:
+#   1. On https://pypi.org, under "Publishing", add a pending trusted publisher for the new
+#      project "stateous":
+#        owner:        StateousLabs
+#        repository:   stateous
+#        workflow:     publish.yml
+#        environment:  pypi
+#   2. In the GitHub repo, create an environment named "pypi" (Settings > Environments);
+#      optionally require a reviewer so every release needs a manual approval.
+#   3. Create a GitHub release for tag vX.Y.Z. The tag must match the version in
+#      pyproject.toml: the build job stops when it does not.
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: The tag matches the version
+        run: |
+          version=$(uv version --short)
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "the tag ${GITHUB_REF_NAME} does not match the version ${version} in pyproject.toml"
+            exit 1
+          fi
+      - run: uv build
+      - run: uvx twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
