@@ -969,6 +969,7 @@ phd = [
 [package.dev-dependencies]
 dev = [
     { name = "import-linter" },
+    { name = "poly-harness-dispatcher" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -995,6 +996,7 @@ provides-extras = ["phd"]
 [package.metadata.requires-dev]
 dev = [
     { name = "import-linter", specifier = ">=2.0" },
+    { name = "poly-harness-dispatcher", specifier = ">=0.1" },
     { name = "pyright", specifier = ">=1.1.380" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },

@@ -33,6 +33,7 @@ dev = [
     "import-linter>=2.0",
     "types-pyyaml>=6",
     "types-jsonschema",
+    "poly-harness-dispatcher>=0.1",
 ]
 
 [build-system]
@@ -84,7 +85,7 @@ pythonVersion = "3.12"
 typeCheckingMode = "strict"
 executionEnvironments = [
     { root = "examples/sdlc" },
-    { root = "examples/sdlc-supervisor", extraPaths = ["tests/examples/phd_stub"] },
+    { root = "examples/sdlc-supervisor" },
 ]
 
 [tool.pytest.ini_options]

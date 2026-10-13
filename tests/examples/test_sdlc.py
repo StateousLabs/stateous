@@ -30,7 +30,7 @@ FLOW = ROOT / "examples" / "sdlc"
 FOLDER = ROOT / "examples" / "sdlc-supervisor"
 GRAPH = FLOW / "build" / "sdlc.json"
 STATEOUS = [sys.executable, "-m", "stateous"]
-MODULES = ("contract", "testing", "coding", "phd")
+MODULES = ("contract", "testing", "coding")
 PASSING = "def test_ok() -> None:\n    assert True\n"
 FAILING = "def test_not_ok() -> None:\n    assert 1 == 2\n"
 

@@ -462,17 +462,17 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
         cwd=ctx["repo"],
         credentials=phd.Credentials.from_host("claude"),  # the login of this computer
         output_schema=states.coding.outcome_schema(),
-        idle_timeout_s=900,  # no event for 15 minutes: stop (PHD request 7)
+        idle_timeout_s=900,  # no event for 15 minutes: stop
     )
     inputs = phd.Inputs(msg=f"Implement {ctx['repo']}")
     # Leaving the block stops an unfinished run:
-    # an error, or the token left the state (PHD request 1).
+    # an error, or the token left the state.
     async with phd.Dispatcher(spec).run(inputs, session_id=ctx.memory.get("dev")) as handle:
         async for ev in handle.events():
             if handle.session_id and "dev" not in ctx.memory:
-                # known after run.started; kept across a crash (PHD request 2)
+                # known when the harness reports it; saved at once, so a crash keeps it
                 ctx.memory["dev"] = handle.session_id
-            ctx.note(ev.summary)  # progress in the token's history (PHD request 6)
+            ctx.note(ev.summary)  # progress in the token's history; "" gives no note
         result = await handle.wait()
     if result.status != "succeeded":
         if result.error and result.error.kind == "session" and "dev" in ctx.memory:
@@ -493,61 +493,36 @@ PHD needs a stack and credentials for each run. `phd.Stack.load("stacks/dev")` l
 | Show progress | The routine gives PHD's events to `ctx.note(...)`. |
 | Retry and time out | Stateous, as for each routine. |
 
-### Not released yet
+### Install PHD
 
-`coding.py` uses PHD features that are not released yet. The PHD author accepted them on 2026-10-06:
+PHD is on PyPI as `poly-harness-dispatcher`. Its import name is `phd`. Install it in the supervisor's environment with the `phd` extra of Stateous:
 
-- `Dispatcher.run()`, an `async with` block that stops the run when the block ends (batch 1);
-- `handle.session_id`, known when the run starts (batch 1);
-- `Spec.idle_timeout_s`, which stops a run with no events for that long (batch 1);
-- `event.summary`, one line for each event (batch 3).
+```bash
+pip install "stateous[phd]"
+uv add "stateous[phd]"
+```
 
-`coding.py` needs a PHD release with these features. Its tests use a stand-in for PHD.
+From a copy of the Stateous repository, use `uv add --editable path/to/stateous --extra phd`.
+
+Without PHD, the supervisor cannot import `coding.py`, and it does not start. Then remove `coding.py`, and report `coding` from outside, as in "Try it on one computer".
+
+### What coding.py uses from PHD
+
+- `Dispatcher.run()` is an `async with` block. If the block ends before the run ends, PHD stops the run.
+- `handle.session_id` is the harness's session id. It is `None` until the harness reports it.
+- `Spec.idle_timeout_s` stops a run that sends no event for that long. The run's status is then `timed_out`, with error kind `idle`.
+- `event.summary` is one line for a `message`, `tool_call` or `tool_result` event. For other events, it is `""`.
+- `result.error.kind` is one of `phd.ERROR_KINDS`. Use the kind, not the message.
 
 `coding.py` gives each `event.summary` to `ctx.note(...)`. An empty summary does nothing, so this works for every event.
 
-Until the release, use `start()`, and call `handle.cancel()` yourself:
+With error kind `session`, PHD cannot resume the session. `coding.py` then deletes the session id from `ctx.memory`. Thus the retry starts a new session. With another kind, the retry resumes the same session.
 
-```python
-# Before PHD's batch 1: start(), and cancel the run yourself
-import asyncio
+`Spec.cwd` must be a folder that exists. If it does not exist, PHD refuses the spec (`CwdNotFound`).
 
-import phd
+### Free-form payloads
 
-from stateous import on_state
-
-from contract import TicketContext, events, states
-
-
-@on_state(states.coding)
-async def code(ctx: TicketContext) -> events.done | events.stuck:
-    spec = phd.Spec(
-        harness="claude",
-        model="sonnet",
-        stack=phd.Stack.load("stacks/dev"),  # the agent: a PHD stack folder
-        cwd=ctx["repo"],
-        credentials=phd.Credentials.from_host("claude"),  # the login of this computer
-        output_schema=states.coding.outcome_schema(),
-    )
-    inputs = phd.Inputs(msg=f"Implement {ctx['repo']}")
-    handle = await phd.Dispatcher(spec).start(inputs, session_id=ctx.memory.get("dev"))
-    try:
-        result = await handle.wait()
-    except asyncio.CancelledError:
-        await handle.cancel()  # the token left the state: stop the agent
-        raise
-    if result.session_id:
-        ctx.memory["dev"] = result.session_id
-    if result.status != "succeeded":
-        if result.error and result.error.kind == "session" and "dev" in ctx.memory:
-            del ctx.memory["dev"]  # the session cannot be resumed: the retry starts fresh
-        raise RuntimeError(result.error)
-    return states.coding.outcome(result.structured_output)
-```
-
-With `start()`, the session id comes only at the end of the run. If the supervisor crashes, the retry starts a new session.
-
-Install PHD in the supervisor's environment. Without PHD, the supervisor cannot import `coding.py`, and it does not start. Then remove `coding.py`, and report `coding` from outside, as in "Try it on one computer".
+Codex uses OpenAI's strict structured outputs. These cannot return an object that has no listed properties. Thus a payload model with a `dict[str, Any]` field cannot run on Codex. PHD refuses such a run before it starts (`UnsupportedFeature`). Claude and OpenCode accept it.
 
 ### The routine's memory
 
@@ -572,8 +547,8 @@ The running agents of a supervisor are its child processes.
 - **A graceful stop** (Ctrl-C, SIGTERM): the supervisor takes no new tasks, and waits for its running routines. A second signal stops it at once. A deploy loses nothing.
 - **The control plane cannot be reached at the stop:** the supervisor does not wait for it. The reports, notes and memory writes stay in the outbox. The next `stateous supervise` sends them.
 - **The lease limits the outbox:** a report counts only if it gets to the control plane before its task's lease ends. The lease ends 2 minutes after the last heartbeat. After that, the control plane counts a failed attempt and refuses the late report. Then the task runs again.
-- **A crash** (or `kill -9`): today, PHD runs each agent in its own process group. So the agent does not stop with the supervisor. It can change the repository and spend money until it next writes output.
-- PHD batch 1 ties the agent to its caller: a Windows Job Object, `PR_SET_PDEATHSIG` on Linux, a watchdog on macOS. After that, the agents stop with the supervisor.
+- **A crash** (or `kill -9`): PHD ties each agent to its caller, so the agents stop with the supervisor. On Windows, a Job Object stops them. On Linux and macOS, a small reaper process stops the agent's process group.
+- If PHD cannot start this protection, the run continues without it, and `result.warnings` says so. Then the agent can continue after a crash.
 - The leases of a dead supervisor end after 2 minutes. Then the tasks are tried again. With `ctx.memory`, the retry resumes the agent's session.
 - **Steps with side effects:** the agent can repeat its last step or two. The agent's instructions must make that safe, for example "check whether the PR exists first". Stateous cannot do this for the agent.
 
@@ -807,7 +782,7 @@ Each `token` command also takes `--url`. An error prints one sentence to stderr,
 
 ### Known limits
 
-- `coding.py` needs PHD features that are not released yet. See "Agents, with PHD".
+- On Codex, a payload model with a `dict[str, Any]` field cannot run. See "Free-form payloads".
 - The supervisor cannot stop a `def` routine. It ignores the result of that routine.
 - A paused token never ends on its own. A lease continues while the token is paused.
 - `count('event')` counts the event over the whole life of the token, not for one visit.

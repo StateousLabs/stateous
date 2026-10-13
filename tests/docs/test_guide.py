@@ -246,22 +246,29 @@ def test_the_guide_names_the_seven_mechanisms() -> None:
         assert mechanism in reliability, mechanism
 
 
-def test_the_guide_says_which_phd_features_are_not_released() -> None:
+def test_the_guide_says_how_to_install_phd_and_what_coding_uses() -> None:
     agents = section(read(GUIDE), "## Agents, with PHD")
 
     for said in (
-        "not released",
+        "stateous[phd]",
+        "poly-harness-dispatcher",
         "Dispatcher.run()",
         "handle.session_id",
         "idle_timeout_s",
         "event.summary",
-        "start()",
-        "handle.cancel()",
-        "asyncio.CancelledError",
+        "phd.ERROR_KINDS",
         "outcome_schema()",
         "ctx.memory",
+        "dict[str, Any]",
+        "UnsupportedFeature",
     ):
         assert said in agents, said
+    assert "not released" not in agents
+    assert "start()" not in agents
+
+
+def test_the_guide_no_longer_says_that_phd_is_not_released() -> None:
+    assert "not released" not in read(GUIDE)
 
 
 def test_the_nesting_section_describes_parallel_states() -> None:
