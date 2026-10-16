@@ -1,7 +1,7 @@
 """The graph document -> a supervisor's `contract.py`, and a stub routine per state.
 
-Generated from the document, never from Python objects: `stateous init` has only
-the graph that the control plane serves. The output follows ruff's format for
+Generated from the document, never from Python objects: `stateous init supervisor`
+can have only the graph that the control plane serves. The output follows ruff's format for
 lines of up to 100 characters.
 
 Each child workflow of a parallel state is a class in `events` and in `states` (design

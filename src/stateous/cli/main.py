@@ -44,27 +44,38 @@ def compile_command(
     ] = None,
 ) -> None:
     """Check a workflow, and write its graph file."""
+    name, document = _compiled(flow)
+    target = out if out is not None else flow.parent / "build" / f"{name}.json"
+    _write_graph(target, document)
+    typer.echo(f"wrote {target}")
+
+
+def _compiled(flow: Path) -> tuple[str, dict[str, Any]]:
+    """Load and check the workflow in `flow`. Returns its name and its graph document.
+    A mistake ends the command with one sentence."""
     from stateous.compiler.codegen import CodegenError, generate_contract
     from stateous.compiler.compile import compile_workflow
     from stateous.compiler.load import LoadError, load_workflow
-    from stateous.model.graph_file import dump_graph
     from stateous.model.workflow import DefinitionError
 
     try:
         workflow = load_workflow(flow)
         document = compile_workflow(workflow)
-        generate_contract(document)  # a name that cannot be Python is found now, not at `init`
+        generate_contract(document)  # a bad Python name is found now, not at `init supervisor`
     except (LoadError, DefinitionError, CodegenError) as error:
-        typer.echo(f"error: {error}", err=True)
-        raise typer.Exit(1) from None
-    target = out if out is not None else flow.parent / "build" / f"{workflow.name}.json"
+        exit_with(str(error))
+    return workflow.name, document
+
+
+def _write_graph(target: Path, document: dict[str, Any]) -> None:
+    """Write the graph file. A failure ends the command with one sentence."""
+    from stateous.model.graph_file import dump_graph
+
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(dump_graph(document), encoding="utf-8", newline="\n")
     except OSError as error:
-        typer.echo(f"error: cannot write {target}: {error.strerror}", err=True)
-        raise typer.Exit(1) from None
-    typer.echo(f"wrote {target}")
+        exit_with(f"cannot write {target}: {error.strerror}")
 
 
 @app.command()
@@ -91,54 +102,168 @@ def serve(
     running.serve(graph, db, listen, supervise_folder)
 
 
-@app.command()
-def init(
-    url: Annotated[str, typer.Argument(help="The control plane, e.g. http://127.0.0.1:8080.")],
-    folder: Annotated[Path, typer.Argument(help="The supervisor's folder. Made if absent.")],
-    stateous_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--stateous-path",
-            help="A local Stateous checkout for the folder to depend on, to work on Stateous "
-            "itself.",
-        ),
-    ] = None,
+init_app = typer.Typer(
+    help="Write a new workflow's folder, or a supervisor's folder.",
+    no_args_is_help=True,
+)
+
+StateousPath = Annotated[
+    Path | None,
+    typer.Option(
+        "--stateous-path",
+        help="A local Stateous checkout for the folder to depend on, to work on Stateous itself.",
+    ),
+]
+
+
+@init_app.command("workflow")
+def init_workflow(
+    name: Annotated[
+        str, typer.Argument(help="The workflow's name. It is also the name of the folder.")
+    ],
+    stateous_path: StateousPath = None,
 ) -> None:
-    """Write a supervisor's folder: contract.py, a stub for each state with a routine
-    (of each workflow), stateous.yaml, pyproject.toml. Run it again to update
-    contract.py."""
-    from stateous.cli.errors import CommandError
-    from stateous.cli.project_file import checkout, write_pyproject
-    from stateous.client.client import Client, ClientError
-    from stateous.compiler.codegen import generate_contract, generate_stub, routine_states
+    """Write a starter workflow in the folder NAME, and compile it.
+
+    It writes flow.py, schemas.py and pyproject.toml. Then it compiles flow.py to
+    NAME/build/NAME.json. It refuses a folder that has a flow.py."""
+    from stateous.cli.project_file import WORKFLOW_HEADER, write_pyproject
+    from stateous.cli.starter import FLOW, SCHEMAS, flow_text, schemas_text
+    from stateous.model.workflow import DefinitionError, Workflow
+
+    try:
+        Workflow(name)  # the rule for a name is the rule of flow.py
+    except DefinitionError as error:
+        exit_with(str(error))
+    folder = Path(name)
+    flow = folder / FLOW
+    if flow.exists():
+        exit_with(f"{folder} already has {FLOW}: give a different name, or edit that file")
+    source = _checkout(stateous_path)
+    lines: list[str] = []
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        flow.write_text(flow_text(name), encoding="utf-8", newline="\n")
+        lines.append(f"wrote    {flow}")
+        schemas = folder / SCHEMAS
+        if schemas.exists():
+            lines.append(f"kept     {schemas}")
+        else:
+            schemas.write_text(schemas_text(name), encoding="utf-8", newline="\n")
+            lines.append(f"wrote    {schemas}")
+        lines.append(write_pyproject(folder, stateous_path=source, header=WORKFLOW_HEADER))
+    except OSError as error:
+        exit_with(f"cannot write {folder}: {error.strerror or error}")
+    for line in lines:
+        typer.echo(line)
+    _, document = _compiled(flow)
+    graph = folder / "build" / f"{name}.json"
+    _write_graph(graph, document)
+    typer.echo(f"wrote    {graph}")
+    typer.echo("\nNext steps:")
+    typer.echo(f"  stateous serve {graph.as_posix()}")
+    typer.echo(f"  stateous init supervisor {flow.as_posix()} {name}-supervisor")
+
+
+@init_app.command("supervisor")
+def init_supervisor(
+    source: Annotated[
+        str,
+        typer.Argument(
+            help="The workflow: a control plane's URL (http://127.0.0.1:8080), a graph "
+            "file (sdlc/build/sdlc.json), or a flow.py.",
+            show_default=False,
+        ),
+    ],
+    folder: Annotated[Path, typer.Argument(help="The supervisor's folder. Made if absent.")],
+    stateous_path: StateousPath = None,
+) -> None:
+    """Write a supervisor's folder, from a control plane, a graph file or a flow.py.
+
+    It writes contract.py, a stub for each state with a routine (of each workflow),
+    stateous.yaml and pyproject.toml. Run it again to update contract.py. With a
+    graph file or a flow.py, stateous.yaml gets http://127.0.0.1:8080."""
+    from stateous.cli.project_file import write_pyproject
+    from stateous.compiler.codegen import (
+        CodegenError,
+        generate_contract,
+        generate_stub,
+        routine_states,
+    )
     from stateous.supervisor.folder import write_folder
 
-    source: str | None = None
-    if stateous_path is not None:
-        try:
-            source = checkout(stateous_path)
-        except CommandError as error:
-            exit_with(str(error))
-    try:
-        with Client(url) as client:
-            document = client.workflow()
-    except ClientError as error:
-        exit_with(f"cannot fetch the workflow from {url}: {error}")
+    checkout = _checkout(stateous_path)
+    url, document = _workflow_of(source)
 
     def stub(state: str) -> str:
         return generate_stub(document, state)
 
-    states = routine_states(document)
     try:
-        lines = write_folder(
-            folder, url=url, contract=generate_contract(document), states=states, stub=stub
-        )
-        lines.append(write_pyproject(folder, stateous_path=source))
+        contract = generate_contract(document)
+        states = routine_states(document)
+    except CodegenError as error:
+        exit_with(f"cannot write a contract for the workflow of {source}: {error}")
+    try:
+        lines = write_folder(folder, url=url, contract=contract, states=states, stub=stub)
+        lines.append(write_pyproject(folder, stateous_path=checkout))
     except OSError as error:
         exit_with(f"cannot write {folder}: {error.strerror or error}")
     for line in lines:
         typer.echo(line)
     typer.echo(f"\nWrite the routines, then run: stateous supervise {folder}")
+
+
+def _checkout(stateous_path: Path | None) -> str | None:
+    """`--stateous-path` as `checkout` returns it; None when it is not given. A path
+    that is not a Stateous checkout ends the command with one sentence."""
+    from stateous.cli.errors import CommandError
+    from stateous.cli.project_file import checkout
+
+    if stateous_path is None:
+        return None
+    try:
+        return checkout(stateous_path)
+    except CommandError as error:
+        exit_with(str(error))
+
+
+def _workflow_of(source: str) -> tuple[str, dict[str, Any]]:
+    """The URL for `stateous.yaml`, and the graph document of `source`.
+
+    An http:// or https:// source is a control plane: the document is its
+    `GET /workflow`. Else `source` is a local path: a graph file (.json), or a
+    flow.py that is compiled in memory. For a local source, the URL is the address
+    that `serve` listens on by default. Each document gets the checks that `serve`
+    does on a graph file (`load_graph`)."""
+    from stateous.client.client import Client, ClientError
+    from stateous.model.graph_file import GraphFileError, dump_graph, load_graph
+
+    if source.startswith(("http://", "https://")):
+        try:
+            with Client(source) as client:
+                return source, load_graph(dump_graph(client.workflow()))
+        except (ClientError, GraphFileError) as error:
+            exit_with(f"cannot fetch the workflow from {source}: {error}")
+    local = f"http://{DEFAULT_LISTEN}"
+    path = Path(source)
+    if not path.exists():
+        exit_with(
+            f"{source} does not exist: give a control plane's URL (http:// or https://), "
+            "a graph file or a flow.py"
+        )
+    if path.is_file() and path.suffix == ".py":
+        return local, _compiled(path)[1]
+    if not path.is_file() or path.suffix != ".json":
+        exit_with(f"{source} is not a graph file (.json) or a flow.py")
+    try:
+        return local, load_graph(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as error:
+        exit_with(f"cannot read {source}: {error}")
+    except GraphFileError as error:
+        exit_with(f"cannot use {source}: {error}")
+
+
+app.add_typer(init_app, name="init")
 
 
 @app.command()

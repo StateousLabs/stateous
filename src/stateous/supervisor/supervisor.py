@@ -751,7 +751,7 @@ async def _checked(
         raise SupervisorError(
             f"{folder.path / CONTRACT} is for another version of the workflow "
             f"({folder.checksum}; the control plane serves {served}): "
-            f"run `stateous init {api.url} {folder.path}` again"
+            f"run `stateous init supervisor {api.url} {folder.path}` again"
         )
     try:
         registry = Registry.discover(folder.path)

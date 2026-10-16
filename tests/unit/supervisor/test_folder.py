@@ -72,7 +72,7 @@ def test_a_folder_without_its_files_is_refused(tmp_path: Path, missing: str) -> 
     folder = folder_with(tmp_path, "url: http://127.0.0.1:8080\n")
     (folder / missing).unlink()
 
-    with pytest.raises(FolderError, match=rf"has no {missing}: run `stateous init URL "):
+    with pytest.raises(FolderError, match=rf"has no {missing}: run `stateous init supervisor URL "):
         load_folder(folder)
 
 
@@ -105,7 +105,9 @@ def test_bad_settings_are_named_in_one_plain_sentence(
 def test_a_contract_without_a_checksum_is_refused(tmp_path: Path) -> None:
     folder = folder_with(tmp_path, "url: http://127.0.0.1:8080\n", contract="x = 1\n")
 
-    with pytest.raises(FolderError, match=r"has no __checksum__: run `stateous init URL .*` again"):
+    with pytest.raises(
+        FolderError, match=r"has no __checksum__: run `stateous init supervisor URL .*` again"
+    ):
         load_folder(folder)
 
 

@@ -1,7 +1,8 @@
 """The example, end to end, as real processes.
 
 `stateous compile`, `serve`, `init`, `supervise` and `token ...` each run as a
-process of their own, as in docs/guide.md, "Try it on one computer". The control
+process of their own, as in docs/guide.md, "Try it on one computer". A second test
+starts from `init workflow`, as in the guide, "Start a workflow". The control
 plane listens on a free port of 127.0.0.1 and keeps a SQLite file in the test's
 folder. The supervisor runs testing.py from the example. Nobody runs coding.py,
 because it needs PHD (see the guide, "Agents, with PHD"). The test reports
@@ -265,7 +266,7 @@ def test_the_example_runs_as_real_processes(tmp_path: Path, processes: Processes
     folder = computer / "sdlc-supervisor"
     folder.mkdir(parents=True)
     shutil.copy(EXAMPLES / "sdlc-supervisor" / "testing.py", folder / "testing.py")
-    processes.ok("init", url, "sdlc-supervisor", cwd=computer)
+    processes.ok("init", "supervisor", url, "sdlc-supervisor", cwd=computer)
 
     example = EXAMPLES / "sdlc-supervisor"
     contract = (folder / "contract.py").read_text(encoding="utf-8")
@@ -362,3 +363,68 @@ def test_the_example_runs_as_real_processes(tmp_path: Path, processes: Processes
         (gated / "gate").write_text("open", encoding="utf-8")
         assert supervising.wait(timeout=60) == 0, log(supervise_log)
         assert client.get("TICKET-5")["status"] == "completed"
+
+
+DRAFT = """\
+from stateous import on_state
+
+from contract import ItemContext, events, states
+
+
+@on_state(states.draft)
+def draft(ctx: ItemContext) -> events.submitted:
+    return events.submitted()
+"""
+
+REVIEW = """\
+from stateous import on_state
+
+from contract import ItemContext, Verdict, events, states
+
+
+@on_state(states.review)
+def review(ctx: ItemContext) -> events.reviewed:
+    return events.reviewed(Verdict(approved=ctx["title"] != "reject me"))
+"""
+
+
+def test_a_new_workflow_runs_from_init_to_a_completed_token(
+    tmp_path: Path, processes: Processes
+) -> None:
+    url = processes.url
+
+    # init workflow writes a starter that compiles; serve runs its graph file
+    made = processes.ok("init", "workflow", "orders", cwd=tmp_path)
+    assert "stateous serve orders/build/orders.json" in made, made
+    serve_log = tmp_path / "serve.log"
+    database = f"sqlite:///{(tmp_path / 'orders.db').as_posix()}"
+    processes.start(
+        "serve", "orders/build/orders.json", "--db", database,
+        "--listen", url.removeprefix("http://"), cwd=tmp_path, log=serve_log,
+    )  # fmt: skip
+    assert wait_for(lambda: answers(url), 60), log(serve_log)
+
+    # init supervisor from the flow.py and from the URL: the same contract
+    processes.ok("init", "supervisor", "orders/flow.py", "from-flow", cwd=tmp_path)
+    processes.ok("init", "supervisor", url, "orders-supervisor", cwd=tmp_path)
+    folder = tmp_path / "orders-supervisor"
+    contract = (folder / "contract.py").read_text(encoding="utf-8")
+    assert contract == (tmp_path / "from-flow" / "contract.py").read_text(encoding="utf-8")
+    local = yaml.safe_load((tmp_path / "from-flow" / "stateous.yaml").read_text(encoding="utf-8"))
+    assert local["url"] == "http://127.0.0.1:8080"
+    (folder / "draft.py").write_text(DRAFT, encoding="utf-8", newline="\n")
+    (folder / "review.py").write_text(REVIEW, encoding="utf-8", newline="\n")
+    supervise_log = tmp_path / "supervise.log"
+    processes.start("supervise", "orders-supervisor", cwd=tmp_path, log=supervise_log)
+
+    with Client(url) as client:
+        processes.ok("token", "start", "ORDER-1", '{"title": "a"}', cwd=tmp_path)
+        processes.ok("token", "start", "ORDER-2", '{"title": "reject me"}', cwd=tmp_path)
+        assert wait_for(has_status(client, "ORDER-1", "completed"), 90), log(supervise_log)
+        assert accepted(client, "ORDER-1") == ["submitted", "reviewed"]
+
+        # a Verdict that does not approve sends the token back to `draft` (`otherwise=True`)
+        def sent_back() -> bool:
+            return entered(client, "ORDER-2")[:3] == ["draft", "review", "draft"]
+
+        assert wait_for(sent_back, 90), log(supervise_log)

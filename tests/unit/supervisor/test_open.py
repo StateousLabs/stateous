@@ -98,7 +98,7 @@ def test_a_contract_for_another_graph_is_refused(tmp_path: Path) -> None:
 
     message = str(refused.value)
     assert "contract.py is for another version of the workflow" in message
-    assert f"run `stateous init http://fake.test {folder.path}` again" in message
+    assert f"run `stateous init supervisor http://fake.test {folder.path}` again" in message
 
 
 def test_a_folder_without_routines_is_refused(tmp_path: Path) -> None:

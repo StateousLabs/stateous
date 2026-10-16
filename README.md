@@ -27,7 +27,7 @@ stateous compile sdlc/flow.py                         # writes sdlc/build/sdlc.j
 stateous serve sdlc/build/sdlc.json --listen 0.0.0.0:8080
 
 # on the supervisor's computer
-stateous init http://cp.internal:8080 sdlc-supervisor # contract.py, stubs, stateous.yaml, pyproject.toml
+stateous init supervisor http://cp.internal:8080 sdlc-supervisor  # contract.py, stubs, stateous.yaml, pyproject.toml
 stateous supervise sdlc-supervisor                    # runs the routines
 
 # anywhere
@@ -36,6 +36,14 @@ stateous token show TICKET-1 --url http://cp.internal:8080
 ```
 
 Stateous has no authentication. Keep a control plane that listens on a wider address behind a VPN or a proxy.
+
+To start a workflow of your own, let Stateous write a starter that compiles:
+
+```bash
+stateous init workflow orders                         # orders/flow.py, schemas.py, pyproject.toml, build/orders.json
+stateous serve orders/build/orders.json
+stateous init supervisor orders/flow.py orders-supervisor  # from a local flow.py or graph file, too
+```
 
 To try the example on one computer, follow [the guide](https://github.com/StateousLabs/stateous/blob/main/docs/guide.md#try-it-on-one-computer).
 

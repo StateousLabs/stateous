@@ -69,7 +69,7 @@ def control_plane(graph: Path, db: str) -> Generator[str]:
 
 
 def init_folder(url: str, folder: Path) -> None:
-    result = CliRunner().invoke(app, ["init", url, str(folder)])
+    result = CliRunner().invoke(app, ["init", "supervisor", url, str(folder)])
     assert result.exit_code == 0, result.output
 
 

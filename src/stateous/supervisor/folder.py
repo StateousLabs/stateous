@@ -1,6 +1,6 @@
 """A supervisor's folder: `stateous.yaml`, the generated `contract.py`, the routines.
 
-`stateous init` writes it (`write_folder`). `stateous supervise` reads it
+`stateous init supervisor` writes it (`write_folder`). `stateous supervise` reads it
 (`load_folder`). The folder never holds the graph: `contract.py` is its only
 knowledge of the workflow."""
 
@@ -94,7 +94,9 @@ def load_folder(path: Path) -> Folder:
     contract, config = path / CONTRACT, path / CONFIG
     for needed in (contract, config):
         if not needed.is_file():
-            raise FolderError(f"{path} has no {needed.name}: run `stateous init URL {path}`")
+            raise FolderError(
+                f"{path} has no {needed.name}: run `stateous init supervisor URL {path}`"
+            )
     try:
         text = contract.read_text(encoding="utf-8")
         data: Any = yaml.safe_load(config.read_text(encoding="utf-8"))
@@ -102,7 +104,9 @@ def load_folder(path: Path) -> Folder:
         raise FolderError(f"cannot read {path}: {_one_line(str(error))}") from None
     found = _CHECKSUM.search(text)
     if found is None:
-        raise FolderError(f"{contract} has no __checksum__: run `stateous init URL {path}` again")
+        raise FolderError(
+            f"{contract} has no __checksum__: run `stateous init supervisor URL {path}` again"
+        )
     if data is None:
         data = {}
     if not isinstance(data, dict):

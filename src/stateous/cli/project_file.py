@@ -1,9 +1,11 @@
-"""The pyproject.toml that `stateous init` writes (see the guide, "Set up a supervisor").
+"""The pyproject.toml that `stateous init` writes (see the guide, "Start a workflow" and
+"Set up a supervisor").
 
-The supervisor's folder is a Python project of its own. It depends on Stateous and
-on what its routines import, so `uv sync` makes its environment (`.venv`), and
-editors find `stateous` there. To work on Stateous itself, `--stateous-path`
-points the dependency at a local checkout, as an editable `[tool.uv.sources]` entry.
+A workflow's folder and a supervisor's folder are each a Python project of their
+own. Each depends on Stateous and on what its code imports, so `uv sync` makes its
+environment (`.venv`), and editors find `stateous` there. To work on Stateous
+itself, `--stateous-path` points the dependency at a local checkout, as an editable
+`[tool.uv.sources]` entry.
 
 The text is built in Python, as `stateous.compiler.codegen` builds `contract.py`."""
 
@@ -22,10 +24,16 @@ PYPROJECT = "pyproject.toml"
 DEFAULT_NAME = "supervisor"
 """The project's name when nothing of the folder's name can be one."""
 
-_HEADER = """\
-# Written by `stateous init`. This folder is a Python project of its own:
+SUPERVISOR_HEADER = """\
+# Written by `stateous init supervisor`. This folder is a Python project of its own:
 # `uv sync` makes its environment (.venv), and `uv run stateous ...` runs in it.
 # Add what your routines import to `dependencies`.
+"""
+
+WORKFLOW_HEADER = """\
+# Written by `stateous init workflow`. This folder is a Python project of its own:
+# `uv sync` makes its environment (.venv), and `uv run stateous ...` runs in it.
+# Add what flow.py and schemas.py import to `dependencies`.
 """
 
 _SOURCE_COMMENT = "# A local checkout of Stateous: delete this table to use Stateous from PyPI."
@@ -54,24 +62,26 @@ def checkout(path: Path) -> str:
     return resolved.as_posix()
 
 
-def write_pyproject(folder: Path, *, stateous_path: str | None = None) -> str:
+def write_pyproject(
+    folder: Path, *, stateous_path: str | None = None, header: str = SUPERVISOR_HEADER
+) -> str:
     """Write `folder/pyproject.toml`, only when it is absent. `stateous_path` is a
-    checkout, as `checkout` returns it. Returns one line: `wrote    <path>` or
-    `kept     <path>`."""
+    checkout, as `checkout` returns it. `header` is the comment at the top. Returns
+    one line: `wrote    <path>` or `kept     <path>`."""
     target = folder / PYPROJECT
     if target.exists():
         return f"kept     {target}"
     folder.mkdir(parents=True, exist_ok=True)
-    text = pyproject_text(project_name(folder.resolve().name), stateous_path)
+    text = pyproject_text(project_name(folder.resolve().name), stateous_path, header)
     target.write_text(text, encoding="utf-8", newline="\n")
     return f"wrote    {target}"
 
 
-def pyproject_text(name: str, stateous_path: str | None) -> str:
+def pyproject_text(name: str, stateous_path: str | None, header: str = SUPERVISOR_HEADER) -> str:
     """The text of the file: a `[project]`, and a `[tool.uv.sources]` table when a
     checkout is given."""
     lines = [
-        _HEADER,
+        header,
         "[project]",
         f"name = {_toml_string(name)}",
         'version = "0.1.0"',

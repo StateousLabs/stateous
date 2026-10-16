@@ -61,6 +61,7 @@ HEADINGS = [
     "## The words",
     "## Two sides, two folders",
     "## Install",
+    "## Start a workflow",
     "## Write the workflow",
     "## Compile and serve",
     "## Set up a supervisor",

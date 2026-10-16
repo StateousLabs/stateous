@@ -1,6 +1,6 @@
 """A workflow -> the graph document: plain data, written as the graph file.
 
-The document holds all that the control plane and `stateous init` need: each
+The document holds all that the control plane and `stateous init supervisor` need: each
 state's settings and the events it may emit, the events, the transitions, and
 each model as JSON Schema. The child workflows of parallel states are in it too,
 under `workflows`. Nothing in it refers back to Python code.

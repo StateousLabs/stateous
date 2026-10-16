@@ -30,11 +30,11 @@ sdlc/                    the control plane's side: the workflow
   build/sdlc.json        written by `stateous compile`: the graph file
 
 sdlc-supervisor/         the supervisor's side, on any computer: no graph
-  contract.py            written by `stateous init`: states, their events, the models
+  contract.py            written by `stateous init supervisor`: states, events, models
   coding.py              @on_state(states.coding) ...
   testing.py             @on_state(states.testing) ...
   stateous.yaml          the control plane's URL, how many tasks at once
-  pyproject.toml         written by `stateous init` if absent: the folder is a Python project
+  pyproject.toml         written by `stateous init supervisor` if absent: a Python project
   .stateous/outbox.db    made by `stateous supervise`: messages not yet delivered
 ```
 
@@ -52,6 +52,32 @@ pip install "stateous[phd]"     # also PHD, to run agents in routines ("Agents, 
 ```
 
 Run the `stateous` command in that environment. The control plane keeps its data in SQLite or in Postgres.
+
+## Start a workflow
+
+To start a new workflow, let `init` write a starter:
+
+```bash
+stateous init workflow orders
+```
+
+This makes the folder `orders/` in the current folder, with these files:
+
+- `flow.py`: a starter workflow with two states and two events. Comments tell what each line does.
+- `schemas.py`: the context model and one payload model.
+- `pyproject.toml`: the folder is a Python project that depends on Stateous.
+- `build/orders.json`: the graph file. `init` compiles `flow.py` one time.
+
+The name of the workflow is also the name of the folder. The rules for names are in "Write the workflow". `init workflow` does not start when the folder already has `flow.py`. `--stateous-path` works as for a supervisor's folder (see "Set up a supervisor").
+
+Then serve the workflow, and make a supervisor's folder for it:
+
+```bash
+stateous serve orders/build/orders.json
+stateous init supervisor orders/flow.py orders-supervisor
+```
+
+Change `flow.py` and `schemas.py` for your process, then compile again: `stateous compile orders/flow.py`. The rest of this guide uses the example `sdlc`.
 
 ## Write the workflow
 
@@ -108,7 +134,7 @@ flow.transition(testing, END, on=failed, otherwise=True)
 Rules:
 
 - A transition from `START` has no `on=`.
-- A name of a state or an event has lower-case letters, digits, `_` and `-`. It starts with a letter and has 64 characters or fewer.
+- A name of a workflow, a state or an event has lower-case letters, digits, `_` and `-`. It starts with a letter and has 64 characters or fewer.
 - A duration is a whole number and one unit: `30s`, `10m`, `6h` or `2d`. The longest is `3650d`.
 - Stateous has three events of its own: `timeout`, `error` and `joined`. Use them by name, for example `on="timeout"`. You cannot declare them, and you cannot fire them.
 - If no transition takes `timeout` or `error`, the token fails.
@@ -161,10 +187,10 @@ A supervisor on a different computer must reach the control plane. Then use `--l
 ## Set up a supervisor
 
 ```bash
-stateous init http://cp.internal:8080 sdlc-supervisor
+stateous init supervisor http://cp.internal:8080 sdlc-supervisor
 ```
 
-`stateous init` gets the graph from the control plane. Then it writes these files:
+`stateous init supervisor` gets the graph from the control plane. Then it writes these files:
 
 - `contract.py`, always (it replaces the old file);
 - a stub `<state>.py` for each state that no file in the folder implements;
@@ -185,19 +211,28 @@ Write the routines, then run: stateous supervise sdlc-supervisor
 
 On Windows, the paths in these lines have `\` in place of `/`.
 
+The source can also be a local path: a graph file or a `flow.py`. Use it when no control plane runs yet:
+
+```bash
+stateous init supervisor sdlc/build/sdlc.json sdlc-supervisor
+stateous init supervisor sdlc/flow.py sdlc-supervisor
+```
+
+`init` compiles a `flow.py` in memory. It does not write the graph file. A graph file gets the same checks as in `serve`. With a local path, `stateous.yaml` gets `http://127.0.0.1:8080`, the default address of `serve`. Change `url` when the control plane is at a different address.
+
 The folder is a Python project of its own. Its `pyproject.toml` depends on Stateous. Add the packages that your routines import to `dependencies`. Then `uv sync` in the folder makes its environment, `.venv`.
 
 The folder depends on Stateous from PyPI. To work on Stateous itself, give `init` the folder of a local Stateous checkout with `--stateous-path`:
 
 ```bash
-stateous init http://cp.internal:8080 sdlc-supervisor --stateous-path ../stateous
+stateous init supervisor http://cp.internal:8080 sdlc-supervisor --stateous-path ../stateous
 ```
 
 Then `pyproject.toml` has a `[tool.uv.sources]` table that points `stateous` at that checkout. Delete the table to use Stateous from PyPI again. `init` does not write the folder if the path is not a Stateous checkout.
 
 To edit the routines in VS Code, open the supervisor's folder and run `uv sync` in it. Then select `.venv` as the Python interpreter. VS Code then finds `stateous` and `contract.py`.
 
-Run `stateous init` again after each change to the workflow. `stateous supervise` does not start when `contract.py` does not agree with the control plane.
+Run `stateous init supervisor` again after each change to the workflow. `stateous supervise` does not start when `contract.py` does not agree with the control plane.
 
 The settings of the supervisor are in `stateous.yaml`:
 
@@ -339,7 +374,7 @@ The supervisor keeps an outbox, `.stateous/outbox.db` in its folder. It writes e
 
 `stateous supervise` does not start in these cases:
 
-- `contract.py` is for a different graph. Run `stateous init` again.
+- `contract.py` is for a different graph. Run `stateous init supervisor` again.
 - The folder has no routine, or two routines for one state.
 - A file of the folder cannot be imported.
 - Another supervisor runs on the same folder. Two supervisors cannot share one outbox.
@@ -646,7 +681,7 @@ When the parent enters the state, the control plane starts the children in the s
 
 A child is a normal token. It has tasks, timers, memory and history. Supervisors claim its tasks as they claim other tasks.
 
-A claim names a child's state as `<workflow>/<state>`, for example `design-review/triage`. In `contract.py`, this state is `states.design_review.triage`. Its events are in `events.design_review`. `stateous init` writes a stub for each state of each workflow, in a file such as `design_review_triage.py`. When two states get the same file name, the second stub goes in `<name>_2.py`, and `init` tells you. A parallel state has no stub.
+A claim names a child's state as `<workflow>/<state>`, for example `design-review/triage`. In `contract.py`, this state is `states.design_review.triage`. Its events are in `events.design_review`. `stateous init supervisor` writes a stub for each state of each workflow, in a file such as `design_review_triage.py`. When two states get the same file name, the second stub goes in `<name>_2.py`, and `init` tells you. A parallel state has no stub.
 
 When a child ends, the control plane checks the join in the same transaction. The parent can leave the state on `joined`, on `timeout` or on an event that you fire. When the parent leaves the state, or when you cancel it, the control plane cancels each child that has not ended.
 
@@ -680,7 +715,7 @@ stateous serve sdlc/build/sdlc.json --db sqlite:///try.db
 In a second terminal, in `try/`:
 
 ```bash
-stateous init http://127.0.0.1:8080 sdlc-supervisor
+stateous init supervisor http://127.0.0.1:8080 sdlc-supervisor
 rm sdlc-supervisor/coding.py
 stateous supervise sdlc-supervisor
 ```
@@ -747,7 +782,7 @@ The sentence is for people, and it can change. The code does not change: a progr
 | `POST /tasks/heartbeat` | The supervisor's tasks are still alive, in one call. Body: `{"supervisor", "tasks"}`. The answer `{"lost"}` names the lost tasks. |
 | `POST /tasks/{id}/note` | A line of progress. Body: `{"text", "attempt"}`. |
 | `PUT /tasks/{id}/memory` | Save one key of the routine's memory. Body: `{"key", "value", "attempt"}`. A `null` value deletes the key. |
-| `GET /workflow` | The graph file. `init` and `show --graph` use it. |
+| `GET /workflow` | The graph file. `init supervisor` and `show --graph` use it. |
 | `GET /health` | The workflow's name and the graph's checksum: `{"workflow", "checksum"}`. |
 
 A report from outside, for a waiting task, has no `supervisor`. A supervisor's own report adds `"supervisor"`.
@@ -758,13 +793,14 @@ A report from outside, for a waiting task, has no `supervisor`. A supervisor's o
 
 ## The commands
 
-Stateous has five commands.
+Stateous has five commands. `init` has two forms.
 
 | Command | What it does |
 |---|---|
 | `stateous compile FLOW [--out FILE]` | Check the workflow. Write the graph file. |
 | `stateous serve GRAPH [--db URL] [--listen HOST:PORT] [--supervise FOLDER]` | The control plane. `--supervise` also runs a supervisor in the same process, for development. |
-| `stateous init URL FOLDER [--stateous-path PATH]` | Make a supervisor's folder: `contract.py`, a stub for each state, `stateous.yaml`, `pyproject.toml`. Run it again to update `contract.py`. `--stateous-path` points the folder at a local Stateous checkout, to work on Stateous itself. |
+| `stateous init workflow NAME [--stateous-path PATH]` | Make a new workflow's folder `NAME/`: a starter `flow.py`, `schemas.py` and `pyproject.toml`. Then compile it to `NAME/build/NAME.json`. It refuses a folder that has `flow.py`. |
+| `stateous init supervisor SOURCE FOLDER [--stateous-path PATH]` | Make a supervisor's folder: `contract.py`, a stub for each state, `stateous.yaml`, `pyproject.toml`. `SOURCE` is a control plane's URL, a graph file or a `flow.py`. Run it again to update `contract.py`. `--stateous-path` points the folder at a local Stateous checkout, to work on Stateous itself. |
 | `stateous supervise FOLDER` | The supervisor. |
 | `stateous token start ID [CONTEXT_JSON]` | Start a token. |
 | `stateous token fire ID EVENT [PAYLOAD_JSON] [--key K]` | Fire an event, with an optional idempotency key. |
