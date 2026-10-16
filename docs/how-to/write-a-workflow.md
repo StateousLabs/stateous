@@ -149,3 +149,5 @@ These are frequent errors, and what to do:
 - [Timers and timeouts](../concepts/timers.md): `timeout=` and the event `timeout`.
 - [Write a routine](write-a-routine.md): the work of each state.
 - [Change a workflow](change-a-workflow.md): a new graph while tokens are live.
+- [The commands](../reference/cli.md): `stateous compile` and `stateous init workflow`.
+- [The files](../reference/files.md): what the graph file holds.

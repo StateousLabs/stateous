@@ -117,3 +117,4 @@ The routine of `testing` knows that it can emit `passed` or `failed`. It does no
 - [Reliability](reliability.md): what keeps the two sides safe when a network or a computer fails.
 - [Run supervisors](../how-to/run-supervisors.md): supervisors on other computers.
 - [Change a workflow](../how-to/change-a-workflow.md): run `stateous init supervisor` again after a change.
+- [The files](../reference/files.md): the graph file, `contract.py` and the other files of each folder.

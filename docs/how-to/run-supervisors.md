@@ -148,3 +148,5 @@ The test `tests/e2e/test_example.py` of the repository runs the same steps, and 
 - [Reliability](../concepts/reliability.md): leases, the outbox, and what happens when a supervisor stops.
 - [Write a routine](write-a-routine.md): the routines in the folder.
 - [Use Postgres](use-postgres.md): the database of the control plane.
+- [The files](../reference/files.md): every key of `stateous.yaml`.
+- [The commands](../reference/cli.md): `stateous init supervisor` and `stateous supervise`.

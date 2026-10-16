@@ -64,3 +64,4 @@ Each token moves one step at a time on both databases.
 - [Reliability](../concepts/reliability.md): the ledger, and the time limits among the other mechanisms.
 - [Run supervisors](run-supervisors.md): supervisors on other computers.
 - [Change a workflow](change-a-workflow.md): what `serve` checks in the database at start.
+- [The commands](../reference/cli.md): every option of `stateous serve`.

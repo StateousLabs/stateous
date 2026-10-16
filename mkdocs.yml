@@ -99,3 +99,8 @@ nav:
       - The event graph: inside/event-graph.md
       - The internal workflows: inside/workflows.md
       - The data: inside/data.md
+  - Reference:
+      - The commands: reference/cli.md
+      - The HTTP API: reference/http.md
+      - The files: reference/files.md
+      - Limits: reference/limits.md

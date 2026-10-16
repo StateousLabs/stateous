@@ -525,3 +525,5 @@ Actor-initiated. A person runs `stateous supervise FOLDER`, or `stateous serve -
 - [The event graph](event-graph.md): how these workflows start each other.
 - [The data](data.md): the tables, the outbox, and the rows of one token.
 - [Reliability](../concepts/reliability.md): the guarantees that these workflows give.
+- [The HTTP API](../reference/http.md): the routes that start these workflows.
+- [The commands](../reference/cli.md): the commands that start these workflows.

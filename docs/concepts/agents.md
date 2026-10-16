@@ -148,3 +148,4 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
 - [Tasks and routines](tasks-and-routines.md): `async def` routines, cancel, and retries.
 - [Reliability](reliability.md): what happens when the supervisor stops.
 - [Write a routine](../how-to/write-a-routine.md): `outcome_schema()` and `outcome()`.
+- [Limits](../reference/limits.md): the known limits, also on Codex.
