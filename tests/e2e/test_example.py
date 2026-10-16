@@ -2,7 +2,8 @@
 
 `stateous compile`, `serve`, `init`, `supervise` and `token ...` each run as a
 process of their own, as in docs/guide.md, "Try it on one computer". A second test
-starts from `init workflow`, as in the guide, "Start a workflow". The control
+is the tutorial of docs/getting-started.md: it starts from `init workflow`, and runs
+the routines and the `token start` lines that the page shows. The control
 plane listens on a free port of 127.0.0.1 and keeps a SQLite file in the test's
 folder. The supervisor runs testing.py from the example. Nobody runs coding.py,
 because it needs PHD (see the guide, "Agents, with PHD"). The test reports
@@ -365,27 +366,21 @@ def test_the_example_runs_as_real_processes(tmp_path: Path, processes: Processes
         assert client.get("TICKET-5")["status"] == "completed"
 
 
-DRAFT = """\
-from stateous import on_state
-
-from contract import ItemContext, events, states
-
-
-@on_state(states.draft)
-def draft(ctx: ItemContext) -> events.submitted:
-    return events.submitted()
-"""
-
-REVIEW = """\
-from stateous import on_state
-
-from contract import ItemContext, Verdict, events, states
+TUTORIAL = ROOT / "docs" / "getting-started.md"
+ROUTINE_BLOCK = re.compile(r"```python\n(# orders-supervisor/(\w+)\.py\n.*?)```", re.DOTALL)
+TOKEN_START = re.compile(r"^stateous token start (ORDER-\d+) '(\{.*\})'$", re.MULTILINE)
 
 
-@on_state(states.review)
-def review(ctx: ItemContext) -> events.reviewed:
-    return events.reviewed(Verdict(approved=ctx["title"] != "reject me"))
-"""
+def tutorial_routines() -> dict[str, str]:
+    """The routines that the tutorial tells the reader to write, by file name."""
+    text = TUTORIAL.read_text(encoding="utf-8")
+    return {name: block for block, name in ROUTINE_BLOCK.findall(text)}
+
+
+def tutorial_tokens() -> dict[str, str]:
+    """The tokens that the tutorial starts: the context JSON, by token id."""
+    text = TUTORIAL.read_text(encoding="utf-8")
+    return dict(TOKEN_START.findall(text))
 
 
 def test_a_new_workflow_runs_from_init_to_a_completed_token(
@@ -412,14 +407,21 @@ def test_a_new_workflow_runs_from_init_to_a_completed_token(
     assert contract == (tmp_path / "from-flow" / "contract.py").read_text(encoding="utf-8")
     local = yaml.safe_load((tmp_path / "from-flow" / "stateous.yaml").read_text(encoding="utf-8"))
     assert local["url"] == "http://127.0.0.1:8080"
-    (folder / "draft.py").write_text(DRAFT, encoding="utf-8", newline="\n")
-    (folder / "review.py").write_text(REVIEW, encoding="utf-8", newline="\n")
+    routines = tutorial_routines()
+    assert set(routines) == {"draft", "review"}
+    for name, routine in routines.items():
+        (folder / f"{name}.py").write_text(routine, encoding="utf-8", newline="\n")
     supervise_log = tmp_path / "supervise.log"
     processes.start("supervise", "orders-supervisor", cwd=tmp_path, log=supervise_log)
 
     with Client(url) as client:
-        processes.ok("token", "start", "ORDER-1", '{"title": "a"}', cwd=tmp_path)
-        processes.ok("token", "start", "ORDER-2", '{"title": "reject me"}', cwd=tmp_path)
+        tokens = tutorial_tokens()
+        assert tokens == {
+            "ORDER-1": '{"title": "first order"}',
+            "ORDER-2": '{"title": "reject me"}',
+        }
+        for token, context in tokens.items():
+            processes.ok("token", "start", token, context, cwd=tmp_path)
         assert wait_for(has_status(client, "ORDER-1", "completed"), 90), log(supervise_log)
         assert accepted(client, "ORDER-1") == ["submitted", "reviewed"]
 
