@@ -139,3 +139,4 @@ No supervisor ran, so no one took task 1 or task 2. The history shows them as `c
 - [The model](model.md): the word [token](model.md#token) and its statuses.
 - [Timers and timeouts](timers.md): timers get the paused time back.
 - [Reliability](reliability.md): pause and resume among the other mechanisms.
+- [Steer tokens](../how-to/steer-tokens.md): the commands and the client.

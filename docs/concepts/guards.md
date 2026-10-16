@@ -94,3 +94,4 @@ Change the second guard to `ctx['amount'] <= 100`, or make it the fallback.
 
 - [The model](model.md): the words [transition](model.md#transition) and [guard](model.md#guard).
 - [Timers and timeouts](timers.md): guards on the events `timeout` and `error`.
+- [Write a workflow](../how-to/write-a-workflow.md): compile errors for guards that overlap.

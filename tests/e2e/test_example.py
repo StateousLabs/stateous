@@ -1,13 +1,14 @@
 """The example, end to end, as real processes.
 
 `stateous compile`, `serve`, `init`, `supervise` and `token ...` each run as a
-process of their own, as in docs/guide.md, "Try it on one computer". A second test
-is the tutorial of docs/getting-started.md: it starts from `init workflow`, and runs
-the routines and the `token start` lines that the page shows. The control
-plane listens on a free port of 127.0.0.1 and keeps a SQLite file in the test's
-folder. The supervisor runs testing.py from the example. Nobody runs coding.py,
-because it needs PHD (see the guide, "Agents, with PHD"). The test reports
-`coding` from outside, as CI or a person does: it fires `done`.
+process of their own, as in docs/how-to/run-supervisors.md, "Try it on one
+computer". A second test is the tutorial of docs/getting-started.md: it starts
+from `init workflow`, and runs the routines and the `token start` lines that
+the page shows. The control plane listens on a free port of 127.0.0.1 and keeps
+a SQLite file in the test's folder. The supervisor runs testing.py from the
+example. Nobody runs coding.py, because it needs PHD (see
+docs/concepts/agents.md). The test reports `coding` from outside, as CI or a
+person does: it fires `done`.
 
 The stop signal is real: SIGTERM on POSIX. On Windows, it is CTRL_BREAK_EVENT to a
 process started in a process group of its own.

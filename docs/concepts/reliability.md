@@ -134,3 +134,5 @@ build-box-2 took task 1 (attempt 2)
 - [Tasks and routines](tasks-and-routines.md): claims, heartbeats and attempts.
 - [Context, notes and memory](context-notes-memory.md): the routine's memory.
 - [Pause, resume and cancel](pause-resume-cancel.md).
+- [Use Postgres](../how-to/use-postgres.md): the database, and its time limits.
+- [Run supervisors](../how-to/run-supervisors.md): stop a supervisor safely.

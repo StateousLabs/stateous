@@ -110,3 +110,4 @@ For this, `Ticket` must have a field `last_failed`. Else the control plane refus
 - [The model](model.md): the words [context](model.md#context), [note](model.md#note) and [memory](model.md#memory).
 - [Agents, with PHD](agents.md): the memory keeps an agent's session.
 - [Reliability](reliability.md): the supervisor's outbox.
+- [Write a routine](../how-to/write-a-routine.md): the routine that reads and writes `ctx`.

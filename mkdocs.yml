@@ -88,3 +88,10 @@ nav:
       - Parallel and nested work: concepts/parallel.md
       - Reliability: concepts/reliability.md
       - Agents, with PHD: concepts/agents.md
+  - How-to guides:
+      - Write a workflow: how-to/write-a-workflow.md
+      - Write a routine: how-to/write-a-routine.md
+      - Run supervisors: how-to/run-supervisors.md
+      - Use Postgres: how-to/use-postgres.md
+      - Steer tokens: how-to/steer-tokens.md
+      - Change a workflow: how-to/change-a-workflow.md

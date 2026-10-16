@@ -94,3 +94,4 @@ timer fired: stuck
 - [The model](model.md): the words [timer](model.md#timer) and [event](model.md#event).
 - [Tasks and routines](tasks-and-routines.md): attempts and retries.
 - [Guards](guards.md): guards on the event of a timer.
+- [Write a routine](../how-to/write-a-routine.md): a routine that sets a timer.

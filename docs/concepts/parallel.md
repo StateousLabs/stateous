@@ -131,3 +131,4 @@ Each child gets `repo` and `branch` from the parent's context. For a token `TICK
 - [The model](model.md): the words [parallel state](model.md#parallel-state) and [child token](model.md#child-token).
 - [Guards](guards.md): the guard language.
 - [Pause, resume and cancel](pause-resume-cancel.md): steering, and the order of held events.
+- [Write a workflow](../how-to/write-a-workflow.md): declare the child workflows in `flow.py`.

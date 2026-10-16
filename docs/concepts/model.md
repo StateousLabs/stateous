@@ -211,3 +211,4 @@ stateDiagram-v2
 - [Tasks and routines](tasks-and-routines.md): how the work of a state is done.
 - [Guards](guards.md) and [Timers and timeouts](timers.md).
 - [Pause, resume and cancel](pause-resume-cancel.md): the statuses of a token.
+- [Write a workflow](../how-to/write-a-workflow.md): from the starter to a workflow of your own.

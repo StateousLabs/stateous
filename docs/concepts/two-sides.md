@@ -115,3 +115,5 @@ The routine of `testing` knows that it can emit `passed` or `failed`. It does no
 - [Tasks and routines](tasks-and-routines.md): what crosses the network for each task.
 - [Getting started](../getting-started.md): both sides on one computer.
 - [Reliability](reliability.md): what keeps the two sides safe when a network or a computer fails.
+- [Run supervisors](../how-to/run-supervisors.md): supervisors on other computers.
+- [Change a workflow](../how-to/change-a-workflow.md): run `stateous init supervisor` again after a change.

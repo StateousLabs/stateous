@@ -147,3 +147,4 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
 - [Context, notes and memory](context-notes-memory.md): `ctx.memory` and `ctx.note`.
 - [Tasks and routines](tasks-and-routines.md): `async def` routines, cancel, and retries.
 - [Reliability](reliability.md): what happens when the supervisor stops.
+- [Write a routine](../how-to/write-a-routine.md): `outcome_schema()` and `outcome()`.

@@ -130,3 +130,4 @@ build-box-2 took task 1 (attempt 2)
 - [Timers and timeouts](timers.md): a state's `timeout=` covers all attempts.
 - [Context, notes and memory](context-notes-memory.md): every field of `ctx`.
 - [Reliability](reliability.md): leases, the outbox, and what happens when a supervisor stops.
+- [Write a routine](../how-to/write-a-routine.md): mark a routine, return an outcome, and fail.
