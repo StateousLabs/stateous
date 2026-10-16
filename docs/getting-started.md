@@ -123,7 +123,10 @@ from contract import ItemContext, events, states
 
 
 @on_state(states.draft)
-def draft(ctx: ItemContext) -> events.submitted:
+def draft(ctx: ItemContext) -> events.submitted | None:
+    if ctx.visit > 1:  # the review sent the order back
+        ctx.note("the review sent this order back: a person must change it")
+        return None  # the task waits for a person
     return events.submitted()
 ```
 
@@ -139,7 +142,7 @@ def review(ctx: ItemContext) -> events.reviewed:
     return events.reviewed(Verdict(approved=ctx["title"] != "reject me"))
 ```
 
-`draft` submits at once. `review` approves each order, except an order with the title `reject me`.
+`draft` submits a new order at once. `review` approves each order, except an order with the title `reject me`. When the review sends an order back to `draft`, `draft` returns `None`: the task then waits for a person, and the token stays in `draft`.
 
 Then run the supervisor:
 
@@ -186,13 +189,32 @@ stateous token start ORDER-2 '{"title": "reject me"}'
 stateous token show ORDER-2
 ```
 
-Each review sends `ORDER-2` back to `draft`, so the token never ends. The history shows `entered draft (visit 2)`, then visit 3, and more. Stop it:
+The review sends `ORDER-2` back to `draft`. There, `draft` returns `None`, so the token waits. `token show` prints these lines:
 
-```bash
-stateous token cancel ORDER-2
+```text
+ORDER-2: draft (visit 2), active
+22:23:40  #1  started
+22:23:40  #2  __started__ in START
+22:23:40  #3  entered draft
+22:23:40  #4  task 3 queued for draft
+22:23:40  #5  build-box-1 took task 3 (attempt 1)
+22:23:40  #6  submitted in draft
+22:23:40  #7  task 3 done
+22:23:40  #8  entered review
+22:23:40  #9  task 4 queued for review
+22:23:40  #10  build-box-1 took task 4 (attempt 1)
+22:23:40  #11  reviewed in review: {"approved": false, "note": ""}
+22:23:40  #12  task 4 done
+22:23:40  #13  entered draft (visit 2)
+22:23:40  #14  task 5 queued for draft
+22:23:40  #15  build-box-1 took task 5 (attempt 1)
+22:23:40  #16  the review sent this order back: a person must change it
+22:23:40  #17  task 5 waits: the work goes on outside
 ```
 
-To stop the supervisor and the control plane, push Ctrl-C in terminals 2 and 1.
+The token stays in `draft` until a person acts. For example, `stateous token cancel ORDER-2` cancels it. [Steer tokens](how-to/steer-tokens.md) tells what else a person can do.
+
+To stop the supervisor and the control plane, press Ctrl-C in terminals 2 and 1.
 
 ## What happened
 

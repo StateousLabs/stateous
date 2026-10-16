@@ -7,12 +7,17 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 
-# Local files that are never published.
+# Only these pages are published: index.md, getting-started.md and four folders.
+# Each other file under docs/ stays local.
 exclude_docs: |
-  design.md
-  phd.md
-  PHD_ANSWERS.md
-  superpowers/
+  /*.md
+  !/index.md
+  !/getting-started.md
+  /*/
+  !/concepts/
+  !/how-to/
+  !/inside/
+  !/reference/
 
 theme:
   name: material

@@ -4,8 +4,8 @@ Generated from the document, never from Python objects: `stateous init superviso
 can have only the graph that the control plane serves. The output follows ruff's format for
 lines of up to 100 characters.
 
-Each child workflow of a parallel state is a class in `events` and in `states` (design
-section 8). A parallel state has no routine, so it has no `StateRef` and no stub.
+Each child workflow of a parallel state is a class in `events` and in `states`, so a
+routine can name it. A parallel state has no routine, so it has no `StateRef` and no stub.
 """
 
 from __future__ import annotations

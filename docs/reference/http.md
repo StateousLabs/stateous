@@ -72,7 +72,7 @@ One token. The answer is the token.
 The token's history, in order. The answer is a list of entries:
 
 ```json
-[{"seq": 6, "at": "2026-10-07T05:43:47Z", "kind": "event_accepted", "data": {"event": "done", "state": "coding"}}]
+[{"seq": 6, "at": "2026-10-07T05:43:47Z", "kind": "event_accepted", "data": {"event": "done", "payload": null, "state": "coding"}}]
 ```
 
 `seq` is the entry's number in the ledger. `kind` tells what happened, for example `entered`, `task_claimed` or `timer_fired`. `data` holds the facts of that kind. [The data](../inside/data.md) shows the entries of one token.

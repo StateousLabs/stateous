@@ -82,7 +82,7 @@ When a child ends, the control plane checks the join in the same transaction. Th
 
 ### Steer the parent
 
-`pause` and `resume` on the parent also pause and resume its children. On resume, the events that the parent and its children held apply in the order that they arrived. Thus, with `join="any"`, the child that ended first goes on.
+`pause` and `resume` on the parent also pause and resume its children. On resume, the events that the parent and its children held apply in the order that they arrived. So, with `join="any"`, the child that ended first goes on.
 
 You cannot pause, resume or cancel a child alone. The answer is 409, with the code `child_token`, because a child is a part of its parent's work. Cancel the parent: that cancels its children.
 

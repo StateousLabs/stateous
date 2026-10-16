@@ -4,7 +4,7 @@ This guide tells you how to keep the control plane's data in Postgres in place o
 
 ## Before you start
 
-- You have a Postgres server and an empty database, or a database that has no tables with the names that Stateous uses.
+- You have a Postgres server and a database. The database is empty, or this Stateous or an older Stateous made it.
 - Stateous has its Postgres driver, psycopg 3. You do not install it yourself.
 
 ## 1. Give the database URL to `serve`
@@ -17,7 +17,13 @@ stateous serve sdlc/build/sdlc.json --db postgresql://stateous:secret@db.interna
 
 At the first start, `serve` makes its tables in the database. It keeps its schema version in its own table, `stateous_version`. So a different application can use Alembic in the same database.
 
-`serve` does not start when the database has tables with the names that Stateous uses, but no version of Stateous. It also does not start when a different version of Stateous made the database. Then use a new database.
+When an older Stateous made the database, `serve` upgrades the tables in place at start, and keeps the data.
+
+`serve` does not start in these cases:
+
+- A newer Stateous made the database. Use that version of Stateous.
+- The database has tables with the names that Stateous uses, but no version of Stateous. Use a new database.
+- The database does not have a table that its version of Stateous made, or it has a table that the upgrade must make. Use a new database.
 
 ## 2. Run one control plane for each database
 

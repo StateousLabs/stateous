@@ -35,7 +35,26 @@ WORDS = [
     "graph file",
     "contract",
     "ledger",
+    "visit",
+    "claim",
+    "checksum",
+    "structure",
+    "guard",
+    "timer",
+    "lease",
+    "heartbeat",
+    "attempt",
+    "retries",
+    "note",
+    "memory",
+    "parallel state",
+    "child token",
+    "join",
+    "outbox",
+    "idempotency key",
+    "held event",
 ]
+"""Each Stateous word that the pages use. `concepts/model.md` defines each one."""
 
 FACTS: dict[str, list[str]] = {
     "concepts/model.md": [f"### {word}" for word in WORDS]
@@ -187,3 +206,20 @@ def test_the_agents_page_shows_coding_py_as_it_is() -> None:
             assert block == example.read_text(encoding="utf-8"), found.group(1)
             shown.add(found.group(1))
     assert shown == {"sdlc-supervisor/coding.py"}
+
+
+def test_the_model_defines_each_word_once() -> None:
+    headings = re.findall(r"^### (.+)$", page("concepts/model.md"), re.MULTILINE)
+
+    assert sorted(headings) == sorted(WORDS)
+
+
+def test_the_two_sides_page_shows_the_contract_as_init_writes_it() -> None:
+    contract = (ROOT / "examples" / "sdlc-supervisor" / "contract.py").read_text(encoding="utf-8")
+    blocks = [
+        block
+        for block in PYTHON.findall(page("concepts/two-sides.md"))
+        if block.startswith("# GENERATED from the `sdlc` workflow")
+    ]
+
+    assert blocks == [contract]

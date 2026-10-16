@@ -101,7 +101,7 @@ For this, `Ticket` must have a field `last_failed`. Else the control plane refus
 
 - Changes to the context are saved with the outcome in one transaction, or not at all.
 - Notes and memory writes are sent in order, before the report of the same task.
-- A memory write is on disk in the supervisor's outbox before it is sent. A crash does not lose it.
+- A memory write is on disk in the supervisor's outbox before it is sent. A crash does not lose it, if the supervisor starts again before the task's lease ends.
 - A note or a memory write for an attempt that is over is refused. An old attempt cannot write to a new one.
 - Not guaranteed: that the memory stays after the token ends. It is deleted when the token ends.
 

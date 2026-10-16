@@ -1,6 +1,6 @@
 """`prepare_serve`: it checks --listen, the graph file, the port, the database's
-hold and the structure on record. Each refusal is one plain sentence (contract
-section 15). The server that it prepares runs the API and the clock."""
+hold and the structure on record. Each refusal is one plain
+sentence. The server that it prepares runs the API and the clock."""
 
 import copy
 import json

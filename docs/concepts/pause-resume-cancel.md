@@ -38,9 +38,9 @@ A paused token never moves or ends on its own:
 - Its timers and its timeout stop. On resume, they get the paused time back.
 - An event that you fire is held. The answer shows the token, still paused.
 - A routine that runs already continues, and its lease continues too.
-- When that routine returns an event, the control plane holds all of the outcome: the event, the context changes and the timers.
+- When that routine returns an event, the control plane first decides as for an active token. It refuses an outcome that cannot apply (`event_rejected`). Else it holds all of the outcome: the event, the context changes and the timers.
 - When that routine returns `None`, the task waits. Its context changes and its timers are saved at once.
-- A task that fails holds the event `error` until the resume.
+- When the last attempt of a task fails, the token holds the event `error` until the resume. With retries left, the task is queued again.
 
 Each held event gets an arrival number. The history shows `done held while paused`.
 

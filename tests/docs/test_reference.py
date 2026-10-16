@@ -11,8 +11,9 @@ from typer.core import TyperGroup
 import stateous
 import stateous.client
 from stateous.control import engine
+from stateous.supervisor.folder import _config_text  # pyright: ignore[reportPrivateUsage]
 
-from .pages import ROOT, child, cli, commands, options, page, section
+from .pages import ROOT, TYPER_OWN, Command, child, cli, commands, options, page, section
 
 HEADING = re.compile(r"^### stateous ([\w -]+)$", re.MULTILINE)
 ROUTE = re.compile(r"`(GET|POST|PUT|DELETE) (/[^`]*)`")
@@ -142,3 +143,70 @@ def test_every_public_name_has_a_docstring() -> None:
         for member_name, member in members.items():
             if not member_name.startswith("_") and inspect.isfunction(member):
                 assert inspect.getdoc(member), f"{name}.{member_name}"
+
+
+def test_the_files_page_shows_stateous_yaml_as_init_writes_it() -> None:
+    blocks = re.findall(r"```yaml\n(.*?)```", page("reference/files.md"), re.DOTALL)
+
+    assert _config_text("http://127.0.0.1:8080") in blocks
+
+
+HANDLED = re.compile(r"^\s+(\w+): _answer\((\d{3})", re.MULTILINE)
+"""A row of the API's map of an engine error to its status."""
+LITERAL_STATUS = re.compile(r'(?:refusal|Problem)\(\s*(\d{3}),[^\n]*?"([a-z_]+)"\s*\)')
+"""A code that the API writes as text, with its status."""
+CODE_STATUS_ROW = re.compile(r"^\| `([a-z_]+)` \| (\d{3})", re.MULTILINE)
+SYNOPSIS = re.compile(r"```text\n(stateous [^\n]+)\n```")
+OPTION = re.compile(r"`(--[a-z][a-z-]*)")
+
+
+def real_statuses() -> dict[str, int]:
+    """The status of each refusal code that has one fixed status."""
+    source = (ROOT / "src/stateous/control/api.py").read_text(encoding="utf-8")
+    handled = {name: int(status) for name, status in HANDLED.findall(source)}
+    found: dict[str, int] = {}
+    for cls in subclasses(engine.EngineError):
+        status = next((handled[c.__name__] for c in cls.__mro__ if c.__name__ in handled), None)
+        if status is not None:
+            found[cls.code] = status
+    for name in ("src/stateous/control/api.py", "src/stateous/cli/serving.py"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        for status, code in LITERAL_STATUS.findall(text):
+            found.setdefault(code, int(status))
+    return found
+
+
+def test_the_http_reference_gives_each_code_its_status() -> None:
+    shown = {
+        code: int(status) for code, status in CODE_STATUS_ROW.findall(page("reference/http.md"))
+    }
+    real = real_statuses()
+
+    assert {"attempt_over", "task_not_held", "not_found", "database_busy"} <= set(real)
+    for code, status in real.items():
+        assert shown.get(code) == status, (code, shown.get(code), status)
+
+
+def test_every_option_on_the_cli_reference_is_real() -> None:
+    real: set[str] = set(options(cli())) | TYPER_OWN
+    for command in commands(cli()).values():
+        real |= options(command)
+    shown = set(OPTION.findall(page("reference/cli.md")))
+
+    assert shown, "no option found"
+    assert shown <= real, shown - real
+
+
+def test_every_synopsis_on_the_cli_reference_is_real() -> None:
+    group = cli()
+    found = SYNOPSIS.findall(page("reference/cli.md"))
+    assert len(found) >= 5
+    for line in found:
+        words = line.replace("[", " ").replace("]", " ").split()[1:]
+        command: Command = group
+        while isinstance(command, TyperGroup) and words and words[0] in command.commands:
+            command = child(command, words.pop(0))
+        assert not isinstance(command, TyperGroup), line
+        for word in words:
+            if word.startswith("--"):
+                assert word in options(command) | options(group), (line, word)

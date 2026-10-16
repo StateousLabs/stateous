@@ -28,6 +28,8 @@ A folder can implement only some of the states. Remove the stubs of the states t
 
 ## 3. Set `stateous.yaml`
 
+Edit the file that `init` wrote. For example:
+
 ```yaml
 url: http://cp.internal:8080   # the control plane
 tasks: 4                       # routines at once

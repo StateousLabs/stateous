@@ -72,6 +72,15 @@ The data of one event, for example the numbers of tests that passed and failed. 
 
 "Do state S for token T". The control plane queues one task each time a token enters a state. A supervisor claims the task and runs its routine.
 
+
+### visit
+
+One stay of a token in one state. The first time that a token enters a state is visit 1, the next time is visit 2. A routine reads it as `ctx.visit`. The history shows it, for example `entered coding (visit 2)`.
+
+### claim
+
+A supervisor's request for a task of the states that it serves. The control plane answers with a grant: one queued task, its token, its visit, its attempt and its context. The task is then claimed.
+
 ### routine
 
 Your function that does the work of one state. It gets the token's context as `ctx`, and it returns an event. It is in the supervisor's folder, and it is marked with `@on_state(states.X)`.
@@ -87,6 +96,15 @@ The process that keeps every token, and chooses each next state. You start it wi
 ### graph file
 
 The compiled workflow, as JSON, for example `sdlc/build/sdlc.json`. `stateous compile` writes it, and `stateous serve` serves it.
+
+
+### checksum
+
+The hash of the whole graph file, for example `sha256:...`. Each change to the graph file changes it. A supervisor's `contract.py` is for one checksum.
+
+### structure
+
+The hash of the graph file without the `timeout=` and `retries=` of its states. A database serves one structure at a time. See [Change a workflow](../how-to/change-a-workflow.md).
 
 ### contract
 
@@ -108,9 +126,19 @@ An event that the clock fires later, if the token is still in the same state. A 
 
 The time for which a supervisor holds a claimed task. A heartbeat renews it. See [Tasks and routines](tasks-and-routines.md).
 
+
+### heartbeat
+
+The message that a supervisor sends every 30 seconds for all the tasks that it holds. It renews their leases. Its answer names each task that the supervisor does not hold now, for example because the token left the state.
+
 ### attempt
 
 One try of a task. The first claim is attempt 1. When an attempt fails and the state has retries left, the next claim is attempt 2.
+
+
+### retries
+
+The number of more attempts that a state gives after a failed attempt: `retries=2` gives three attempts in all. After the last failed attempt, the token gets the event `error`.
 
 ### note
 
@@ -128,6 +156,11 @@ A state whose work is other workflows, which run at the same time. It has no tas
 
 A token that a parallel state starts, one for each workflow of the state. Its parent is the token in the parallel state.
 
+
+### join
+
+The rule that tells when a parallel state is done. `join="all"` waits for each child token to end. `join="any"` continues when the first child token ends. When the join is met, the control plane fires `joined` on the parent.
+
 ### outbox
 
 The supervisor's local file of messages that the control plane did not answer yet: `.stateous/outbox.db`. See [Reliability](reliability.md).
@@ -135,6 +168,11 @@ The supervisor's local file of messages that the control plane did not answer ye
 ### idempotency key
 
 A key that you give with an event from outside. A second event with the same key applies nothing, and gets the answer "duplicate". See [Reliability](reliability.md).
+
+
+### held event
+
+An event that comes to a paused token. The control plane keeps it, and applies it on resume, in the order of arrival. The history shows `done held while paused`. See [Pause, resume and cancel](pause-resume-cancel.md).
 
 ## Example
 

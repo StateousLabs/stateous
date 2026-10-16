@@ -26,7 +26,7 @@ The supervisor reports one of three kinds of outcome:
 |---|---|---|
 | an event | The routine returned an event. | It checks the event, and moves the token. The task is `done`. |
 | waiting | The routine returned `None`. | The task waits. Someone outside reports its event later. |
-| failed | The routine raised an exception. | It counts a failed attempt. |
+| failed | The routine raised an exception, or its outcome is not valid. See [Write a routine](../how-to/write-a-routine.md#5-fail-on-purpose). | It counts a failed attempt. |
 
 A failed attempt is not the end. When the state has retries left, the task is queued again, and the next claim is the next attempt. `retries=2` on a state gives three attempts in all. After the last failed attempt, the token gets the event `error`. If no transition takes `error`, the token fails.
 
@@ -44,13 +44,16 @@ stateDiagram-v2
     claimed --> queued: the attempt fails, retries are left
     claimed --> failed: the attempt fails, no retries are left
     queued --> cancelled: the token leaves the state
-    claimed --> cancelled: the token leaves the state
+    claimed --> cancelled: the token leaves on another event
+    waiting --> cancelled: the token leaves on another event
     done --> [*]
     failed --> [*]: the token gets error
     cancelled --> [*]
 ```
 
 A failed attempt can also start from `waiting`, when the report from outside is a failure. A task is also cancelled when the token is cancelled.
+
+An event from outside can move the token while its task is claimed or waiting. When the state emits that event, the task is `done`. When it does not, for example `timeout`, the task is `cancelled`.
 
 This is one task, from claim to report:
 
@@ -81,7 +84,7 @@ A routine is a function in the supervisor's folder, marked with `@on_state(state
 
 The routine's argument is `ctx`. It gives the context, the ids of the token and the task, the visit and the attempt.
 
-When the token leaves the state, or is cancelled, the next heartbeat tells the supervisor that the task is lost. The supervisor then cancels an `async def` routine. It cannot stop a `def` routine, so it ignores the result of that routine.
+When the token leaves the state, or is cancelled, the next heartbeat tells the supervisor that the task is lost. This can be up to 30 seconds later. The supervisor then cancels an `async def` routine. It cannot stop a `def` routine, so it ignores the result of that routine.
 
 ### A claim that gets no answer
 

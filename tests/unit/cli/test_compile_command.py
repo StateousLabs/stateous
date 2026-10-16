@@ -1,4 +1,4 @@
-"""`stateous compile FLOW [--out FILE]` (contract sections 6 and 15)."""
+"""`stateous compile FLOW [--out FILE]`: it writes the graph file, or names the error."""
 
 import json
 import subprocess

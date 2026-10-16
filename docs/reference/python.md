@@ -21,6 +21,9 @@ A routine is a function in the supervisor's folder. `@on_state` marks it, `ctx` 
 ::: stateous.on_state
 
 ::: stateous.Context
+    options:
+      merge_init_into_class: false
+      show_attribute_values: false
 
 ::: stateous.StateRef
 

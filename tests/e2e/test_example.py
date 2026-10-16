@@ -384,6 +384,18 @@ def tutorial_tokens() -> dict[str, str]:
     return dict(TOKEN_START.findall(text))
 
 
+def tutorial_histories() -> dict[str, list[str]]:
+    """The `token show` output that the tutorial shows, by token id, without the times."""
+    text = TUTORIAL.read_text(encoding="utf-8")
+    blocks = re.findall(r"```text\n((ORDER-\d+): .*?)```", text, re.DOTALL)
+    return {token: without_times(block) for block, token in blocks}
+
+
+def without_times(output: str) -> list[str]:
+    """The lines of `token show`, without the time at the start of each history line."""
+    return [re.sub(r"^\d\d:\d\d:\d\d  ", "", line) for line in output.strip().splitlines()]
+
+
 def test_a_new_workflow_runs_from_init_to_a_completed_token(
     tmp_path: Path, processes: Processes
 ) -> None:
@@ -421,13 +433,30 @@ def test_a_new_workflow_runs_from_init_to_a_completed_token(
             "ORDER-1": '{"title": "first order"}',
             "ORDER-2": '{"title": "reject me"}',
         }
-        for token, context in tokens.items():
-            processes.ok("token", "start", token, context, cwd=tmp_path)
+        # the reader starts ORDER-2 after ORDER-1 completes, so the task numbers agree
+        processes.ok("token", "start", "ORDER-1", tokens["ORDER-1"], cwd=tmp_path)
         assert wait_for(has_status(client, "ORDER-1", "completed"), 90), log(supervise_log)
         assert accepted(client, "ORDER-1") == ["submitted", "reviewed"]
+        processes.ok("token", "start", "ORDER-2", tokens["ORDER-2"], cwd=tmp_path)
 
-        # a Verdict that does not approve sends the token back to `draft` (`otherwise=True`)
-        def sent_back() -> bool:
-            return entered(client, "ORDER-2")[:3] == ["draft", "review", "draft"]
+        # a Verdict that does not approve sends the token back to `draft` (`otherwise=True`),
+        # where `draft` returns None: the task waits for a person, and the token stays
+        def waits_in_draft() -> bool:
+            return kinds(client, "ORDER-2")[-1:] == ["task_waiting"]
 
-        assert wait_for(sent_back, 90), log(supervise_log)
+        assert wait_for(waits_in_draft, 90), log(supervise_log)
+        assert entered(client, "ORDER-2") == ["draft", "review", "draft"]
+        time.sleep(2)  # the supervisor claims at once: a loop would add rows by now
+        assert kinds(client, "ORDER-2")[-1:] == ["task_waiting"]
+        now = client.get("ORDER-2")
+        assert (now["state"], now["visit"], now["status"]) == ("draft", 2, "active")
+
+        supervisor = next(
+            str(entry["data"]["supervisor"])
+            for entry in client.history("ORDER-1")
+            if entry["kind"] == "task_claimed"
+        )
+        shown = tutorial_histories()
+        for token in ("ORDER-1", "ORDER-2"):
+            printed = processes.ok("token", "show", token, cwd=tmp_path)
+            assert without_times(printed.replace(supervisor, "build-box-1")) == shown[token]

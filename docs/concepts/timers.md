@@ -56,7 +56,7 @@ coding = flow.state("coding", timeout="6h", retries=2)
 flow.transition(coding, END, on="timeout")
 ```
 
-A routine can give the work to a person, and set a reminder. Here, the routine of `coding` returns `None`, so the task waits. If no one reports `done` in 2 days, the timer fires `stuck`:
+A routine can give the work to a person, and set a reminder. Here, the routine of `coding` returns `None`, so the task waits. If no one reports `done` in 2 hours, the timer fires `stuck`, and `stuck` takes the token to the end:
 
 ```python
 # sdlc-supervisor/coding.py: a person does the work
@@ -68,17 +68,19 @@ from contract import TicketContext, events, states
 @on_state(states.coding)
 def code(ctx: TicketContext) -> None:
     ctx.note(f"waiting for a person to change {ctx['repo']}")
-    ctx.schedule(events.stuck, after="2d")
+    ctx.schedule(events.stuck, after="2h")
     return None
 ```
 
-When the person reports `done` first, the token leaves `coding`, and the timer stops.
+The reminder must be shorter than the timeout. The two timers are in the same visit, and the first that is due fires first. When the token leaves `coding`, the other timer stops. So a reminder of 2 days never fires, because the timeout fails the token after 6 hours.
+
+When the person reports `done` first, the token leaves `coding`, and the two timers stop.
 
 The history shows each timer:
 
 ```text
 timer set: timeout at 2026-10-07 05:43:39
-timer set: stuck at 2026-10-08 23:43:39
+timer set: stuck at 2026-10-07 01:43:39
 timer fired: stuck
 ```
 

@@ -86,8 +86,8 @@ erDiagram
 |---|---|---|
 | `ledger` | The history of each token. One row for each change, numbered by `seq` for each token. A row is never changed or deleted. `key` holds the idempotency key of an event from outside. | All workflows that change a token. |
 | `tokens` | Where each token is now: its state, its status, its visit of the state, and its context. A child token has `parent` and `workflow`. | Start a token, Fire an event, Report an outcome, Timer fires, Lease expiry, Pause and resume, Cancel, Join. |
-| `tasks` | One row each time a token enters a state that is not parallel. `attempt` counts the claims. `lease_until` is set while a supervisor holds the task. | Start a token, Claim a task, Heartbeat, Report an outcome, Lease expiry, Cancel. |
-| `timers` | The timeout of a state (`kind` is `timeout`), and the timers of routines (`kind` is `timer`). | Start a token, Report an outcome, Timer fires, Pause and resume, Cancel. |
+| `tasks` | One row each time a token enters a state that is not parallel. `attempt` counts the claims. `lease_until` is set while a supervisor holds the task. | Start a token, Fire an event, Claim a task, Heartbeat, Report an outcome, Lease expiry, Timer fires, Cancel, Join. |
+| `timers` | The timeout of a state (`kind` is `timeout`), and the timers of routines (`kind` is `timer`). | Start a token, Fire an event, Report an outcome, Lease expiry, Timer fires, Pause and resume, Cancel, Join. |
 | `memory` | The routine's memory: one key and its value, for one token and one state. The rows of a token are deleted when it ends. | Report an outcome (memory writes), and the end of a token. |
 | `claims` | The last claim of each supervisor: the request id, and the task and attempt that it got. An empty `task_id` means that the claim got no task. | Claim a task. |
 | `control_plane` | One row. The structure and the checksum of the graph on record, and the control plane that holds the database now. | Serve, and its clock. |

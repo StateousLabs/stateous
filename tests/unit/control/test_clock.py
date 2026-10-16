@@ -97,6 +97,22 @@ def test_a_routines_timer_fires_its_event_once_when_it_is_due() -> None:
     assert engine.get("T-1").status == "completed"  # coding --stuck--> END
 
 
+def test_a_reminder_due_before_the_timeout_fires_and_stops_the_timeout() -> None:
+    # The example of the page "Timers and timeouts": a 2-hour reminder in a 6-hour state.
+    clock = Clock()
+    engine = started(clock)
+    grant = claimed(engine)
+    engine.report(grant.task, waiting_with_a_timer(after="2h"), supervisor="box-1")
+
+    clock.advance(hours=2)
+    assert engine.tick() == 1
+    clock.advance(hours=4)
+    assert engine.tick() == 0
+
+    assert engine.get("T-1").status == "completed"  # coding --stuck--> END
+    assert kinds(engine, "T-1").count("timer_fired") == 1
+
+
 def test_a_timer_is_cancelled_when_the_token_leaves_its_state() -> None:
     clock = Clock()
     engine = started(clock)

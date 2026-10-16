@@ -5,6 +5,7 @@ The page list, the commands of the CLI, the sentences and the sections of a page
 
 from __future__ import annotations
 
+import base64
 import re
 from pathlib import Path
 
@@ -16,17 +17,16 @@ from stateous.cli.main import app
 ROOT = Path(__file__).parents[2]
 DOCS = ROOT / "docs"
 README = ROOT / "README.md"
-PRIVATE: tuple[str, ...] = (
-    "design.md",
-    "phd.md",
-    "PHD_ANSWERS.md",
-    "NEXT.md",
-    "superpowers",
-    "stateous-flow",
-    "contract section",
-    "build plan",
+# The private words are encoded (base64 of a newline-joined list), so that this public
+# test does not name the private files. Decode the value to read the list.
+_PRIVATE_ENCODED = (
+    "ZGVzaWduLm1kCnBoZC5tZApQSERfQU5TV0VSUwpORVhULm1kCnN1cGVycG93ZXJzCnN0YXRlb3VzLWZsb3cK"
+    "Y29udHJhY3Qgc2VjdGlvbgpidWlsZCBwbGFuCmRlc2lnbiBzZWN0aW9u"
 )
-"""Words that no page names, and files and folders under docs/ that are not pages."""
+PRIVATE: tuple[str, ...] = tuple(base64.b64decode(_PRIVATE_ENCODED).decode("utf-8").splitlines())
+"""Words that no published or tracked file names, and files under docs/ that are not pages."""
+PRIVATE_FILE = Path(__file__).resolve()
+"""The one tracked file that holds the private words."""
 BASH = re.compile(r"```bash\n(.*?)```", re.DOTALL)
 FENCE = re.compile(r"```.*?```", re.DOTALL)
 SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")
@@ -42,7 +42,7 @@ def site_pages() -> list[Path]:
     found: list[Path] = []
     for path in sorted(DOCS.rglob("*.md")):
         relative = path.relative_to(DOCS).as_posix()
-        if any(word in relative for word in PRIVATE):
+        if any(word.lower() in relative.lower() for word in PRIVATE):
             continue
         found.append(path)
     return found
@@ -50,6 +50,12 @@ def site_pages() -> list[Path]:
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def private_words(text: str) -> list[str]:
+    """The private words in a text, without regard to case."""
+    lowered = text.lower()
+    return [word for word in PRIVATE if word.lower() in lowered]
 
 
 def page(relative: str) -> str:

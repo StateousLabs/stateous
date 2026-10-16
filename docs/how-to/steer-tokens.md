@@ -122,7 +122,7 @@ Each method returns the JSON answer of the control plane. Without `with`, call `
 
 The client raises these errors, from `stateous.client`:
 
-- `Refused`, when the control plane refuses a call. It has `.status`, `.message` and `.code`. Use `.code` in your program, for example `attempt_over`. `.message` is for people, and it can change.
+- `Refused`, when the control plane refuses a call. It has `.status`, `.message` and `.code`. `.code` is `None` when the answer has no code, for example an answer from a proxy. Use `.code` in your program, for example `attempt_over`. `.message` is for people, and it can change.
 - `NotFound`, a `Refused` with the status 404: no such token, task or path.
 - `Unreachable`, when the control plane does not answer.
 

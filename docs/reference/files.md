@@ -119,13 +119,16 @@ def coding(ctx: TicketContext) -> events.done | events.stuck:
 
 ### `stateous.yaml`
 
-The supervisor's settings. `stateous init supervisor` writes it only when the folder does not have it.
+The supervisor's settings. `stateous init supervisor` writes it only when the folder does not have it. From a graph file or a `flow.py`, it writes this text:
 
 ```yaml
-url: http://127.0.0.1:8080     # the control plane
-tasks: 4                       # how many routines run at once
-name: build-box-1              # optional; the default is the host name
+# A Stateous supervisor. Run it with: stateous supervise <this folder>
+url: "http://127.0.0.1:8080"    # the control plane
+tasks: 4    # how many routines run at once
+# name: build-box-1    # optional; default: the host name
 ```
+
+To give the supervisor a name, remove the `#` before `name:`.
 
 | Key | Meaning |
 |---|---|

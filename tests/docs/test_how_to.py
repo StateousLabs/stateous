@@ -47,6 +47,9 @@ FACTS: dict[str, list[str]] = {
         "one control plane",
         "statement_timeout",
         "lock_timeout",
+        "older Stateous made the database, `serve` upgrades the tables in place",
+        "keeps the data",
+        "A newer Stateous made the database",
     ],
     "how-to/steer-tokens.md": [
         "stateous token start",

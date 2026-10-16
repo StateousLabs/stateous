@@ -44,7 +44,7 @@ When an event comes, the control plane looks at the transitions from the token's
 
 If two guards can overlap, compile stops with an error, and it gives an example of such data. Stateous never chooses between two matching guards at run time.
 
-Compile also stops when it cannot prove that two guards never overlap. This occurs when a guard compares two values with each other, or uses `branches`. Then make one transition the fallback with `otherwise=True`.
+Compile also stops when it cannot prove that two guards never overlap. This occurs when a guard compares two values with each other, orders a list, or uses `branches`. Then make one transition the fallback with `otherwise=True`.
 
 Next to transitions with guards, a transition without a guard must have `otherwise=True`. Compile stops if it does not.
 
@@ -76,7 +76,7 @@ flow.transition(review, draft, on=reviewed, when="ctx['amount'] > 50")
 `stateous compile` refuses them, and it gives an amount that makes both of them true:
 
 ```text
-Error: workflow 'orders' is not valid:
+error: workflow 'orders' is not valid:
   - 'reviewed' from 'review': the guards "ctx['amount'] > 100" and "ctx['amount'] > 50" can both be true, e.g. when ctx['amount'] = 101; make them exclusive, or make one the fallback (otherwise=True)
 ```
 

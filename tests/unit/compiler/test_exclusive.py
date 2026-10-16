@@ -1,4 +1,4 @@
-"""Two guards that could both be true are refused when compiling (design, section 5.1)."""
+"""Two guards that could both be true are refused when compiling."""
 
 from enum import Enum
 from typing import Literal

@@ -81,7 +81,7 @@ Actor-initiated. A person runs `stateous serve GRAPH`.
 |---|---|
 | success | stderr: `serving on http://127.0.0.1:8080 (Ctrl-C stops)`. The row of `control_plane` gets `structure`, `checksum`, `serving` and `since`. |
 | each tick of the clock | The steps of [Lease expiry](#lease-expiry) and [Timer fires](#timer-fires). A tick that fails logs `the clock's tick failed (...); it tries again in 1.0 seconds`. |
-| a refusal at start | stderr: `error: <sentence>`. Exit code 1. For example: the port is in use, another control plane serves the database, or a new structure while tokens are live. |
+| a refusal at start | stderr: `error: <sentence>`. Exit code 1. For example: the port is in use, another control plane serves the database, a newer Stateous made the database, or a new structure while tokens are live. |
 | another control plane takes the database | log: `another control plane took this database; ...`. Each request gets 503 with the code `not_serving`. Then stderr: `error: another control plane took the database; this control plane stopped`. Exit code 1. |
 | a graceful stop | stderr: `stopped`. Exit code 0. |
 
@@ -166,6 +166,8 @@ All steps are one transaction. A refusal is recorded, and then the answer is the
 | an ended token | Ledger: `event_rejected`. HTTP 409, `token_not_active`. |
 | an event that cannot move the token | Ledger: `event_rejected` with the reason. HTTP 409, `event_not_allowed`. |
 | a bad payload or key | HTTP 422, `invalid_payload`. No ledger entry. |
+| two guards match | Ledger: `failed` with the reason `... matched more than one guard ...`. HTTP 200 with the failed token. |
+| no such token | HTTP 404, `token_not_found`. No ledger entry. |
 
 **Data**
 
@@ -203,7 +205,7 @@ Event-initiated and scheduled. The claim loop of a supervisor starts after [Supe
 | a task | Ledger: `task_claimed` (`task`, `supervisor`, `attempt`). HTTP 200 with the grant. Log: `task 2: testing of TICKET-1, attempt 1`. |
 | no task | HTTP 204. The supervisor waits 1 second. |
 | the same request again | HTTP 200 with the same grant. No new ledger entry. |
-| a bad body | HTTP 422, `invalid_argument` or `invalid_body`. Log: `the control plane refused a claim: ...`. |
+| a bad body | HTTP 422, `invalid_argument` or `invalid_body`, for example for a supervisor name of more than 256 characters. Log: `the control plane refused a claim: ...`. |
 | no answer | Log: `... trying again in 1s`, then 2, 4, 8, 16 and 30 seconds. The same request id. |
 
 **Data**
@@ -239,7 +241,7 @@ Scheduled. Every 30 seconds, while the supervisor has running routines.
 | success | HTTP 200 with `{"lost": [...]}`. `tasks.lease_until` moves. No ledger entry. |
 | a lost task | Log: `task 2 of TICKET-1: the control plane took it back; cancelling its routine`. |
 | a refusal | Log: `the control plane refused a heartbeat: ...`. |
-| no answer | Log: `...; trying again in 1s`, then 2, 4, 8, 16 and 30 seconds. The leases are not renewed meanwhile. After 2 minutes, [Lease expiry](#lease-expiry) runs. |
+| no answer | Log: `...; trying again in 1s`, then 2, 4, 8, 16 and 30 seconds. Until an answer comes, the leases are not renewed. After 2 minutes, [Lease expiry](#lease-expiry) runs. |
 | a different failure | Log: `a heartbeat failed`, with the error. The next heartbeat comes 30 seconds later. |
 
 **Data**
@@ -285,6 +287,8 @@ Event-initiated: a routine returned or raised. Also actor-initiated: someone out
 | a memory write | Ledger: `memory_set` or `memory_deleted` (`state`, `memory_key`). Never the value. HTTP 204. |
 | an event that the state cannot emit, or that no guard takes | Ledger: `event_rejected`. HTTP 409, `event_not_allowed`. The supervisor reports a failure: `the control plane refused the report: ...`. |
 | an attempt that is over | HTTP 409, `attempt_over`. Log: `task 2 of TICKET-1: the control plane refused the report: ...`. The supervisor drops it. |
+| a task that this supervisor does not hold now | HTTP 409, `task_not_held`, for example after the lease ended and the task was queued again. The supervisor sends a heartbeat to check, then drops the report. |
+| no such task | HTTP 404, `task_not_found`. The supervisor drops the report. |
 | a bad context change | HTTP 422, `invalid_context`. The supervisor reports a failure. |
 | no answer | Log: `...; trying again in 1s`, then 2, 4, 8, 16 and 30 seconds. The report stays in the outbox. |
 | no answer at a stop | Log: `task 2 of TICKET-1: the control plane cannot be reached; the report stays in the outbox for the next start`. |
@@ -321,7 +325,7 @@ Scheduled. Each tick of the clock of [Serve](#serve), about each second, looks f
 |---|---|
 | retries left | Ledger: `task_failed` (`build-box-1 stopped answering: no heartbeat for 2 minutes`), `task_retrying`. The task is `queued`. |
 | no retries left | Ledger: `task_failed`, then `event_accepted` for `error`, or `failed` with the reason `'coding' failed, and has no transition on 'error': ...`. |
-| a paused token | Ledger: `task_failed`, then `event_deferred` for `error`. |
+| a paused token, no retries left | Ledger: `task_failed`, then `event_deferred` for `error`. |
 | a late report of that attempt | HTTP 409, `attempt_over` (a new attempt started) or `task_not_held`. |
 
 **Data**
@@ -396,6 +400,7 @@ Actor-initiated. A person runs `stateous token pause` or `stateous token resume`
 | resume | Ledger: `resumed`, then `event_replayed` and the move, or `event_dropped` (`event`, `reason`) for each held event. HTTP 200. |
 | a token in the wrong status | HTTP 409, `token_not_active`. |
 | a child token | HTTP 409, `child_token`. |
+| no such token | HTTP 404, `token_not_found`. |
 
 **Data**
 
@@ -432,6 +437,7 @@ Actor-initiated. A person runs `stateous token cancel`, or a program calls `Clie
 | success | Ledger: `event_dropped` (a paused token), `task_cancelled`, `cancelled`. HTTP 200 with the token. A child: `cancelled` with a `reason`. |
 | an ended token | HTTP 409, `token_not_active`. |
 | a child token | HTTP 409, `child_token`. |
+| no such token | HTTP 404, `token_not_found`. |
 
 **Data**
 
@@ -506,6 +512,8 @@ Actor-initiated. A person runs `stateous supervise FOLDER`, or `stateous serve -
 | On | Emitted |
 |---|---|
 | success | Log: `build-box-1 serves draft, review; the control plane is http://127.0.0.1:8080`. |
+| the control plane cannot be reached | Log: `cannot reach the control plane at <url> (...); trying again in 1s`, then 2, 4, 8, 16 and 30 seconds. The supervisor claims no task until it gets an answer. |
+| the URL is not a Stateous control plane | stderr: `error: <url> did not answer as a Stateous control plane: ...`. Exit code 1. |
 | messages left | Log: `sending 2 message(s) left in the outbox`, then one line for each report. |
 | a contract for a different graph | stderr: `error: ... is for another version of the workflow ...: run stateous init supervisor ... again`. Exit code 1. |
 | a second supervisor on the folder | stderr: `error: another supervisor runs on <folder> now: stop it, or use another folder`. Exit code 1. |

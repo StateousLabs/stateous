@@ -3,7 +3,11 @@ names them."""
 
 from __future__ import annotations
 
+import re
+
 import pytest
+
+from stateous.control.store.tables import Base
 
 from .pages import page, section
 
@@ -54,3 +58,19 @@ def test_the_data_page_names_every_table_and_the_outbox() -> None:
         assert f"`{table}`" in text, table
     assert "outbox.db" in text
     assert "```mermaid" in text
+
+
+ENTITY = re.compile(r"^    (\w+) \{\n(.*?)^    \}", re.MULTILINE | re.DOTALL)
+"""An entity of the erDiagram on `inside/data.md`, with its column lines."""
+
+
+def test_the_data_diagram_has_the_columns_of_each_table() -> None:
+    shown = {
+        name: [line.split()[1] for line in body.strip().splitlines()]
+        for name, body in ENTITY.findall(page("inside/data.md"))
+    }
+    real = {name: list(table.columns.keys()) for name, table in Base.metadata.tables.items()}
+
+    assert set(real) <= set(shown), set(real) - set(shown)
+    for name, columns in real.items():
+        assert sorted(shown[name]) == sorted(columns), name

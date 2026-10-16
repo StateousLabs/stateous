@@ -9,12 +9,14 @@ The README and the package lead to the site, and no tracked file points to the o
 from __future__ import annotations
 
 import ast
+import os
 import re
 import shlex
 import subprocess
 from pathlib import Path
 from typing import cast
 
+import pytest
 import yaml
 from typer.core import TyperGroup
 
@@ -24,6 +26,7 @@ from .pages import (
     DOCS,
     MOST_WORDS,
     PRIVATE,
+    PRIVATE_FILE,
     README,
     ROOT,
     Command,
@@ -31,6 +34,7 @@ from .pages import (
     cli,
     command_lines,
     options,
+    private_words,
     read,
     sentences,
     site_pages,
@@ -46,8 +50,8 @@ DIAGRAM_TYPES = (
     "erDiagram",
     "classDiagram",
 )
-BUILT_PRIVATE = ("design", "phd", "PHD_ANSWERS", "superpowers", "guide")
-"""Parts of file names that the built site must not have."""
+OLD_GUIDE = "guide"
+"""The old guide is not a page of the site."""
 SITE = "https://stateouslabs.github.io/stateous/"
 REPOSITORY = "https://github.com/StateousLabs/stateous"
 """PyPI shows the README, so its links are absolute: a relative link breaks there."""
@@ -80,24 +84,55 @@ def test_every_page_is_in_the_menu() -> None:
 
 def test_no_page_names_a_private_document() -> None:
     for path in [*site_pages(), README]:
-        text = read(path)
-        for word in PRIVATE:
-            assert word not in text, f"{path.name} names {word!r}"
+        assert private_words(read(path)) == [], path.name
 
 
-def test_the_built_site_has_no_private_document(tmp_path: Path) -> None:
-    site = tmp_path / "site"
+def test_no_tracked_file_names_a_private_document() -> None:
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True
+    )
+    tracked = [ROOT / name for name in listed.stdout.split("\0") if name]
+    assert ROOT / "src" / "stateous" / "__init__.py" in tracked
+    for path in tracked:
+        if path.resolve() == PRIVATE_FILE or not path.is_file():
+            continue
+        text = path.read_bytes().decode("utf-8", errors="replace")
+        assert private_words(text) == [], path.relative_to(ROOT).as_posix()
+
+
+@pytest.fixture(scope="module")
+def site(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The site, built once with `--strict` for the tests of this module."""
+    folder = tmp_path_factory.mktemp("built") / "site"
     built = subprocess.run(
         ["uv", "run", "--group", "docs", "mkdocs", "build", "--strict", "--quiet",
-         "--site-dir", str(site)],
+         "--site-dir", str(folder)],
         cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace", timeout=300,
-        check=False,
+        check=False, env={**os.environ, "NO_MKDOCS_2_WARNING": "1"},
     )  # fmt: skip
-
     assert built.returncode == 0, built.stdout + built.stderr
+    return folder
+
+
+def test_the_python_reference_hides_how_the_supervisor_makes_ctx(site: Path) -> None:
+    html = read(site / "reference" / "python" / "index.html")
+    start = html.index('id="stateous.Context"')
+    context = html[start : html.index('id="stateous.StateRef"', start)]
+
+    assert "schedule" in context
+    for internal in ("save_memory", "grant"):
+        assert internal not in context, internal
+
+
+def test_the_built_site_has_no_private_document(site: Path) -> None:
     assert (site / "index.html").is_file()
-    for name in BUILT_PRIVATE:
-        assert not list(site.rglob(f"*{name}*")), name
+    assert (site / "reference" / "python" / "index.html").is_file()
+    stems = [word.removesuffix(".md").lower() for word in PRIVATE] + [OLD_GUIDE]
+    for path in site.rglob("*"):
+        name = path.relative_to(site).as_posix().lower()
+        assert not [stem for stem in stems if stem in name], name
+        if path.suffix in {".html", ".json"}:
+            assert private_words(read(path)) == [], name
 
 
 def test_sentences_are_short() -> None:

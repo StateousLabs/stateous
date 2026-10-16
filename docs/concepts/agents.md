@@ -18,7 +18,7 @@ Stateous and PHD share this work. PHD runs the agent and checks its answer. Stat
 | Keep the task's lease alive while the agent runs | The supervisor. It sends heartbeats for each task whose routine still runs. |
 | Stop the agent when the token leaves the state, or is cancelled | The supervisor cancels the routine. PHD's `async with … run(...)` block stops the run when it ends. |
 | Choose the outcome | The agent. PHD's `output_schema` is `states.X.outcome_schema()`, so the agent's answer names one allowed event and its payload. |
-| Check the outcome | PHD checks the answer against the schema. `states.X.outcome(...)` makes the event, and the control plane checks it again. |
+| Check the outcome | PHD checks the answer against the schema. A mismatch is a failed run, so a failed attempt. `states.X.outcome(...)` makes the event, and the control plane checks it again. |
 | See that an agent is stuck | PHD. `Spec.idle_timeout_s` stops a run that sends no event for that long. |
 | Show progress | The routine gives PHD's events to `ctx.note(...)`. |
 | Keep the session for the next attempt | The routine, with `ctx.memory`. |
@@ -64,7 +64,7 @@ pip install "stateous[phd]"     # or: uv add "stateous[phd]"
 
 From a copy of the Stateous repository, use `uv add --editable path/to/stateous --extra phd`.
 
-Without PHD, the supervisor cannot import a routine that imports `phd`, and it does not start.
+Without PHD, the supervisor cannot import a routine that imports `phd`, and it does not start. Then remove that routine, and report its state from outside, as [Try it on one computer](../how-to/run-supervisors.md#try-it-on-one-computer) shows for `coding`.
 
 PHD needs a stack and credentials for each run. `phd.Stack.load("stacks/dev")` loads the agent's stack folder: its identity, skills and tools. The path is relative to the folder where the supervisor runs. `phd.Credentials.from_host("claude")` uses the login of the supervisor's computer. The PHD documentation tells how to write a stack.
 
@@ -82,13 +82,13 @@ PHD needs a stack and credentials for each run. `phd.Stack.load("stacks/dev")` l
 
 The routine keeps the session id in `ctx.memory`, as soon as the harness reports it. The memory is saved at once, so a crash keeps it. The next attempt gives the session id to `run(...)`, and the agent continues its session.
 
-With the error kind `"session"`, PHD cannot resume the session. The routine then deletes the session id from `ctx.memory`. Thus the retry starts a new session. With another kind, the retry resumes the same session.
+With the error kind `"session"`, PHD cannot resume the session. The routine then deletes the session id from `ctx.memory`. So the retry starts a new session. With another kind, the retry resumes the same session.
 
-The running agents of a supervisor are its child processes. PHD ties each agent to its caller, so the agents stop when the supervisor crashes. On Windows, a Job Object stops them. On Linux and macOS, a small reaper process stops the agent's process group. If PHD cannot start this protection, the run continues without it, and `result.warnings` says so.
+The running agents of a supervisor are its child processes. PHD ties each agent to its caller, so the agents stop when the supervisor crashes. On Windows, a Job Object stops them. On Linux and macOS, a small reaper process stops the agent's process group. If PHD cannot start this protection, the run continues without it, and `result.warnings` says so. Then the agent can continue after a crash of the supervisor.
 
 ### Free-form payloads
 
-Codex uses OpenAI's strict structured outputs. These cannot return an object that has no listed properties. Thus a payload model with a `dict[str, Any]` field cannot run on Codex. PHD refuses such a run before it starts (`UnsupportedFeature`). Claude and OpenCode accept it.
+Codex uses OpenAI's strict structured outputs. These cannot return an object that has no listed properties. So a payload model with a `dict[str, Any]` field cannot run on Codex. PHD refuses such a run before it starts (`UnsupportedFeature`). Claude and OpenCode accept it.
 
 ## Example
 

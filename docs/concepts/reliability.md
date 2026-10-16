@@ -77,7 +77,7 @@ sequenceDiagram
     CP->>CP: retries are left: queue task 1 again
     Note over S: the supervisor starts again
     O->>CP: send what is left in the outbox, in order
-    CP-->>O: accepted, or refused (attempt_over): dropped
+    CP-->>O: accepted, or refused (task_not_held or attempt_over): dropped
     S->>CP: claim
     CP-->>S: task 1, attempt 2, with the saved memory
 ```
