@@ -135,6 +135,34 @@ def test_the_built_site_has_no_private_document(site: Path) -> None:
             assert private_words(read(path)) == [], name
 
 
+ASSET_TAGS = re.compile(
+    r"<link\b[^>]*\brel=[\"']?stylesheet[^>]*>|<script\b[^>]*\bsrc=[^>]*>", re.IGNORECASE
+)
+ASSET_URL = re.compile(r"\b(?:href|src)=[\"']([^\"']+)[\"']", re.IGNORECASE)
+
+
+def test_the_built_site_has_the_theme_and_the_search(site: Path) -> None:
+    assert list(site.glob("assets/stylesheets/main.*.css"))
+    assert list(site.glob("assets/javascripts/bundle.*.js"))
+    assert (site / "search" / "search_index.json").is_file()
+
+
+def test_every_page_references_only_files_that_exist(site: Path) -> None:
+    pages = list(site.rglob("*.html"))
+    assert pages
+    for page in pages:
+        for tag in ASSET_TAGS.findall(read(page)):
+            for url in ASSET_URL.findall(tag):
+                if re.match(r"([a-z][a-z0-9+.-]*:|//|#)", url, re.IGNORECASE):
+                    continue
+                path = url.split("?", 1)[0].split("#", 1)[0]
+                if path.startswith("/stateous/"):  # the 404 page: a path from the site root
+                    target = site / path.removeprefix("/stateous/")
+                else:
+                    target = (page.parent / path).resolve()
+                assert target.is_file(), f"{page.relative_to(site).as_posix()}: {url}"
+
+
 def test_sentences_are_short() -> None:
     for path in [*site_pages(), README]:
         for sentence in sentences(read(path)):

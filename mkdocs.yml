@@ -8,6 +8,7 @@ docs_dir: docs
 site_dir: site
 
 # Only these pages are published: index.md, getting-started.md and four folders.
+# The rule also applies to the files of the theme, so it lets the assets/ folder in.
 # Each other file under docs/ stays local.
 exclude_docs: |
   /*.md
@@ -18,6 +19,7 @@ exclude_docs: |
   !/how-to/
   !/inside/
   !/reference/
+  !/assets/
 
 theme:
   name: material
