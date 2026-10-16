@@ -2,7 +2,8 @@
 
 GitHub Actions does not run for this repository, so this script is the gate
 before a commit. It runs the lint rules, the format check, the types, the import
-contracts and the tests. It stops at the first check that fails, and names it.
+contracts, the build of the documentation site and the tests. It stops at the first
+check that fails, and names it.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("format", ["uv", "run", "ruff", "format", "--check", "."]),
     ("types", ["uv", "run", "pyright"]),
     ("imports", ["uv", "run", "lint-imports"]),
+    ("docs", ["uv", "run", "--group", "docs", "mkdocs", "build", "--strict", "--quiet"]),
     ("tests", ["uv", "run", "pytest"]),
 ]
 
