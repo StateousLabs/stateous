@@ -34,3 +34,5 @@ The control plane keeps its data in SQLite or in Postgres.
 ## Where to start
 
 - [Getting started](getting-started.md): build and run a workflow on one computer.
+- [The model](concepts/model.md): the words of Stateous, each defined one time.
+- [The two sides](concepts/two-sides.md): the control plane and the supervisor, and what crosses between them.

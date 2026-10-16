@@ -217,5 +217,5 @@ The control plane keeps the token, and it chooses each next state. The superviso
 
 ## Next
 
-- Concepts: the words of Stateous, and the two sides, the control plane and the supervisor.
+- Concepts: [the words of Stateous](concepts/model.md), and [the two sides](concepts/two-sides.md), the control plane and the supervisor.
 - How-to guides: change the starter into a workflow of your own.

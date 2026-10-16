@@ -77,3 +77,9 @@ validation:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Concepts:
+      - The model: concepts/model.md
+      - The two sides: concepts/two-sides.md
+      - Tasks and routines: concepts/tasks-and-routines.md
+      - Guards: concepts/guards.md
+      - Timers and timeouts: concepts/timers.md
