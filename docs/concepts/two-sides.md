@@ -114,3 +114,4 @@ The routine of `testing` knows that it can emit `passed` or `failed`. It does no
 - [The model](model.md): the words [control plane](model.md#control-plane), [supervisor](model.md#supervisor) and [contract](model.md#contract).
 - [Tasks and routines](tasks-and-routines.md): what crosses the network for each task.
 - [Getting started](../getting-started.md): both sides on one computer.
+- [Reliability](reliability.md): what keeps the two sides safe when a network or a computer fails.

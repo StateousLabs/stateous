@@ -114,15 +114,15 @@ One try of a task. The first claim is attempt 1. When an attempt fails and the s
 
 ### note
 
-One line of progress that a routine writes to the token's history with `ctx.note(text)`.
+One line of progress that a routine writes to the token's history with `ctx.note(text)`. See [Context, notes and memory](context-notes-memory.md).
 
 ### memory
 
-The routine's own key-value store, for one token and one state: `ctx.memory`. It is saved at once, so it stays after a crash.
+The routine's own key-value store, for one token and one state: `ctx.memory`. It is saved at once, so it stays after a crash. See [Context, notes and memory](context-notes-memory.md).
 
 ### parallel state
 
-A state whose work is other workflows, which run at the same time. It has no task and no routine.
+A state whose work is other workflows, which run at the same time. It has no task and no routine. See [Parallel and nested work](parallel.md).
 
 ### child token
 
@@ -130,11 +130,11 @@ A token that a parallel state starts, one for each workflow of the state. Its pa
 
 ### outbox
 
-The supervisor's local file of messages that the control plane did not answer yet: `.stateous/outbox.db`.
+The supervisor's local file of messages that the control plane did not answer yet: `.stateous/outbox.db`. See [Reliability](reliability.md).
 
 ### idempotency key
 
-A key that you give with an event from outside. A second event with the same key applies nothing, and gets the answer "duplicate".
+A key that you give with an event from outside. A second event with the same key applies nothing, and gets the answer "duplicate". See [Reliability](reliability.md).
 
 ## Example
 
@@ -210,3 +210,4 @@ stateDiagram-v2
 - [The two sides](two-sides.md): the control plane and the supervisor.
 - [Tasks and routines](tasks-and-routines.md): how the work of a state is done.
 - [Guards](guards.md) and [Timers and timeouts](timers.md).
+- [Pause, resume and cancel](pause-resume-cancel.md): the statuses of a token.

@@ -14,11 +14,13 @@ flowchart LR
 
 ## What it guarantees
 
+[Reliability](concepts/reliability.md) tells how each guarantee works, and what is not guaranteed.
+
 - **No lost tasks.** A change to a token, its tasks and its timers is one transaction in one database.
 - **A supervisor that stops does not stop a token.** A claimed task has a lease. When the lease ends, the control plane counts a failed attempt. The task runs again if it has retries left; if not, the token gets the event `error`.
 - **A duplicate event applies one time.** A second event with the same idempotency key gets the answer "duplicate".
 - **A report survives a network failure.** The supervisor keeps each report in a local outbox until the control plane accepts it or refuses it.
-- **A paused token does not move.** Its events wait, and on resume they apply in order.
+- **A paused token does not move.** Its events wait, and on resume they apply in order. See [Pause, resume and cancel](concepts/pause-resume-cancel.md).
 
 ## Install
 
@@ -36,3 +38,4 @@ The control plane keeps its data in SQLite or in Postgres.
 - [Getting started](getting-started.md): build and run a workflow on one computer.
 - [The model](concepts/model.md): the words of Stateous, each defined one time.
 - [The two sides](concepts/two-sides.md): the control plane and the supervisor, and what crosses between them.
+- [Agents, with PHD](concepts/agents.md): run a coding agent in a routine.

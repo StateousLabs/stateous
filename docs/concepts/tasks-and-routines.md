@@ -128,3 +128,5 @@ build-box-2 took task 1 (attempt 2)
 - [The model](model.md): the words [task](model.md#task), [routine](model.md#routine), [lease](model.md#lease) and [attempt](model.md#attempt).
 - [The two sides](two-sides.md): what crosses the network.
 - [Timers and timeouts](timers.md): a state's `timeout=` covers all attempts.
+- [Context, notes and memory](context-notes-memory.md): every field of `ctx`.
+- [Reliability](reliability.md): leases, the outbox, and what happens when a supervisor stops.

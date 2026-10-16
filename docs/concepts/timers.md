@@ -27,7 +27,7 @@ A timer is tied to one visit of the token to one state:
 
 - When the token leaves the state, its timers stop. A timer of an earlier visit never fires.
 - A retry stops the timers that the failed attempt set, because the routine runs again. The state's timeout continues: it covers all attempts.
-- A paused token's timers stop. On resume, they get the paused time back.
+- A paused token's timers stop. On resume, they get the paused time back. See [Pause, resume and cancel](pause-resume-cancel.md).
 
 When no transition takes a timer's event, two different things occur:
 

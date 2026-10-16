@@ -30,7 +30,7 @@ Some rules of the language:
 - A value that is not set reads as `null`. A comparison of `null` with a number is false, not an error.
 - `count('event')` counts the event over the whole life of the token, not for one visit.
 - A guard on a transition from `START` reads only the context. A new token has no event yet, so it has no payload and no count.
-- A guard on `joined` can also use `branches.all(...)` and `branches.any(...)`.
+- A guard on `joined` can also use `branches.all(...)` and `branches.any(...)`. See [Parallel and nested work](parallel.md).
 
 When an event comes, the control plane looks at the transitions from the token's state on that event:
 

@@ -83,3 +83,8 @@ nav:
       - Tasks and routines: concepts/tasks-and-routines.md
       - Guards: concepts/guards.md
       - Timers and timeouts: concepts/timers.md
+      - Context, notes and memory: concepts/context-notes-memory.md
+      - Pause, resume and cancel: concepts/pause-resume-cancel.md
+      - Parallel and nested work: concepts/parallel.md
+      - Reliability: concepts/reliability.md
+      - Agents, with PHD: concepts/agents.md
