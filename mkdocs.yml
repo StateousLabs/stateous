@@ -67,6 +67,7 @@ plugins:
             signature_crossrefs: false
             filters: ["!^_"]
             heading_level: 3
+            docstring_style: google
 
 validation:
   omitted_files: warn
@@ -102,5 +103,6 @@ nav:
   - Reference:
       - The commands: reference/cli.md
       - The HTTP API: reference/http.md
+      - The Python API: reference/python.md
       - The files: reference/files.md
       - Limits: reference/limits.md

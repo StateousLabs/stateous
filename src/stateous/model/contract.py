@@ -23,42 +23,66 @@ _DEFS = "#/$defs/"
 
 
 class OutcomeError(ValueError):
-    """An outcome does not fit its state: an event the state may not emit, or a
-    payload that does not fit the event's model."""
+    """An outcome does not fit its state. The state cannot emit the event, or the
+    payload does not agree with the event's model. `StateRef.outcome()` raises it."""
 
 
 @dataclass(frozen=True)
 class StateRef(Generic[O]):
-    """A state as a supervisor sees it. The generated `contract.py` has one per
-    state, as `states.<name>`, for `@on_state`.
+    """A state as a supervisor sees it. The generated `contract.py` has one for
+    each state, as `states.<name>`. Give it to `@on_state`.
 
-    The type argument is the union of the state's events. Pyright gets it from
-    `emits`: `StateRef("coding", emits=(done, stuck))` is a `StateRef[done | stuck]`,
-    so `outcome()` gives a `done | stuck`."""
+    You do not write a `StateRef`: `stateous init supervisor` writes them. The
+    type argument is the union of the state's events. For example,
+    `StateRef("coding", emits=(done, stuck))` is a `StateRef[done | stuck]`. So
+    `outcome()` returns a `done | stuck`."""
 
     name: str
     """The state's name."""
     emits: tuple[type[O], ...] = ()
-    """The events the state may be left on: those it has transitions for."""
+    """The events that the state can emit: the events of its transitions."""
 
     def may_emit(self, occurrence: Occurrence[Any]) -> bool:
-        """Whether the state may be left on `occurrence`."""
+        """Tell if the state can emit an occurrence.
+
+        Args:
+            occurrence: An occurrence of an event.
+
+        Returns:
+            True when the event of `occurrence` is one of `emits`.
+        """
         return any(type(occurrence) is event for event in self.emits)
 
     def outcome_schema(self) -> dict[str, Any]:
-        """The events this state may emit, with their payloads, as one JSON schema.
-        An agent's final answer that fits it names one event and its payload.
-        `OutcomeError` for a state that may emit no event: no answer fits."""
+        """The events that this state can emit, with their payloads, as one JSON
+        Schema. Give it to an agent as the form of its final answer.
+
+        Returns:
+            A JSON Schema with one branch for each event. An answer that agrees
+                with it names one event and its payload.
+
+        Raises:
+            OutcomeError: The state can emit no event, so no answer agrees.
+        """
         if not self.emits:
             raise OutcomeError(f"{self._allowed()}, so no outcome schema fits it")
         return {"oneOf": [_branch(event) for event in self.emits]}
 
     def outcome(self, data: Any) -> O:
-        """The occurrence that `data` names: `{"event": ..., "payload": ...}`.
-        `OutcomeError` when `data` does not fit `outcome_schema()`.
+        """Make the occurrence that an agent's answer names.
 
-        The payload is validated as pydantic validates JSON, not in strict mode:
-        an agent sends JSON, so the string "3" fits an `int` field."""
+        Pydantic checks the payload as JSON, not in strict mode. So the string
+        `"3"` agrees with an `int` field.
+
+        Args:
+            data: The answer: `{"event": ..., "payload": ...}`.
+
+        Returns:
+            The occurrence of the event, with its payload.
+
+        Raises:
+            OutcomeError: `data` does not agree with `outcome_schema()`.
+        """
         allowed = self._allowed()
         if not isinstance(data, dict):
             raise OutcomeError(
@@ -146,7 +170,24 @@ def _resolve(node: Any, definitions: dict[str, Any], path: tuple[str, ...]) -> A
 
 
 def on_state(state: StateRef[Any]) -> Callable[[F], F]:
-    """Mark a function as the routine for `state`: it runs when the state has a task."""
+    """Mark a function as the routine of a state. The supervisor runs it for each
+    task of the state.
+
+    ```python
+    @on_state(states.testing)
+    def testing(ctx: TicketContext) -> events.passed | events.failed:
+        return events.passed(Tests(passed=12, failed=0))
+    ```
+
+    Args:
+        state: The state, from `contract.states`.
+
+    Returns:
+        A decorator. It returns the function unchanged, with a mark.
+
+    Raises:
+        TypeError: `state` is not a `StateRef`.
+    """
     if not isinstance(state, StateRef):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError(f"@on_state takes a state from contract.states, not {state!r}")
 

@@ -97,31 +97,47 @@ class Transition:
 _RESERVED = {name: Event(name, payload=None, workflow=None) for name in RESERVED_EVENTS}
 
 START = State("__start__", workflow="")
-"""Where every token begins. Its transitions take no `on=`: the engine leaves it at
-once, on `__started__`, and chooses among them by their guards on the starting
-context."""
+"""Where every token begins. Import it; do not declare it.
+
+A transition from START takes no `on=`. The control plane leaves START at once, on
+`__started__`. When START has more than one transition, their guards on the starting
+context choose one."""
 
 END = State("__end__", workflow="")
-"""Entering it completes the token. No task is queued there, and nothing leaves it."""
+"""Where a token completes. Import it; do not declare it.
+
+A token that enters END is `completed`. END has no task, and no transition leaves it."""
 
 
 class Workflow:
-    """A process: states, the events that can happen, and where each one leads.
+    """A process: its states, its events, and the transitions between them.
 
-    Written in `flow.py`. `stateous compile` turns it into the graph file that a
-    control plane serves:
+    You write it in `flow.py`. `stateous compile` checks it and writes the graph
+    file that a control plane serves. Each method refuses a mistake at once, with
+    `DefinitionError`.
 
-        flow = Workflow("sdlc", context=Ticket)
-        testing = flow.state("testing", timeout="1h")
-        failed = flow.event("failed", payload=Tests)
-        flow.transition(testing, coding, on=failed, when="count('failed') < 3")
+    ```python
+    flow = Workflow("sdlc", context=Ticket)
+    coding = flow.state("coding", timeout="6h", retries=2)
+    testing = flow.state("testing", timeout="1h")
+    failed = flow.event("failed", payload=Tests)
+    flow.transition(testing, coding, on=failed, when="count('failed') < 3")
+    ```
     """
 
     def __init__(self, name: str, *, context: type[BaseModel] | None = None) -> None:
-        """Args:
-        name: The workflow's name. It names the graph file.
-        context: The model of each token's context: what a token starts with, and
-            what its routines read and write as `ctx["key"]`. None: any object.
+        """Make an empty workflow.
+
+        Args:
+            name: The workflow's name: `a-z`, `0-9`, `_` and `-`, with a letter
+                first, at most 64 characters. It is also the name of the graph file.
+            context: The Pydantic model of each token's context. A token starts with
+                it, and its routines read and write it as `ctx["key"]`. None: any
+                JSON object.
+
+        Raises:
+            DefinitionError: The name is not valid, or `context` is not a Pydantic
+                model class.
         """
         _check_name("workflow", name)
         _check_model(f"workflow {name!r}: context", context)
@@ -144,28 +160,35 @@ class Workflow:
         join: str = "all",
         inputs: Sequence[str] = (),
     ) -> State:
-        """Declare a state. Entering it creates one task. With `parallel`, it is a
-        parallel state: entering it starts one child token for each workflow, and it
-        has no task (see the guide, "Nested and parallel work").
+        """Add a state to the workflow.
+
+        When a token enters the state, the control plane makes one task. With
+        `parallel`, it is a parallel state: it starts one child token for each
+        workflow, and it has no task. See the docs, Concepts > Parallel and nested
+        work.
 
         Args:
-            name: Unique in the workflow.
-            timeout: After this long in the state, the token gets `timeout`:
-                `30s`, `10m`, `6h`, `1d`. None: no limit.
-            retries: How many more tries a failed task gets. Then the token gets
-                `error`. A parallel state has no task, so it has no retries.
-            parallel: The child workflows. When the join is met, the token gets
-                `joined`.
-            join: `"all"`: wait until each child has ended. `"any"`: go on when the
-                first child ends; the others are cancelled.
-            inputs: The context keys that are copied into each child's starting
-                context. They must give each field that a child's context requires.
+            name: The state's name: `a-z`, `0-9`, `_` and `-`, with a letter first.
+                It is unique in the workflow.
+            timeout: How long a token can stay in the state, for example `"30s"`,
+                `"10m"`, `"6h"` or `"1d"`. Then the token gets the event `timeout`.
+                None: no limit.
+            retries: How many more times a failed task runs. Then the token gets
+                the event `error`. A parallel state has no task, so no retries.
+            parallel: The child workflows of a parallel state. When the join is
+                met, the token gets the event `joined`.
+            join: `"all"`: wait until each child ends. `"any"`: continue when the
+                first child ends, and cancel the others.
+            inputs: The context keys that each child's context starts with. They
+                must give each field that a child's context requires.
+
+        Returns:
+            The state, to use in transitions.
 
         Raises:
-            DefinitionError: The name is not valid, taken, or Stateous's own; the
-                timeout is not a duration; retries is not a whole number, 0 or more;
-                `parallel`, `join` or `inputs` breaks a rule of a parallel state
-                (see the guide, "Nested and parallel work").
+            DefinitionError: The name is not valid, is used, or is Stateous's own.
+                Or the timeout is not a duration, `retries` is not 0 or more, or
+                `parallel`, `join` or `inputs` breaks a rule of a parallel state.
         """
         if name in (START.name, END.name):
             raise DefinitionError(
@@ -234,16 +257,22 @@ class Workflow:
         return children
 
     def event(self, name: str, *, payload: type[BaseModel] | None = None) -> Event:
-        """Declare an event: an outcome, the only thing that moves a token.
+        """Add an event to the workflow. An event is an outcome: only an event
+        moves a token.
 
         Args:
-            name: Unique in the workflow, and not one of Stateous's own events
-                (`timeout`, `error`, `joined`), which transitions use by name.
-            payload: The model of the data each occurrence carries. None: nothing.
+            name: The event's name, unique in the workflow. Do not declare
+                Stateous's own events, `timeout`, `error` and `joined`: a
+                transition uses them by name.
+            payload: The Pydantic model of the data that the event carries. None:
+                no data.
+
+        Returns:
+            The event, to use in transitions.
 
         Raises:
-            DefinitionError: The name is not valid, taken, or Stateous's own; the
-                payload is not a pydantic model class.
+            DefinitionError: The name is not valid, is used, or is Stateous's own.
+                Or the payload is not a Pydantic model class.
         """
         if name in _RESERVED:
             raise DefinitionError(
@@ -267,24 +296,29 @@ class Workflow:
         when: str | None = None,
         otherwise: bool = False,
     ) -> Transition:
-        """Declare where `on` leads from `source`. The events a state may emit
-        follow from the transitions out of it.
+        """Add a transition: the event `on` moves a token from `source` to
+        `target`. The events that a state can emit are the events of its
+        transitions.
 
         Args:
-            source: The state the token is in, or `START`.
-            target: The state the token moves to, or `END`.
-            on: The event, or the name of one of Stateous's own: `"timeout"`,
-                `"error"`, `"joined"`. Left out from `START`.
-            when: A guard over `ctx['key']`, `payload.field` and `count('event')`.
-                Guards on one state and event must never overlap; compiling checks.
-            otherwise: The fallback, taken when no guard on the same state and
-                event holds. It takes no `when`.
+            source: The state that the token is in, or `START`.
+            target: The state that the token moves to, or `END`.
+            on: The event, or the name of one of Stateous's own events:
+                `"timeout"`, `"error"` or `"joined"`. Leave it out from `START`.
+            when: A guard that reads `ctx['key']`, `payload.field` and
+                `count('event')`. Two guards on one state and event must not
+                overlap: `stateous compile` checks this.
+            otherwise: True for the fallback: the control plane takes it when no
+                guard on the same state and event is true. It has no `when`.
+
+        Returns:
+            The transition.
 
         Raises:
-            DefinitionError: A state is not this workflow's; the event is missing
-                or not allowed here; the guard does not parse or reads a field the
-                payload does not have; the transition is ambiguous with one
-                already declared.
+            DefinitionError: A state is not of this workflow, or the event is
+                missing or not allowed here. Or the guard does not parse, or it
+                reads a field that the payload does not have. Or two transitions
+                have no guard on the same state and event.
         """
         source, target = self._own(source), self._own(target)
         event = self._taken_on(source, target, on)

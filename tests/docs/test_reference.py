@@ -3,10 +3,13 @@ the routes and the refusal codes. Each file and each limit has its place."""
 
 from __future__ import annotations
 
+import inspect
 import re
 
 from typer.core import TyperGroup
 
+import stateous
+import stateous.client
 from stateous.control import engine
 
 from .pages import ROOT, cli, commands, options, page, section
@@ -109,3 +112,24 @@ def test_the_limits_page_has_both_parts() -> None:
 
     assert "## What Stateous does not do" in text
     assert "## Known limits" in text
+
+
+def test_the_python_reference_covers_every_public_name() -> None:
+    text = page("reference/python.md")
+    for name in stateous.__all__:
+        assert f"::: stateous.{name}\n" in text, name
+    for name in stateous.client.__all__:
+        if name != "Client":
+            assert f"::: stateous.client.{name}\n" in text, name
+
+
+def test_every_public_name_has_a_docstring() -> None:
+    for name in stateous.__all__:
+        value: object = getattr(stateous, name)
+        if not (inspect.isclass(value) or inspect.isfunction(value)):
+            continue
+        assert inspect.getdoc(value), name
+        members: dict[str, object] = dict(vars(value)) if inspect.isclass(value) else {}
+        for member_name, member in members.items():
+            if not member_name.startswith("_") and inspect.isfunction(member):
+                assert inspect.getdoc(member), f"{name}.{member_name}"

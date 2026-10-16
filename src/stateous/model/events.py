@@ -15,10 +15,17 @@ P = TypeVar("P", bound=BaseModel | None)
 
 
 class Occurrence(Generic[P]):
-    """One occurrence of an event. Subclasses set `name` to the event's name."""
+    """One occurrence of an event, with its payload. A routine returns one.
+
+    The generated contract has one subclass for each event, in the class `events`.
+    The type argument is the payload model, or `None`. For example,
+    `events.failed(Tests(passed=3, failed=1))` is an `Occurrence[Tests]`, and
+    `events.done()` is an `Occurrence[None]`."""
 
     name: ClassVar[str]
+    """The event's name. Each subclass sets it."""
     payload: P
+    """The payload, or None for an event without a payload."""
 
     @overload
     def __init__(self: Occurrence[None]) -> None: ...
@@ -29,7 +36,12 @@ class Occurrence(Generic[P]):
 
     @classmethod
     def payload_model(cls) -> type[BaseModel] | None:
-        """The payload's model, read from the class's `Occurrence[Model]` base."""
+        """The payload model of the event.
+
+        Returns:
+            The model of the class's `Occurrence[Model]` base, or None when the
+                event has no payload.
+        """
         for klass in cls.__mro__:
             bases: tuple[Any, ...] = getattr(klass, "__orig_bases__", ())
             for base in bases:

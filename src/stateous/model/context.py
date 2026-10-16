@@ -73,12 +73,24 @@ class Memory(MutableMapping[str, Any]):
 
 
 class Context(Generic[C]):
-    """A token's context `C`, as a routine sees it.
+    """What a routine gets as `ctx`: the token's context `C`, and the task's facts.
 
-    A routine gets one as `ctx`, typed by the generated contract (e.g.
-    `TicketContext = Context[Ticket]`). `ctx["key"]` reads the token's context, and
-    `ctx["key"] = value` writes it; the control plane checks the writes against the
-    workflow's schema and saves them with the outcome."""
+    The generated contract gives the type, for example
+    `TicketContext = Context[Ticket]`. `ctx["key"]` reads a copy of a context
+    value. `ctx["key"] = value` writes it. The control plane checks the writes
+    against the context model, and saves them with the outcome.
+
+    A change in place, such as `ctx["items"].append(2)`, changes nothing. Write
+    the new value with `ctx["items"] = ...`.
+
+    ```python
+    @on_state(states.coding)
+    async def coding(ctx: TicketContext) -> events.done | events.stuck:
+        ctx.note(f"coding {ctx['repo']}, attempt {ctx.attempt}")
+        ctx["branch"] = "fix-1"
+        return events.done()
+    ```
+    """
 
     def __init__(
         self,
@@ -87,6 +99,7 @@ class Context(Generic[C]):
         save_memory: Callable[[str, Any], None],
         note: Callable[[str], None],
     ) -> None:
+        """The supervisor makes the `ctx` of each task. A routine does not make one."""
         self.token: str = grant.token
         """The token's id."""
         self.task: int = grant.task
@@ -98,7 +111,9 @@ class Context(Generic[C]):
         self.entered_by: EventRecord | None = grant.entered_by
         """The event that brought the token here, with its payload."""
         self.memory: Memory = Memory(grant.memory, save_memory)
-        """The routine's own memory, for this token and this state."""
+        """The routine's own memory, for this token and this state: a mapping of
+        keys to JSON values. Each change is saved at once. `del ctx.memory[key]`
+        deletes a key."""
         self._values: dict[str, Any] = dict(grant.context)
         self._writes: dict[str, Any] = {}
         self._schedules: list[Schedule] = []
@@ -115,12 +130,28 @@ class Context(Generic[C]):
         self._writes[key] = copy.deepcopy(kept)
 
     def get(self, key: str, default: Any = None) -> Any:
-        """A copy of the token's context value at `key`, or `default` if it is not set."""
+        """Read a context value, with a default.
+
+        Args:
+            key: The context key.
+            default: The value to return when the context has no `key`.
+
+        Returns:
+            A copy of the value at `key`, or `default`.
+        """
         return copy.deepcopy(self._values[key]) if key in self._values else default
 
     def note(self, text: str) -> None:
-        """One line of progress in the token's history, sent at once. Empty text (after
-        stripping) does nothing: no record, no send, no error."""
+        """Add one line of progress to the token's history. The supervisor sends it
+        at once.
+
+        Args:
+            text: The line. The spaces at its two ends are removed. Empty text does
+                nothing.
+
+        Raises:
+            ValueError: The text has more than 500 characters.
+        """
         line = text.strip()
         if not line:
             return
@@ -129,9 +160,21 @@ class Context(Generic[C]):
         self._note(line)
 
     def schedule(self, event: type[Occurrence[Any]] | Occurrence[Any], *, after: str) -> None:
-        """A timer: the clock fires `event` on this token `after` from now ('30s',
-        '10m', '6h', '1d'), if the token is still in this state. It is set when the
-        report is saved."""
+        """Set a timer. The clock fires `event` on this token after the time
+        `after`, if the token is still in this state.
+
+        The timer is set when the control plane saves the report.
+
+        Args:
+            event: The event: a class of `events` without a payload, or an
+                occurrence with its payload, for example `events.remind(note)`.
+            after: A duration from now, for example `"30s"`, `"10m"`, `"6h"` or
+                `"1d"`.
+
+        Raises:
+            ValueError: `after` is not a duration, or the event needs a payload and
+                `event` is a class.
+        """
         problem = duration_problem(after)
         if problem is not None:
             raise ValueError(problem)
@@ -148,11 +191,13 @@ class Context(Generic[C]):
         self._schedules.append(Schedule(event=name, payload=data, after=after))
 
     def writes(self) -> dict[str, Any]:
-        """The keys this routine set, with their values; sent with the report."""
+        """The context keys that this routine wrote, with their values. The
+        supervisor sends them with the report."""
         return copy.deepcopy(self._writes)
 
     def schedules(self) -> list[Schedule]:
-        """The timers this routine set; sent with the report."""
+        """The timers that this routine set. The supervisor sends them with the
+        report."""
         return list(self._schedules)
 
 

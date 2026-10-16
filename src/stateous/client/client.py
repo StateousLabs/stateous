@@ -23,20 +23,30 @@ from stateous.model.host import host_problem
 
 
 class ClientError(Exception):
-    """Something the control plane could not do, or could not be asked."""
+    """The base of every error of the client. The control plane could not do the
+    request, or the client could not send it. The message is one plain sentence."""
 
 
 class Unreachable(ClientError):
-    """The control plane did not answer."""
+    """The control plane did not answer: the network failed, or no server listens
+    at the URL."""
 
 
 class Refused(ClientError):
-    """The control plane answered no. `status` is the HTTP status, `message` is the
-    reason it gave, for people, and `code` is the stable code of the refusal
-    (see the guide, "The HTTP API"). `code` is None when the answer has no code, for
-    example an answer from a proxy."""
+    """The control plane refused the request.
+
+    Use `code` in a program, for example `attempt_over`. The codes are in the docs,
+    Reference > The HTTP API. `message` is for people, and it can change.
+
+    Attributes:
+        status: The HTTP status, for example 409.
+        message: The reason that the control plane gave, as one sentence.
+        code: The stable code of the refusal. None when the answer has no code,
+            for example an answer from a proxy.
+    """
 
     def __init__(self, status: int, message: str, *, url: str, code: str | None = None) -> None:
+        """The client makes it from the control plane's answer."""
         super().__init__(f"the control plane at {url} refused ({status}): {message}")
         self.status = status
         self.message = message
@@ -44,13 +54,35 @@ class Refused(ClientError):
 
 
 class NotFound(Refused):
-    """The control plane answered 404: no such token, task or path."""
+    """The control plane answered 404: no token, task or path has this name."""
 
 
 class Client:
-    """The control plane's HTTP API at one URL. Synchronous."""
+    """The control plane's HTTP API at one URL, for a program. Synchronous.
+
+    Each method sends one request, and returns the JSON answer. A failure raises
+    a `ClientError`. Use the client in a `with` block, or call `close()` at the
+    end.
+
+    ```python
+    from stateous import Client
+
+    with Client("http://127.0.0.1:8080") as client:
+        client.start("TICKET-1", {"repo": "acme/api"})
+        client.fire("TICKET-1", "done", key="gh-delivery-81231")
+    ```
+    """
 
     def __init__(self, url: str, *, timeout: float = 30.0) -> None:
+        """Make a client for one control plane.
+
+        Args:
+            url: The control plane's URL, for example `http://127.0.0.1:8080`.
+            timeout: How long to wait for each answer, in seconds.
+
+        Raises:
+            ClientError: `url` is not a valid URL.
+        """
         self.url = url.rstrip("/")
         try:
             http = httpx2.Client(base_url=self.url, timeout=timeout)
@@ -62,17 +94,45 @@ class Client:
         self._http = http
 
     def start(self, token: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Start a token. A token that exists is returned as it is."""
+        """Start a token. If the token exists, it is returned unchanged.
+
+        Args:
+            token: The token's id, for example `TICKET-1`.
+            context: The token's context. None: `{}`.
+
+        Returns:
+            The token.
+        """
         return self._object("POST", "/tokens", {"token": token, "context": context or {}})
 
     def get(self, token: str) -> dict[str, Any]:
+        """Read one token.
+
+        Args:
+            token: The token's id.
+
+        Returns:
+            The token: its state, status, visit, context and the time it entered
+                the state.
+
+        Raises:
+            NotFound: No token has this id.
+        """
         return self._object("GET", f"/tokens/{_segment(token)}")
 
     def tokens(
         self, *, status: str | None = None, parent: str | None = None, limit: int | None = None
     ) -> list[dict[str, Any]]:
-        """The tokens, the most recently moved first. With `parent`: its children only.
-        With `limit` (1 to 1000): at most that many; else at most 100."""
+        """List the tokens, the most recently moved first.
+
+        Args:
+            status: Only the tokens with this status, for example `"active"`.
+            parent: Only the children of this token.
+            limit: The most tokens to return: 1 to 1000. None: 100.
+
+        Returns:
+            The tokens.
+        """
         params: dict[str, str] = {}
         if status is not None:
             params["status"] = status
@@ -83,6 +143,17 @@ class Client:
         return self._list("GET", "/tokens", params=params)
 
     def history(self, token: str) -> list[dict[str, Any]]:
+        """Read the history of a token, in order.
+
+        Args:
+            token: The token's id.
+
+        Returns:
+            The entries: each has `seq`, `at`, `kind` and `data`.
+
+        Raises:
+            NotFound: No token has this id.
+        """
         return self._list("GET", f"/tokens/{_segment(token)}/history")
 
     def fire(
@@ -93,20 +164,61 @@ class Client:
         *,
         key: str | None = None,
     ) -> dict[str, Any]:
-        """Fire `event` on a token. The answer is the token; or, when `key` was used
-        before, `{"duplicate": True, "token": ...}`."""
+        """Fire an event on a token.
+
+        Args:
+            token: The token's id.
+            event: The event's name.
+            payload: The event's payload. None: no payload.
+            key: An idempotency key, from 1 to 256 characters. The same key fires
+                one time.
+
+        Returns:
+            The token after the event. When `key` was used before, the answer is
+                `{"duplicate": True, "token": ...}`, and nothing changes.
+
+        Raises:
+            Refused: The event cannot move the token, or the payload is not valid.
+        """
         headers = {} if key is None else {"Idempotency-Key": key}
         body = {} if payload is None else {"payload": payload}
         path = f"/tokens/{_segment(token)}/events/{_segment(event)}"
         return self._object("POST", path, body, headers=headers)
 
     def pause(self, token: str) -> dict[str, Any]:
+        """Pause an active token. Its events are held, its tasks wait, and its
+        timers stand still.
+
+        Args:
+            token: The token's id. A child token cannot be paused: pause its top
+                token.
+
+        Returns:
+            The token.
+        """
         return self._object("POST", f"/tokens/{_segment(token)}/pause", {})
 
     def resume(self, token: str) -> dict[str, Any]:
+        """Resume a paused token. The held events apply in the order that they
+        arrived.
+
+        Args:
+            token: The token's id.
+
+        Returns:
+            The token.
+        """
         return self._object("POST", f"/tokens/{_segment(token)}/resume", {})
 
     def cancel(self, token: str) -> dict[str, Any]:
+        """Cancel an active or a paused token for good.
+
+        Args:
+            token: The token's id.
+
+        Returns:
+            The token.
+        """
         return self._object("POST", f"/tokens/{_segment(token)}/cancel", {})
 
     def report(
@@ -117,9 +229,19 @@ class Client:
         *,
         attempt: int | None = None,
     ) -> dict[str, Any]:
-        """The outcome of a task that waits for the outside (its routine returned None).
-        With `attempt`: only for that attempt of the task. The control plane refuses
-        it (409) when the task is on another attempt."""
+        """Report the outcome of a task that waits. Its routine returned None, and
+        the work went on outside.
+
+        Args:
+            task: The task's id: `ctx.task` in the routine.
+            event: The event's name.
+            payload: The event's payload. None: no payload.
+            attempt: The attempt that the report is for. The control plane refuses
+                the report (409) when the task is on a different attempt.
+
+        Returns:
+            The token after the event.
+        """
         body: dict[str, Any] = {"kind": "event", "event": event}
         if payload is not None:
             body["payload"] = payload
@@ -128,10 +250,15 @@ class Client:
         return self._object("POST", f"/tasks/{task}/report", body)
 
     def workflow(self) -> dict[str, Any]:
-        """The graph document that the control plane serves."""
+        """Read the graph file that the control plane serves.
+
+        Returns:
+            The graph file, as JSON.
+        """
         return self._object("GET", "/workflow")
 
     def close(self) -> None:
+        """Close the connection. A `with` block calls it at the end."""
         self._http.close()
 
     def __enter__(self) -> Client:
