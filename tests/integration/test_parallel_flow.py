@@ -1,7 +1,7 @@
 """A parallel state end to end: `compile` a flow.py that declares its child workflows,
 `serve` it, `init` a supervisor's folder, and `supervise` it. The supervisor claims
-the children's tasks as `<workflow>/<state>` (see the guide, "Nested and
-parallel work")."""
+the children's tasks as `<workflow>/<state>` (see the docs,
+Concepts > Parallel and nested work)."""
 
 from __future__ import annotations
 

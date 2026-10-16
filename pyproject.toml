@@ -37,10 +37,10 @@ dependencies = [
 Homepage = "https://github.com/StateousLabs/stateous"
 Source = "https://github.com/StateousLabs/stateous"
 Issues = "https://github.com/StateousLabs/stateous/issues"
-Documentation = "https://github.com/StateousLabs/stateous/blob/main/docs/guide.md"
+Documentation = "https://stateouslabs.github.io/stateous/"
 
 [project.optional-dependencies]
-# Agents in routines: PHD runs them (see the guide, "Agents, with PHD").
+# Agents in routines: PHD runs them (see the docs, Concepts > Agents, with PHD).
 phd = ["poly-harness-dispatcher>=0.1"]
 
 [project.scripts]
@@ -76,7 +76,13 @@ include = [
     "src/stateous",
     "tests",
     "examples",
-    "docs/guide.md",
+    "docs/index.md",
+    "docs/getting-started.md",
+    "docs/concepts",
+    "docs/how-to",
+    "docs/inside",
+    "docs/reference",
+    "mkdocs.yml",
     "scripts/check.py",
     "README.md",
     "LICENSE",

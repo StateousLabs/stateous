@@ -1,5 +1,5 @@
 """Every refusal of the HTTP API has a stable `code` beside its sentence
-(see the guide, "The HTTP API"). Clients read the code, never the sentence."""
+(see the docs, Reference > The HTTP API). Clients read the code, never the sentence."""
 
 from typing import Any
 

@@ -300,7 +300,7 @@ class Transaction:
     On Postgres, many writers work at once. A transaction takes the lock of a token's
     family (`lock_token`) before it reads the token to change it, or appends to its
     ledger, and holds the lock until it ends. A family is a top token and the child
-    tokens below it (see the guide, "Nested and parallel work"). A parallel state
+    tokens below it (see the docs, Concepts > Parallel and nested work). A parallel state
     changes a parent and its children in one transaction, so they share one lock:
     the lock of the top token.
     So the changes to one family take turns: a token moves one step at a time. A

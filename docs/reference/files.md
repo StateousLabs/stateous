@@ -100,6 +100,7 @@ class states:
 - The stub of the state `coding` is `coding.py`.
 - A state of a child workflow gets `<workflow>_<state>.py`.
 - A stub that would hide a Python module gets `<state>_routine.py`. For example, the state `queue` gets `queue_routine.py`.
+- When two states get the same file name, the second stub gets `<name>_2.py`. The line of `init` tells why.
 
 A stub holds one routine that raises `NotImplementedError`. Its return type names the events of the state:
 
@@ -159,6 +160,8 @@ Delete the table to use Stateous from PyPI again.
 The supervisor's outbox: one SQLite file. `stateous supervise` writes each report, note and memory write to it first, then sends it. A message leaves the outbox when the control plane accepts it or refuses it.
 
 At start, the supervisor sends the messages that are left, in order. Then it claims new tasks. The outbox has a lock: a second supervisor on the same folder does not start. Do not delete the file while messages are in it.
+
+`.stateous/` holds the local state of the supervisor. Do not commit it: add `.stateous/` to the folder's `.gitignore`.
 
 ## The control plane's database
 

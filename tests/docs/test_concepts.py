@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import inspect
 import re
+from pathlib import Path
 
 import pytest
 
 from stateous import Context
 
-from .pages import page
+from .pages import ROOT, page
 
 PARTS = [
     "## In one sentence",
@@ -38,7 +39,13 @@ WORDS = [
 
 FACTS: dict[str, list[str]] = {
     "concepts/model.md": [f"### {word}" for word in WORDS]
-    + ["START", "END", "otherwise=True", "```mermaid"],
+    + [
+        "START",
+        "END",
+        "otherwise=True",
+        "three events of its own: `timeout`, `error` and `joined`",
+        "```mermaid",
+    ],
     "concepts/two-sides.md": [
         "contract.py",
         "GET /workflow",
@@ -87,6 +94,15 @@ FACTS: dict[str, list[str]] = {
         "`<workflow>/<state>`",
         "`GET /tokens?parent=<id>`",
         "409",
+        "`workflow`",
+        "`token`",
+        "`status`",
+        "`final`",
+        "`payload`",
+        "`states.design_review.triage`",
+        "otherwise=True",
+        "### Tokens that a routine starts",
+        "count('event')",
         "```mermaid",
     ],
     "concepts/reliability.md": [
@@ -118,6 +134,14 @@ FACTS: dict[str, list[str]] = {
         '"session"',
     ],
 }
+NOT_SAID: dict[str, list[str]] = {
+    "concepts/agents.md": ["not released", "start()"],
+    "concepts/model.md": ["no nested or parallel states", "The engine has no nested states"],
+    "concepts/parallel.md": ["no nested or parallel states", "The engine has no nested states"],
+}
+"""Old sentences that are no longer true."""
+EXAMPLE_FILE = re.compile(r"\A# (sdlc[\w-]*/\w+\.py)\b")
+PYTHON = re.compile(r"```python\n(.*?)```", re.DOTALL)
 FOR_THE_SUPERVISOR = {"writes", "schedules"}
 """Methods of `Context` that the supervisor calls, not a routine."""
 ATTRIBUTE = re.compile(r"self\.([a-z]\w*)\s*(?::[^=\n]+)?=")
@@ -145,3 +169,21 @@ def test_the_context_page_names_every_ctx_field() -> None:
     assert {"token", "memory", "note"} <= public
     for name in sorted(public - FOR_THE_SUPERVISOR):
         assert f"ctx.{name}" in text, name
+
+
+@pytest.mark.parametrize("name", sorted(NOT_SAID))
+def test_the_page_no_longer_says_old_things(name: str) -> None:
+    text = page(name)
+    for said in NOT_SAID[name]:
+        assert said not in text, (name, said)
+
+
+def test_the_agents_page_shows_coding_py_as_it_is() -> None:
+    shown: set[str] = set()
+    for block in PYTHON.findall(page("concepts/agents.md")):
+        found = EXAMPLE_FILE.match(block)
+        if found is not None:
+            example: Path = ROOT / "examples" / found.group(1)
+            assert block == example.read_text(encoding="utf-8"), found.group(1)
+            shown.add(found.group(1))
+    assert shown == {"sdlc-supervisor/coding.py"}

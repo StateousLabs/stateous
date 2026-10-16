@@ -1,5 +1,5 @@
-"""The API, the client and `stateous token` with child tokens (see the guide,
-"Child tokens")."""
+"""The API, the client and `stateous token` with child tokens (see the docs,
+Concepts > Parallel and nested work)."""
 
 from __future__ import annotations
 

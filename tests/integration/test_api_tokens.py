@@ -1,4 +1,4 @@
-"""The HTTP API's token routes, in process (see the guide, "The HTTP API")."""
+"""The HTTP API's token routes, in process (see the docs, Reference > The HTTP API)."""
 
 from collections.abc import Iterator
 from typing import Any

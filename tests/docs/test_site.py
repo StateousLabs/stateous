@@ -3,6 +3,7 @@
 Each page is in the menu, names no private document, and has short sentences.
 Each command on a page exists, with its options. Each Python block is Python, and
 each Mermaid block starts with a diagram type. The built site holds no private file.
+The README and the package lead to the site, and no tracked file points to the old guide.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from typing import cast
 
 import yaml
 from typer.core import TyperGroup
+
+from stateous.cli.starter import flow_text
 
 from .pages import (
     DOCS,
@@ -45,6 +48,9 @@ DIAGRAM_TYPES = (
 )
 BUILT_PRIVATE = ("design", "phd", "PHD_ANSWERS", "superpowers", "guide")
 """Parts of file names that the built site must not have."""
+SITE = "https://stateouslabs.github.io/stateous/"
+REPOSITORY = "https://github.com/StateousLabs/stateous"
+"""PyPI shows the README, so its links are absolute: a relative link breaks there."""
 
 
 def menu_pages() -> set[str]:
@@ -132,3 +138,42 @@ def test_every_mermaid_block_has_a_diagram_type() -> None:
     for path in site_pages():
         for block in MERMAID.findall(read(path)):
             assert block.lstrip().startswith(DIAGRAM_TYPES), f"{path.name}: {block[:40]}"
+
+
+def test_the_readme_leads_to_the_site_and_the_example() -> None:
+    readme = read(README)
+    assert f"]({SITE}" in readme
+    for target in (
+        "tree/main/examples/sdlc)",
+        "tree/main/examples/sdlc-supervisor)",
+        "blob/main/LICENSE",
+    ):
+        assert f"]({REPOSITORY}/{target}" in readme, target
+        assert (ROOT / target.split("/", 2)[2].rstrip(")")).exists(), target
+
+
+def test_the_readme_has_no_relative_links() -> None:
+    links = re.findall(r"\]\(([^)]+)\)", read(README))
+    assert links
+    assert all(link.startswith("https://") for link in links), links
+
+
+def test_the_package_points_to_the_site() -> None:
+    assert f'Documentation = "{SITE}"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_no_tracked_file_points_to_the_guide() -> None:
+    # The pattern is a regular expression, so that this file does not match it.
+    found = subprocess.run(
+        ["git", "grep", "-n", "docs/guide[.]md"], cwd=ROOT, capture_output=True, text=True
+    )
+    assert found.stdout == "", found.stdout
+
+
+def test_the_tutorial_shows_the_starter_flow_as_init_writes_it() -> None:
+    blocks = [
+        block
+        for block in PYTHON.findall(read(DOCS / "getting-started.md"))
+        if block.startswith("# orders/flow.py")
+    ]
+    assert blocks == [flow_text("orders")]

@@ -1,5 +1,5 @@
-"""The pyproject.toml that `stateous init` writes (see the guide, "Set up a
-supervisor"): the supervisor's folder is a Python project of its own, so `uv sync`
+"""The pyproject.toml that `stateous init` writes (see the docs,
+Reference > The files): the supervisor's folder is a Python project of its own, so `uv sync`
 makes its `.venv`."""
 
 import tomllib

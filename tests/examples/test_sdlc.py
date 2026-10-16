@@ -1,5 +1,5 @@
 """The example: its committed files are current, its two folders hold what the
-design says (section 3), and its `testing` routine does what the guide says.
+design says (section 3), and its `testing` routine does what the docs say.
 
 If a test of a committed file fails after a change to the compiler or the code
 generator, write the files again. First run `uv run stateous compile

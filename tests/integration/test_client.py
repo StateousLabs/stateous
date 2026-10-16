@@ -1,5 +1,5 @@
 """The client: a program outside calls the control plane over HTTP
-(see the guide, "The HTTP API")."""
+(see the docs, Reference > The HTTP API)."""
 
 import socket
 from collections.abc import Iterator

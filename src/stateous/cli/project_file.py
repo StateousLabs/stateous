@@ -1,5 +1,5 @@
-"""The pyproject.toml that `stateous init` writes (see the guide, "Start a workflow" and
-"Set up a supervisor").
+"""The pyproject.toml that `stateous init` writes (see the docs,
+Reference > The files).
 
 A workflow's folder and a supervisor's folder are each a Python project of their
 own. Each depends on Stateous and on what its code imports, so `uv sync` makes its

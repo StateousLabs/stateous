@@ -1,4 +1,4 @@
-"""The control plane's HTTP API (see the guide, "The HTTP API").
+"""The control plane's HTTP API (see the docs, Reference > The HTTP API).
 
 There are no keys and no tenants: a caller that reaches the port may call every
 route. `stateous serve` listens on 127.0.0.1 by default. Every refusal is
@@ -87,7 +87,7 @@ Handler = Callable[[Request, Exception], Awaitable[Response]]
 
 class Problem(Exception):
     """A request that the API refuses, with the status, one plain sentence and the
-    code of the refusal (see the guide, "The HTTP API"). The code is `bad_request`
+    code of the refusal (see the docs, Reference > The HTTP API). The code is `bad_request`
     when the request names none."""
 
     def __init__(self, status: int, message: str, code: str = "bad_request") -> None:

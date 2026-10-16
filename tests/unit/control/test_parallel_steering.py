@@ -1,5 +1,5 @@
 """Steering a parent: pause and resume go to its children, cancel ends them, and a
-child cannot be steered on its own (see the guide, "Steer the parent")."""
+child cannot be steered on its own (see the docs, Concepts > Parallel and nested work)."""
 
 from __future__ import annotations
 

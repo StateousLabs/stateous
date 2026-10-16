@@ -1,5 +1,5 @@
 """`stateous init workflow NAME [--stateous-path PATH]`: a starter workflow folder that
-compiles at once (see the guide, "Start a workflow")."""
+compiles at once (see the docs, Getting started)."""
 
 import json
 import tomllib

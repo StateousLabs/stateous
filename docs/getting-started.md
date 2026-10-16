@@ -49,7 +49,8 @@ from schemas import Item, Verdict
 flow = Workflow("orders", context=Item)
 
 # The states. A token is in one state at a time. A routine does the work of a state.
-# `timeout=` and `retries=` are optional (see the guide, "Write the workflow").
+# `timeout=` and `retries=` are optional. See
+# https://stateouslabs.github.io/stateous/how-to/write-a-workflow/
 draft = flow.state("draft")
 review = flow.state("review")
 

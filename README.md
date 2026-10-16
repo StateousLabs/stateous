@@ -15,42 +15,25 @@ pip install stateous            # or: uv add stateous
 pip install "stateous[phd]"     # also PHD, to run agents in routines
 ```
 
-Then run the `stateous` command in that environment. The control plane keeps its data in SQLite or in Postgres.
+The control plane keeps its data in SQLite or in Postgres.
 
-## The example
-
-[`examples/sdlc/`](https://github.com/StateousLabs/stateous/tree/main/examples/sdlc) is a workflow with two states: `coding` and `testing`. [`examples/sdlc-supervisor/`](https://github.com/StateousLabs/stateous/tree/main/examples/sdlc-supervisor) is the supervisor's folder for it.
+## A short example
 
 ```bash
-# on the control plane's computer
-stateous compile sdlc/flow.py                         # writes sdlc/build/sdlc.json
-stateous serve sdlc/build/sdlc.json --listen 0.0.0.0:8080
-
-# on the supervisor's computer
-stateous init supervisor http://cp.internal:8080 sdlc-supervisor  # contract.py, stubs, stateous.yaml, pyproject.toml
-stateous supervise sdlc-supervisor                    # runs the routines
-
-# anywhere
-stateous token start TICKET-1 '{"repo": "acme/api"}' --url http://cp.internal:8080
-stateous token show TICKET-1 --url http://cp.internal:8080
+stateous init workflow orders                               # a starter workflow that compiles
+stateous serve orders/build/orders.json                     # the control plane
+stateous init supervisor orders/flow.py orders-supervisor   # contract.py and a stub for each state
+stateous supervise orders-supervisor                        # runs your routines
+stateous token start ORDER-1 '{"title": "first order"}'     # starts a token
 ```
+
+Write the routines in `orders-supervisor/` before you run `supervise`. [`examples/sdlc/`](https://github.com/StateousLabs/stateous/tree/main/examples/sdlc) and [`examples/sdlc-supervisor/`](https://github.com/StateousLabs/stateous/tree/main/examples/sdlc-supervisor) are a larger example.
 
 Stateous has no authentication. Keep a control plane that listens on a wider address behind a VPN or a proxy.
 
-To start a workflow of your own, let Stateous write a starter that compiles:
+## Documentation
 
-```bash
-stateous init workflow orders                         # orders/flow.py, schemas.py, pyproject.toml, build/orders.json
-stateous serve orders/build/orders.json
-stateous init supervisor orders/flow.py orders-supervisor  # from a local flow.py or graph file, too
-```
-
-To try the example on one computer, follow [the guide](https://github.com/StateousLabs/stateous/blob/main/docs/guide.md#try-it-on-one-computer).
-
-## Learn more
-
-- [`docs/guide.md`](https://github.com/StateousLabs/stateous/blob/main/docs/guide.md): the guide, on one page.
-- [`examples/`](https://github.com/StateousLabs/stateous/tree/main/examples): the example.
+The documentation is at [stateouslabs.github.io/stateous](https://stateouslabs.github.io/stateous/). It explains the model, then tells you how to do the work, then gives the reference. To run the short example step by step, follow [Getting started](https://stateouslabs.github.io/stateous/getting-started/).
 
 ## Licence
 

@@ -12,7 +12,7 @@ import stateous
 import stateous.client
 from stateous.control import engine
 
-from .pages import ROOT, cli, commands, options, page, section
+from .pages import ROOT, child, cli, commands, options, page, section
 
 HEADING = re.compile(r"^### stateous ([\w -]+)$", re.MULTILINE)
 ROUTE = re.compile(r"`(GET|POST|PUT|DELETE) (/[^`]*)`")
@@ -59,6 +59,15 @@ def real_codes() -> set[str]:
         for groups in LITERAL_CODE.findall(text):
             codes |= {code for code in groups if code}
     return codes
+
+
+def test_there_are_five_commands() -> None:
+    group = cli()
+
+    assert set(group.commands) == {"compile", "serve", "init", "supervise", "token"}
+    token = child(group, "token")
+    assert isinstance(token, TyperGroup)
+    assert set(token.commands) == {"start", "fire", "show", "pause", "resume", "cancel"}
 
 
 def test_the_cli_reference_has_exactly_the_commands() -> None:

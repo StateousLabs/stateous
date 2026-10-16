@@ -62,6 +62,8 @@ PHD is on PyPI as `poly-harness-dispatcher`. Its import name is `phd`. Install i
 pip install "stateous[phd]"     # or: uv add "stateous[phd]"
 ```
 
+From a copy of the Stateous repository, use `uv add --editable path/to/stateous --extra phd`.
+
 Without PHD, the supervisor cannot import a routine that imports `phd`, and it does not start.
 
 PHD needs a stack and credentials for each run. `phd.Stack.load("stacks/dev")` loads the agent's stack folder: its identity, skills and tools. The path is relative to the folder where the supervisor runs. `phd.Credentials.from_host("claude")` uses the login of the supervisor's computer. The PHD documentation tells how to write a stack.
@@ -93,7 +95,7 @@ Codex uses OpenAI's strict structured outputs. These cannot return an object tha
 This is the routine of `coding` in the `sdlc` example:
 
 ```python
-# sdlc-supervisor/coding.py: an agent, run by PHD
+# sdlc-supervisor/coding.py: an agent, run by PHD (see the docs, Concepts > Agents, with PHD)
 import phd
 
 from stateous import on_state

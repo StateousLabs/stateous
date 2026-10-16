@@ -33,7 +33,7 @@ ERROR = "error"
 
 JOINED = "joined"
 """Fired on a token in a parallel state when the state's join is met (see the
-guide, "The join")."""
+docs, Concepts > Parallel and nested work)."""
 
 RESERVED_EVENTS = (TIMEOUT, ERROR, JOINED, STARTED)
 """Events Stateous fires itself. Transitions use them by name; no one declares them."""
@@ -67,8 +67,8 @@ class Event:
 @dataclass(frozen=True, eq=False)
 class State:
     """A place a token can be. Entering it creates one task. Entering a parallel state
-    starts one child token for each of its workflows instead (see the guide,
-    "Nested and parallel work")."""
+    starts one child token for each of its workflows instead (see the docs,
+    Concepts > Parallel and nested work)."""
 
     name: str
     workflow: str

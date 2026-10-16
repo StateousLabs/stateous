@@ -1,4 +1,4 @@
-"""A workflow with a parallel state (see the guide, "Nested and parallel work"),
+"""A workflow with a parallel state (see the docs, Concepts > Parallel and nested work),
 shared across the tests of this feature.
 
 `sdlc` codes, then runs two reviews at the same time: a child token of the

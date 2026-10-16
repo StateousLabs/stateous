@@ -1,7 +1,6 @@
 """Shared helpers for the tests of the documentation site.
 
 The page list, the commands of the CLI, the sentences and the sections of a page.
-The helpers that read Markdown and the CLI are the same as in test_guide.py.
 """
 
 from __future__ import annotations
@@ -39,11 +38,11 @@ TYPER_OWN = {"--help", "--install-completion", "--show-completion"}
 
 
 def site_pages() -> list[Path]:
-    """Every page of the site: each .md under docs/, without guide.md and the private files."""
+    """Every page of the site: each .md under docs/, without the private files."""
     found: list[Path] = []
     for path in sorted(DOCS.rglob("*.md")):
         relative = path.relative_to(DOCS).as_posix()
-        if relative == "guide.md" or any(word in relative for word in PRIVATE):
+        if any(word in relative for word in PRIVATE):
             continue
         found.append(path)
     return found

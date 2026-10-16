@@ -12,7 +12,6 @@ exclude_docs: |
   design.md
   phd.md
   PHD_ANSWERS.md
-  guide.md
   superpowers/
 
 theme:

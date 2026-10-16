@@ -1,5 +1,5 @@
 """The client: a program outside starts tokens, fires events and reads tokens and
-their history over the control plane's HTTP API (see the guide, "The HTTP API").
+their history over the control plane's HTTP API (see the docs, Reference > The HTTP API).
 
     from stateous import Client
 

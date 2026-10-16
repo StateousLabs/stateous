@@ -1,7 +1,7 @@
 """Proving that two guards can never both be true.
 
 Two transitions that could both match are a compile error, never a choice at run
-time (see the guide, "Guards"). The guard language is small enough to decide it.
+time (see the docs, Concepts > Guards). The guard language is small enough to decide it.
 
 A guard reads a few values (context keys, payload fields, event counts) and
 compares each with literals. Between and around those literals a value behaves

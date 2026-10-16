@@ -33,8 +33,8 @@ MAX_MEMORY_KEY = 128
 
 
 class Memory(MutableMapping[str, Any]):
-    """The routine's own memory, for this token and this state (see the guide,
-    "The routine's memory").
+    """The routine's own memory, for this token and this state (see the docs,
+    Concepts > Context, notes and memory).
 
     Each change is saved at once: `save(key, value)`, or `save(key, None)` for a
     deletion. Values must be JSON."""

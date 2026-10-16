@@ -1,5 +1,5 @@
 """`stateous serve`: the control plane. It runs the HTTP API and the clock over one
-database (see the guide, "Compile and serve").
+database (see the docs, Reference > The commands).
 
 `prepare_serve` does each check before the server starts, and binds the port. Each
 refusal is a `ServeRefused` with one plain sentence. The app in `Serving.config`

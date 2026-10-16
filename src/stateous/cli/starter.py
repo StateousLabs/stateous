@@ -1,5 +1,5 @@
-"""The starter workflow that `stateous init workflow NAME` writes (see the guide, "Start a
-workflow"): `flow.py` and `schemas.py`, in the folder `NAME/`.
+"""The starter workflow that `stateous init workflow NAME` writes (see the docs, Getting
+started): `flow.py` and `schemas.py`, in the folder `NAME/`.
 
 The text is built in Python, as `stateous.compiler.codegen` builds `contract.py`. The
 starter compiles as it is: two states, two events (one with a payload), and a guard."""
@@ -24,7 +24,8 @@ from schemas import Item, Verdict
 flow = Workflow("{name}", context=Item)
 
 # The states. A token is in one state at a time. A routine does the work of a state.
-# `timeout=` and `retries=` are optional (see the guide, "Write the workflow").
+# `timeout=` and `retries=` are optional. See
+# https://stateouslabs.github.io/stateous/how-to/write-a-workflow/
 draft = flow.state("draft")
 review = flow.state("review")
 

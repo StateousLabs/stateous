@@ -1,5 +1,5 @@
 """The supervisor's outbox: the reports, notes and memory writes that the control
-plane did not answer yet (see the guide, "Reliability").
+plane did not answer yet (see the docs, Concepts > Reliability).
 
 The outbox is one SQLite file, `<folder>/.stateous/outbox.db`. The supervisor
 writes each message to it first, then sends it. A message leaves the outbox when

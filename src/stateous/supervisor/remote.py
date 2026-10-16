@@ -1,4 +1,4 @@
-"""The control plane's HTTP API (see the guide, "The HTTP API"), as the supervisor
+"""The control plane's HTTP API (see the docs, Reference > The HTTP API), as the supervisor
 calls it: async, over httpx2.
 
 A call that does not reach the control plane is tried again after 1, 2, 4, 8, 16,
@@ -7,7 +7,7 @@ answer. An answer 502, 503 or 504 counts as "not reached" (a proxy, a control
 plane that restarts, or a control plane that is `not_serving`: another one can take
 over at the same URL); the log line gives its code and sentence, if it has them.
 Any other answer of 400 or more is a refusal: `Refused`, and no new try. A refusal
-has the code that the answer gives (see the guide, "The HTTP API"); read the code,
+has the code that the answer gives (see the docs, Reference > The HTTP API); read the code,
 never the sentence.
 
 A call can get a `stop` event. When it is set, a call that waits to try again

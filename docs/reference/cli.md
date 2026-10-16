@@ -122,6 +122,18 @@ It writes a supervisor's folder. [The files](files.md) tells what each file hold
 
 It always writes `contract.py`. It writes a stub only for a state that no file implements. It writes `stateous.yaml` and `pyproject.toml` only when they do not exist. Run it again after each change to the workflow.
 
+It prints one line for each file: `wrote`, `kept` or `skipped`. For example:
+
+```text
+wrote    sdlc-supervisor/contract.py
+wrote    sdlc-supervisor/coding.py
+kept     the routine of 'testing'
+wrote    sdlc-supervisor/stateous.yaml
+wrote    sdlc-supervisor/pyproject.toml
+
+Write the routines, then run: stateous supervise sdlc-supervisor
+```
+
 ```bash
 stateous init supervisor http://cp.internal:8080 sdlc-supervisor
 stateous init supervisor sdlc/build/sdlc.json sdlc-supervisor
