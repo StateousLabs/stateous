@@ -95,3 +95,7 @@ nav:
       - Use Postgres: how-to/use-postgres.md
       - Steer tokens: how-to/steer-tokens.md
       - Change a workflow: how-to/change-a-workflow.md
+  - How Stateous works inside:
+      - The event graph: inside/event-graph.md
+      - The internal workflows: inside/workflows.md
+      - The data: inside/data.md

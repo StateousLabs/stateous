@@ -136,3 +136,4 @@ build-box-2 took task 1 (attempt 2)
 - [Pause, resume and cancel](pause-resume-cancel.md).
 - [Use Postgres](../how-to/use-postgres.md): the database, and its time limits.
 - [Run supervisors](../how-to/run-supervisors.md): stop a supervisor safely.
+- [The internal workflows](../inside/workflows.md): the steps and events of each mechanism.
