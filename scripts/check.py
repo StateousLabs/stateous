@@ -1,8 +1,8 @@
 """Every check, in order: `uv run python scripts/check.py`.
 
-GitHub Actions does not run for this repository, so this script is the gate
-before a commit. It runs the lint rules, the format check, the types, the import
-contracts, the build of the documentation site and the tests. It stops at the first
+Run it before a commit. CI (.github/workflows/ci.yml) runs it too. It runs the lint
+rules, the format check, the types, the import contracts, the build of the
+documentation site and the tests. It stops at the first
 check that fails, and names it.
 """
 

@@ -1,5 +1,6 @@
 # Stateous
 
+[![CI](https://github.com/StateousLabs/stateous/actions/workflows/ci.yml/badge.svg)](https://github.com/StateousLabs/stateous/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/stateous?cacheSeconds=3600)](https://pypi.org/project/stateous/)
 [![Python](https://img.shields.io/pypi/pyversions/stateous?cacheSeconds=3600)](https://pypi.org/project/stateous/)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://stateouslabs.github.io/stateous/)
