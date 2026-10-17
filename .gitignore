@@ -11,3 +11,5 @@ try/
 try.db
 .stateous/
 site/
+.coverage
+.coverage.*

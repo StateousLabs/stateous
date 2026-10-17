@@ -49,6 +49,7 @@ stateous = "stateous.cli.main:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "coverage>=7.10",
     "ruff>=0.6",
     "pyright>=1.1.380",
     "import-linter>=2.0",
@@ -119,6 +120,20 @@ executionEnvironments = [
     { root = "examples/sdlc" },
     { root = "examples/sdlc-supervisor" },
 ]
+
+# CI measures coverage in the Postgres job, which runs every test. The end-to-end tests
+# start `stateous serve` and `stateous supervise` as child processes: `patch` counts them
+# too. Set COVERAGE_FILE to an absolute path, because the children run in other folders.
+[tool.coverage.run]
+branch = true
+source = ["stateous"]
+parallel = true
+patch = ["subprocess"]
+
+[tool.coverage.report]
+fail_under = 94
+skip_covered = true
+show_missing = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

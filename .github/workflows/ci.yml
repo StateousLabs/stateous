@@ -28,7 +28,7 @@ jobs:
       - run: uv run python scripts/check.py
 
   postgres:
-    name: tests on Postgres
+    name: tests on Postgres, with coverage
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -44,12 +44,16 @@ jobs:
           --health-retries 10
     env:
       STATEOUS_TEST_POSTGRES: postgresql://stateous:stateous@localhost:5432/postgres
+      COVERAGE_FILE: ${{ github.workspace }}/.coverage
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv run pytest
+      - run: uv run coverage run -m pytest
+      - run: uv run coverage combine
+      # Fails under the floor: fail_under in pyproject.toml.
+      - run: uv run coverage report
 
   build:
     name: build and check the distribution
