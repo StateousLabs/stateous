@@ -107,3 +107,31 @@ def test_einval_from_a_write_to_stdout_is_quiet(
 
     assert raised.value.code == 1
     assert capsys.readouterr().err == ""
+
+
+class BrokenStdout(ClosedStdout):
+    """Stdout whose reader closed the pipe, as Linux and macOS report it: EPIPE. Click
+    catches EPIPE itself and exits with code 1."""
+
+    def write(self, text: str) -> int:
+        raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+
+def test_epipe_sends_the_rest_of_stdout_to_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Else Python flushes stdout again at exit, that flush fails, and the exit code is 120."""
+    target = tmp_path / "stdout"
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT)
+    try:
+        monkeypatch.setattr(sys, "stdout", BrokenStdout(fd))
+
+        with pytest.raises(SystemExit) as raised:
+            run_main("compile", str(FLOW), "--out", str(tmp_path / "sdlc.json"))
+
+        os.write(fd, b"after the command")
+    finally:
+        os.close(fd)
+
+    assert raised.value.code == 1
+    assert target.read_bytes() == b""

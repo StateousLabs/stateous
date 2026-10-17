@@ -294,12 +294,15 @@ def main() -> None:
     except OSError as error:
         if not _closed_pipe(error, stdout.failure):
             raise
-        # Python flushes stdout again at exit: send it to nothing, so that flush cannot fail.
-        nothing = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(nothing, sys.stdout.fileno())
         sys.exit(1)
     finally:
         sys.stdout = stdout.stream
+        # Python flushes stdout again at exit: send it to nothing, so that flush cannot
+        # fail. Also when Click caught the EPIPE itself and exited with code 1.
+        if stdout.failure is not None and _closed_pipe(stdout.failure, stdout.failure):
+            nothing = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(nothing, sys.stdout.fileno())
+            os.close(nothing)
 
 
 class _Stdout:
