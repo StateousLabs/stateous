@@ -1,6 +1,6 @@
 [project]
 name = "stateous"
-version = "0.2.0"
+version = "0.2.1"
 description = "A process as a graph of states. A control plane keeps every token durable."
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
