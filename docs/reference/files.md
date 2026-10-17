@@ -149,7 +149,7 @@ With `--stateous-path PATH`, the file also has a `[tool.uv.sources]` table. The 
 name = "sdlc-supervisor"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["stateous>=0.2.1"]
+dependencies = ["stateous>=0.2.2"]
 
 # A local checkout of Stateous: delete this table to use Stateous from PyPI.
 [tool.uv.sources]
