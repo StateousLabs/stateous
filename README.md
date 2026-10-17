@@ -1,5 +1,10 @@
 # Stateous
 
+[![PyPI](https://img.shields.io/pypi/v/stateous?cacheSeconds=3600)](https://pypi.org/project/stateous/)
+[![Python](https://img.shields.io/pypi/pyversions/stateous?cacheSeconds=3600)](https://pypi.org/project/stateous/)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://stateouslabs.github.io/stateous/)
+[![License](https://img.shields.io/pypi/l/stateous?cacheSeconds=3600)](https://github.com/StateousLabs/stateous/blob/main/LICENSE)
+
 Stateous runs a process as a graph of states, and keeps every token of it durable.
 
 You write the graph in Python. A control plane keeps every token and chooses each next state. A supervisor, on any computer, does the work and reports what happened. The supervisor never sees the graph. It knows only which states it serves, and which outcomes each state allows.
