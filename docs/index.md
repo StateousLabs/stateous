@@ -6,8 +6,8 @@ The supervisor never sees the graph. It knows only which states it serves, and w
 
 ```mermaid
 flowchart LR
-    code["flow.py<br/>your workflow"] -->|stateous compile| graph["graph file"]
-    graph --> plane["control plane<br/>stateous serve"]
+    code["flow.py<br/>your workflow"] -->|stateous compile| graphfile["graph file"]
+    graphfile --> plane["control plane<br/>stateous serve"]
     plane <-->|HTTP| supervisor["supervisor<br/>stateous supervise"]
     supervisor --> routines["your routines"]
 ```

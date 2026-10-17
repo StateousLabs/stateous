@@ -32,8 +32,8 @@ The graph file stays on the control plane's side. Two things cross to the superv
 ```mermaid
 flowchart LR
     subgraph cp["control plane side"]
-        flow["flow.py + schemas.py"] -->|stateous compile| graph["graph file"]
-        graph --> serve["control plane<br/>stateous serve"]
+        flow["flow.py + schemas.py"] -->|stateous compile| graphfile["graph file"]
+        graphfile --> serve["control plane<br/>stateous serve"]
         serve --> db[("database")]
     end
     subgraph sv["supervisor side"]

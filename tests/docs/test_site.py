@@ -203,6 +203,22 @@ def test_every_mermaid_block_has_a_diagram_type() -> None:
             assert block.lstrip().startswith(DIAGRAM_TYPES), f"{path.name}: {block[:40]}"
 
 
+# A node id that is a Mermaid keyword stops the parser, and the page shows the source text.
+MERMAID_KEYWORDS = ("graph", "flowchart", "subgraph", "end", "style", "class", "click")
+NODE_ID = re.compile(r"(?:^|-->|<-->|---|\|)\s*([A-Za-z_][\w-]*)\s*(?=[\[\(\{>]|-->|<-->|---|$)")
+
+
+def test_no_mermaid_node_id_is_a_keyword() -> None:
+    for path in site_pages():
+        for block in MERMAID.findall(read(path)):
+            for line in block.splitlines()[1:]:
+                stripped = line.strip()
+                if stripped == "end" or stripped.startswith(("subgraph ", "style ", "class ")):
+                    continue
+                for name in NODE_ID.findall(stripped):
+                    assert name.lower() not in MERMAID_KEYWORDS, f"{path.name}: {stripped}"
+
+
 def test_the_readme_leads_to_the_site_and_the_example() -> None:
     readme = read(README)
     assert f"]({SITE}" in readme
