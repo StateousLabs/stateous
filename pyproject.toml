@@ -131,7 +131,7 @@ parallel = true
 patch = ["subprocess"]
 
 [tool.coverage.report]
-fail_under = 94
+fail_under = 95
 skip_covered = true
 show_missing = true
 
