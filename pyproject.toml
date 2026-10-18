@@ -134,7 +134,7 @@ patch = ["subprocess"]
 omit = ["*/stateous/control/store/migrations/env.py"]
 
 [tool.coverage.report]
-fail_under = 95
+fail_under = 99
 skip_covered = true
 show_missing = true
 
