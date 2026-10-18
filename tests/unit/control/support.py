@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
+
+from sqlalchemy import create_engine, select
 
 from stateous.control.engine import Engine
 from stateous.control.graph import Graph
-from stateous.control.store import Store
+from stateous.control.store import Store, tables
 
 
 def sdlc() -> dict[str, Any]:
@@ -86,3 +89,17 @@ def new_engine(document: dict[str, Any] | None = None, *, clock: Clock | None = 
 
 def kinds(engine: Engine, token: str) -> list[str]:
     return [entry.kind for entry in engine.history(token)]
+
+
+def sqlite_url(path: Path) -> str:
+    return f"sqlite:///{path.as_posix()}"
+
+
+def holder_row(url: str) -> tuple[str | None, datetime | None]:
+    engine = create_engine(url)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(tables.ControlPlane.serving, tables.ControlPlane.since)
+        ).one()
+    engine.dispose()
+    return row[0], row[1]

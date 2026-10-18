@@ -338,7 +338,7 @@ def _domain(schema: Mapping[str, Any], definitions: Mapping[str, Any]) -> Domain
     ref = schema.get("$ref")
     if isinstance(ref, str):
         target = definitions.get(ref.rsplit("/", 1)[-1])
-        if target is None:
+        if target is None:  # pragma: no cover - Pydantic never writes a `$ref` without its target
             return ANY
         rest = {key: value for key, value in schema.items() if key != "$ref"}
         return _domain({**cast("Mapping[str, Any]", target), **rest}, definitions)

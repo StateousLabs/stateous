@@ -136,3 +136,11 @@ def test_two_top_workflows_beside_a_child_are_refused(tmp_path: Path) -> None:
         LoadError, match=r"defines 2 workflows \('sdlc', 'other'\); keep one per file"
     ):
         load_workflow(project(tmp_path, flow=flow))
+
+
+def test_a_file_that_python_cannot_import_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "flow.txt"
+    path.write_text("flow = 1\n", encoding="utf-8")
+
+    with pytest.raises(LoadError, match=r"flow.txt: cannot be imported"):
+        load_workflow(path)

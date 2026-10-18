@@ -277,3 +277,9 @@ def test_changing_a_value_read_from_memory_changes_nothing() -> None:
     assert ctx.memory["seen"] == [1]
     assert ctx.memory["later"] == [3]
     assert calls.saved == [("later", [3])]
+
+
+def test_memory_shows_its_values_in_its_repr() -> None:
+    memory = Memory({"dev": "s-1"}, lambda key, value: None)
+
+    assert repr(memory) == "Memory({'dev': 's-1'})"

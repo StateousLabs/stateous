@@ -502,7 +502,8 @@ def refusal(status: int, message: str, code: str) -> JSONResponse:
 async def _problem(request: Request, error: Exception) -> Response:
     if isinstance(error, Problem):
         return refusal(error.status, str(error), error.code)
-    return refusal(400, str(error), "bad_request")
+    # `_problem` is registered only for Problem.
+    return refusal(400, str(error), "bad_request")  # pragma: no cover
 
 
 async def _http_error(request: Request, error: Exception) -> Response:
@@ -528,7 +529,7 @@ def _answer(status: int, code: str | None = None) -> Handler:
             named = code
         elif isinstance(error, EngineError):
             named = error.code
-        else:
+        else:  # pragma: no cover - every exception registered without a code is an EngineError
             named = "unexpected"
         return refusal(status, message, named)
 

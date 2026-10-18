@@ -6,28 +6,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, update
 
 from stateous.control.engine import TOKEN_ID_PATTERN, Engine, InvalidTokenId
 from stateous.control.graph import Graph
 from stateous.control.store import DatabaseHeld, Store, tables
 from stateous.control.store.store import SERVING_LOCK
 
-from .support import TICKET, sdlc
-
-
-def sqlite_url(path: Path) -> str:
-    return f"sqlite:///{path.as_posix()}"
-
-
-def holder_row(url: str) -> tuple[str | None, datetime | None]:
-    engine = create_engine(url)
-    with engine.connect() as connection:
-        row = connection.execute(
-            select(tables.ControlPlane.serving, tables.ControlPlane.since)
-        ).one()
-    engine.dispose()
-    return row[0], row[1]
+from .support import TICKET, holder_row, sdlc, sqlite_url
 
 
 def age_the_hold(url: str, by: timedelta) -> None:

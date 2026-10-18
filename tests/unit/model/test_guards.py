@@ -184,3 +184,20 @@ def test_branches_all_and_any_look_at_each_ended_child(expression: str, expected
 def test_with_no_children_all_holds_and_any_does_not() -> None:
     assert evaluate(parse_guard("branches.all(final == 'x')"), given()) is True
     assert evaluate(parse_guard("branches.any(final == 'x')"), given()) is False
+
+
+@pytest.mark.parametrize(
+    ("expression", "reason"),
+    [
+        ("ctx['a'] is null", r"compare with < <= > >= == != in or not in"),
+        ("ctx['a'] == true and ctx['b'] == True", r"True is not a literal of the guard language"),
+        ("ctx['a'] == None", r"None is not a literal of the guard language"),
+        ("ctx['a'] == b'x'", r"b'x' is not a literal of the guard language"),
+        ("ctx['a'].size == 1", r"only payload.<field> may be read with a dot"),
+    ],
+)
+def test_a_guard_error_tells_the_person_what_to_change(expression: str, reason: str) -> None:
+    with pytest.raises(GuardError, match=reason) as caught:
+        parse_guard(expression)
+
+    assert str(caught.value).startswith(f"guard {expression!r}: ")

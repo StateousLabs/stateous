@@ -337,3 +337,20 @@ def test_a_numbered_stub_never_takes_the_name_of_another_state(tmp_path: Path) -
 
     assert (folder / "a_b_2.py").read_text(encoding="utf-8") == stub("a_b_2")
     assert (folder / "a_b_3.py").read_text(encoding="utf-8") == stub("a/b")
+
+
+def test_only_the_calls_of_on_state_with_a_state_are_counted(tmp_path: Path) -> None:
+    (tmp_path / "mixed.py").write_text(
+        "from contract import states\n"
+        "from stateous import on_state\n\n"
+        "@property\ndef plain() -> None: ...\n\n"
+        "@on_state(states.first, states.second)\ndef two_args() -> None: ...\n\n"
+        "@handlers['x'](states.third)\ndef indexed() -> None: ...\n\n"
+        "@other(states.fourth)\ndef other_name() -> None: ...\n\n"
+        "@on_state('fifth')\ndef not_a_state() -> None: ...\n\n"
+        "@on_state(states.a.b.c)\ndef too_deep() -> None: ...\n\n"
+        "@on_state(states.good)\ndef good() -> None: ...\n",
+        encoding="utf-8",
+    )
+
+    assert implemented_states(tmp_path) == {"good"}

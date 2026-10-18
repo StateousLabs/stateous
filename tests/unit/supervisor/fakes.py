@@ -8,6 +8,7 @@ from dataclasses import replace
 from types import ModuleType
 from typing import Any
 
+import httpx2
 from pydantic import BaseModel
 
 from stateous.model.contract import StateRef
@@ -15,7 +16,7 @@ from stateous.model.events import Occurrence
 from stateous.model.wire import Outcome, TaskGrant
 from stateous.supervisor.outbox import Outbox
 from stateous.supervisor.registry import Registry, Routine
-from stateous.supervisor.remote import GaveUp, Refused
+from stateous.supervisor.remote import ControlPlaneApi, GaveUp, Refused
 from stateous.supervisor.supervisor import Supervisor
 
 
@@ -234,3 +235,26 @@ async def run_until(
     for _ in range(signals):
         supervisor.on_signal()
     return await asyncio.wait_for(running, 5.0)
+
+
+GRANT = TaskGrant(
+    task=7,
+    token="T-1",
+    state="coding",
+    visit=1,
+    attempt=1,
+    context={"repo": "acme/api"},
+    memory={"dev": "s-1"},
+    entered_by=None,
+)
+
+Handler = Callable[[httpx2.Request], httpx2.Response]
+
+
+def api_with(handler: Handler, delays: list[float] | None = None) -> ControlPlaneApi:
+    async def sleep(seconds: float) -> None:
+        if delays is not None:
+            delays.append(seconds)
+
+    client = httpx2.AsyncClient(base_url="http://cp.test", transport=httpx2.MockTransport(handler))
+    return ControlPlaneApi("http://cp.test/", client=client, sleep=sleep)

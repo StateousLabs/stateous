@@ -627,3 +627,58 @@ def test_a_parallel_state_gets_no_stub() -> None:
 def test_a_stub_for_a_child_state_that_does_not_exist_is_refused() -> None:
     with pytest.raises(CodegenError, match="has no state 'legal/triage'"):
         generate_stub(parallel_document(), "legal/triage")
+
+
+def contract_of(schemas: dict[str, Any]) -> str:
+    """The contract for a document that holds only `schemas`."""
+    document: dict[str, Any] = {
+        "workflow": "w",
+        "events": {},
+        "states": {},
+        "schemas": schemas,
+    }
+    return generate_contract(document)
+
+
+def test_a_model_named_like_the_generated_context_alias_is_refused() -> None:
+    class TicketContext(BaseModel):
+        note: str
+
+    flow = Workflow("w", context=Ticket)
+    a = flow.state("a")
+    flow.transition(START, a)
+    flow.transition(a, END, on=flow.event("done", payload=TicketContext))
+
+    with pytest.raises(CodegenError, match="a model is named 'TicketContext'") as caught:
+        generate_contract(compile_workflow(flow))
+
+    assert "context of Ticket" in str(caught.value)
+
+
+def test_a_const_field_becomes_a_literal() -> None:
+    source = contract_of({"Box": {"properties": {"kind": {"const": "box"}}, "required": ["kind"]}})
+
+    assert 'kind: Literal["box"]' in source
+
+
+def test_a_list_of_types_becomes_a_union() -> None:
+    source = contract_of(
+        {"Box": {"properties": {"size": {"type": ["integer", "null"]}}, "required": ["size"]}}
+    )
+
+    assert "size: int | None" in source
+
+
+def test_a_type_that_is_not_known_becomes_any() -> None:
+    source = contract_of(
+        {"Box": {"properties": {"thing": {"type": "strange"}}, "required": ["thing"]}}
+    )
+
+    assert "thing: Any" in source
+
+
+def test_a_model_that_refers_to_itself_is_refused() -> None:
+    schemas = {"Node": {"properties": {"next": {"$ref": "#/$defs/Node"}}, "required": ["next"]}}
+
+    with pytest.raises(CodegenError, match="the model 'Node' refers to itself"):
+        contract_of(schemas)

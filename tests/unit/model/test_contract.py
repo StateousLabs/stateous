@@ -217,3 +217,7 @@ def test_an_unlabelled_function_implements_nothing() -> None:
 def test_the_state_must_come_from_a_contract() -> None:
     with pytest.raises(TypeError, match=r"a state from contract.states"):
         on_state("testing")  # type: ignore[arg-type]
+
+
+def test_an_occurrence_class_without_a_payload_argument_has_no_payload_model() -> None:
+    assert Occurrence.payload_model() is None

@@ -417,7 +417,8 @@ class Engine:
             tx.append(row.token, "event_dropped", event=event, reason=reason)
             return
         context = {**row.context, **held.context}
-        if held.context and (errors := graph.context_errors(context)):
+        # Each held change was checked when it arrived.
+        if held.context and (errors := graph.context_errors(context)):  # pragma: no cover
             reason = "the context changes break the schema: " + "; ".join(errors)
             tx.append(row.token, "event_dropped", event=event, reason=reason)
             return
@@ -514,7 +515,7 @@ class Engine:
         paused token holds the event; an event from `task` is held with the state,
         visit and task it came from. Returns why the event cannot move the token, or
         None. The caller records the refusal."""
-        if row.status in ENDED:
+        if row.status in ENDED:  # pragma: no cover - every caller checks first
             return f"token {row.token!r} is {row.status}; it takes no events"
         if row.status == "paused":
             self._hold(tx, row, event, payload, key=key, task=task)
@@ -1144,7 +1145,7 @@ class Engine:
     def _children(self, tx: Transaction, row: tables.Token) -> list[tables.Token]:
         """The children that the token's current visit of a parallel state started, in
         the order of the state's workflows. Empty in any other state."""
-        if row.state in (START, END):
+        if row.state in (START, END):  # pragma: no cover - a parent in START or END has no children
             return []
         spec = self._graph(row).state(row.state)
         if not spec.parallel:
@@ -1160,13 +1161,14 @@ class Engine:
         if child.parent is None:
             return
         parent = tx.token(child.parent)
-        if parent is None or parent.status != "active":
+        if parent is None or parent.status != "active":  # pragma: no cover - parent is held
             return  # a paused parent's children are paused too: they do not end
-        if parent.state in (START, END):
+        if parent.state in (START, END):  # pragma: no cover - a parent has a parallel state
             return
         spec = self._graph(parent).state(parent.state)
         prefix = child_id(parent.token, parent.state, parent.visit, "")
-        if not spec.parallel or not child.token.startswith(prefix):
+        # The parent cannot leave its state while a child runs.
+        if not spec.parallel or not child.token.startswith(prefix):  # pragma: no cover
             return  # the parent has left the state that started this child
         ended = [sibling for sibling in self._children(tx, parent) if sibling.status in ENDED]
         if spec.join == "all" and len(ended) < len(spec.parallel):

@@ -198,3 +198,17 @@ def test_the_inputs_of_a_parallel_state_are_a_list_of_names(inputs: Any) -> None
 
     with pytest.raises(GraphFileError, match="'inputs' is a list of context fields"):
         load_graph(dump_graph(document))
+
+
+def test_the_workflows_of_a_graph_file_must_be_an_object(sdlc_document: dict[str, Any]) -> None:
+    sdlc_document["workflows"] = ["review"]
+
+    with pytest.raises(GraphFileError, match="the graph file's 'workflows' is not an object"):
+        load_graph(json.dumps(sdlc_document))
+
+
+def test_a_state_of_a_graph_file_must_be_an_object(sdlc_document: dict[str, Any]) -> None:
+    sdlc_document["states"]["coding"] = "slow"
+
+    with pytest.raises(GraphFileError, match="the graph file's state 'coding' is not an object"):
+        load_graph(json.dumps(sdlc_document))

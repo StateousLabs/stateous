@@ -250,7 +250,8 @@ class Store:
         with self.transaction(wall_clock()) as tx:
             row = tx.control_plane()
             who, since = row.serving, row.since
-        if who is None or since is None:
+        # A race between the refusal and this message can empty the row.
+        if who is None or since is None:  # pragma: no cover
             return "another control plane serves this database; stop it first"
         return (
             f"another control plane serves this database ({who}, last seen at "
@@ -336,7 +337,7 @@ class Transaction:
         key = TOKEN_LOCK + self.family(token).lower()
         if key in self._locked:
             return True
-        if wait and self._locked:
+        if wait and self._locked:  # pragma: no cover - a programming-error guard
             raise RuntimeError("a transaction waits for a token's lock only when it holds none")
         function = "pg_advisory_xact_lock" if wait else "pg_try_advisory_xact_lock"
         held = self._session.scalar(
@@ -567,7 +568,7 @@ class Transaction:
         request id is equal to. The row is made first, so that the lock has a row to
         lock: two first claims with the same request id take turns, and the second
         is a repeat of the first."""
-        if self._locked:
+        if self._locked:  # pragma: no cover - a programming-error guard
             raise RuntimeError("a transaction locks a claim only when it holds no token lock")
         dialect = postgresql if self._locks else sqlite
         self._session.execute(
@@ -736,7 +737,7 @@ class Transaction:
         row = self._session.get(
             tables.ControlPlane, 1, populate_existing=True, with_for_update=self._locks
         )
-        if row is None:  # the migrations seed it; this is only a safety net
+        if row is None:  # pragma: no cover - the migrations seed this row
             row = tables.ControlPlane(id=1)
             self._session.add(row)
             self._session.flush()

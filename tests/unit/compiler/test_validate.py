@@ -407,3 +407,18 @@ def test_a_parallel_state_in_a_child_workflow_also_refuses_error() -> None:
         "in child workflow 'review': parallel state 'inner' has no task, so 'error' can "
         "never fire; check 'branches' on 'joined'"
     ) in problem
+
+
+def test_a_start_guard_that_reads_a_missing_key_names_the_start_transition() -> None:
+    flow = Workflow("w", context=Ticket)
+    a = flow.state("a")
+    flow.transition(START, a, when="ctx['nothing'] == 1")
+    flow.transition(START, a, otherwise=True)
+    flow.transition(a, END, on=flow.event("done"))
+
+    with pytest.raises(DefinitionError) as caught:
+        validate(flow)
+
+    assert "transition START --> 'a' reads ctx['nothing'], which Ticket does not have" in str(
+        caught.value
+    )

@@ -129,6 +129,9 @@ branch = true
 source = ["stateous"]
 parallel = true
 patch = ["subprocess"]
+# Alembic imports env.py under its own module name, outside `stateous`, so coverage
+# cannot see it. Every migration test runs it.
+omit = ["*/stateous/control/store/migrations/env.py"]
 
 [tool.coverage.report]
 fail_under = 95

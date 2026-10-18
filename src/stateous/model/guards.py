@@ -264,7 +264,7 @@ class _Evaluator:
             case ast.Call(func=ast.Attribute(attr=quantifier), args=[condition]):
                 results = (self.value(condition, branch=child) for child in self.facts.branches)
                 return all(results) if quantifier == "all" else any(results)
-            case _:  # parse_guard accepts only the cases above
+            case _:  # pragma: no cover - parse_guard refuses the other nodes first
                 raise GuardError(f"cannot evaluate {ast.dump(node)}")
 
 
@@ -293,7 +293,7 @@ def _compare(op: ast.cmpop, left: Any, right: Any) -> bool:
                 return right is not None and left in right
             case ast.NotIn():
                 return right is not None and left not in right
-            case _:
+            case _:  # pragma: no cover - parse_guard refuses the other operators first
                 return False
     except TypeError:
         return False
