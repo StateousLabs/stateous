@@ -161,10 +161,14 @@ stateous token start ORDER-1 '{"title": "first order"}'
 stateous token show ORDER-1
 ```
 
-`token start` prints `ORDER-1: draft, active`. One or two seconds later, `token show` prints the token and its history:
+`token start` prints `ORDER-1: draft, active`. One or two seconds later, `token show` prints the token, its context and its history:
 
 ```text
 ORDER-1: review, completed
+context:
+  {
+    "title": "first order"
+  }
 22:23:31  #1  started
 22:23:31  #2  __started__ in START
 22:23:31  #3  entered draft
@@ -193,6 +197,10 @@ The review sends `ORDER-2` back to `draft`. There, `draft` returns `None`, so th
 
 ```text
 ORDER-2: draft (visit 2), active
+context:
+  {
+    "title": "reject me"
+  }
 22:23:40  #1  started
 22:23:40  #2  __started__ in START
 22:23:40  #3  entered draft

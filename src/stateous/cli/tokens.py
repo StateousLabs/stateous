@@ -78,12 +78,18 @@ def show(
     graph: Annotated[
         bool, typer.Option("--graph", help="Draw the workflow as a Mermaid diagram.")
     ] = False,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Print the token, its children and its history as JSON."),
+    ] = False,
     url: Url = DEFAULT_URL,
 ) -> None:
-    """Show a token, its children and its history. With no ID, list the tokens. With
-    --graph, draw the workflow."""
+    """Show a token, its context, its children and its history. With no ID, list the
+    tokens. With --graph, draw the workflow."""
     if graph and token is not None:
         raise CommandError("give a token ID or --graph, not both")
+    if as_json and token is None:
+        raise CommandError("--json needs a token ID")
     with Client(url) as client:
         if graph:
             typer.echo(mermaid(client.workflow()), nl=False)
@@ -95,8 +101,15 @@ def show(
             if not found:
                 typer.echo("no tokens")
             return
-        typer.echo(token_line(client.get(token)))
+        found_token = client.get(token)
         children = client.tokens(parent=token, limit=MOST_CHILDREN)
+        if as_json:
+            whole = {"token": found_token, "children": children, "history": client.history(token)}
+            typer.echo(json.dumps(whole, indent=2))
+            return
+        typer.echo(token_line(found_token))
+        for line in context_lines(found_token["context"]):
+            typer.echo(line)
         for child in children:
             typer.echo("  child " + token_line(child))
         if len(children) == MOST_CHILDREN:
@@ -142,6 +155,13 @@ def token_line(token: dict[str, Any]) -> str:
     visit = token.get("visit", 1)
     shown = f" (visit {visit})" if isinstance(visit, int) and visit > 1 else ""
     return f"{token['token']}: {_named(str(token['state']))}{shown}, {token['status']}"
+
+
+def context_lines(context: dict[str, Any]) -> list[str]:
+    """`context: {}`; or `context:`, then the context as JSON, indented by two spaces."""
+    if not context:
+        return ["context: {}"]
+    return ["context:", *("  " + line for line in json.dumps(context, indent=2).splitlines())]
 
 
 def entry_line(entry: dict[str, Any]) -> str:

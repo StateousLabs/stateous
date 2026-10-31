@@ -214,21 +214,23 @@ stateous token fire TICKET-1 failed '{"passed": 3, "failed": 1}' --key gh-delive
 ### stateous token show
 
 ```text
-stateous token show [ID] [--graph] [--url URL]
+stateous token show [ID] [--graph] [--json] [--url URL]
 ```
 
-With an `ID`, it prints the token's line, its children and its history. With no `ID`, it lists at most 100 tokens, the most recently moved first.
+With an `ID`, it prints the token's line, its context, its children and its history. With no `ID`, it lists at most 100 tokens, the most recently moved first.
 
 | Argument or option | Meaning |
 |---|---|
 | `ID` | A token. Leave it out to list the tokens. |
 | `--graph` | Draw the workflow as a Mermaid diagram. Do not give an `ID` with it. |
+| `--json` | Print the token, its children and its history as one JSON object, for scripts. It needs an `ID`. |
 | `--url URL` | The control plane's URL. |
 
 It shows at most 1000 children. Each history line has the local time, the sequence number and what happened.
 
 ```bash
 stateous token show TICKET-1
+stateous token show TICKET-1 --json
 stateous token show --graph
 ```
 

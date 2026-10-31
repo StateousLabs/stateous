@@ -101,7 +101,9 @@ def test_show_lists_the_children_under_the_parent(served: str) -> None:
     assert result.exit_code == 0, result.output
     lines = result.stdout.splitlines()
     assert lines[0] == "T-1: reviews, active"
-    assert sorted(lines[1:3]) == [
+    children = [line for line in lines if line.startswith("  child ")]
+    assert lines.index(children[0]) > lines.index("context:")
+    assert sorted(children) == [
         f"  child {DESIGN}: triage, active",
         f"  child {SECURITY}: triage, active",
     ]

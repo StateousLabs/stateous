@@ -47,16 +47,22 @@ The duplicate shows the token as it is now. A key stays used for the life of the
 
 ```bash
 stateous token show TICKET-1
+stateous token show TICKET-1 --json
 stateous token show
 stateous token show --graph
 ```
 
-- With an id, `show` prints the token's line, its children, and its history. The times are local.
+- With an id, `show` prints the token's line, its context, its children, and its history. The times are local.
+- With an id and `--json`, it prints the same as one JSON object, for scripts.
 - With no id, it lists the tokens, at most 100, the most recently moved first.
 - `--graph` draws the workflow as a Mermaid diagram.
 
 ```text
 TICKET-1: testing, completed
+context:
+  {
+    "repo": "acme/api"
+  }
 23:43:39  #1  started
 23:43:39  #2  __started__ in START
 23:43:39  #3  entered coding

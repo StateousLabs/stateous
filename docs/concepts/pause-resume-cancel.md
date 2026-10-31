@@ -103,6 +103,10 @@ error: the control plane at http://127.0.0.1:8080 refused (409): token 'TICKET-3
 
 ```text
 TICKET-3: testing, cancelled
+context:
+  {
+    "repo": "acme/api"
+  }
 22:39:47  #1  started
 22:39:47  #2  __started__ in START
 22:39:47  #3  entered coding

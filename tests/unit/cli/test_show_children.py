@@ -35,7 +35,7 @@ class Listing:
         return None
 
     def get(self, token: str) -> dict[str, Any]:
-        return {"token": token, "state": "reviews", "status": "active", "visit": 1}
+        return {"token": token, "state": "reviews", "status": "active", "visit": 1, "context": {}}
 
     def tokens(
         self, *, status: str | None = None, parent: str | None = None, limit: int | None = None
