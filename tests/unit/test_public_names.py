@@ -7,6 +7,8 @@ def test_the_public_names_are_the_contracts() -> None:
     assert stateous.__all__ == [
         "END",
         "START",
+        "Branch",
+        "Branches",
         "Client",
         "Context",
         "Occurrence",

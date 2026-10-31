@@ -6,6 +6,7 @@ a user imports comes from here.
 """
 
 from stateous.client import Client
+from stateous.model.branches import Branch, Branches
 from stateous.model.context import Context
 from stateous.model.contract import OutcomeError, StateRef, on_state
 from stateous.model.events import Occurrence
@@ -14,6 +15,8 @@ from stateous.model.workflow import END, START, Workflow
 __all__ = [
     "END",
     "START",
+    "Branch",
+    "Branches",
     "Client",
     "Context",
     "Occurrence",

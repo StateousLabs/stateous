@@ -88,6 +88,7 @@ def _problems(flow: Workflow) -> Iterable[str]:
     yield from _overlapping_guards(flow)
     yield from _context_keys(flow)
     yield from _inputs(flow)
+    yield from _branch_context_fields(flow)
     yield from _parallel_exits(flow)
     yield from _counted_events(flow)
 
@@ -181,6 +182,25 @@ def _inputs(flow: Workflow) -> Iterable[str]:
                         f"state {state.name!r} does not hand on {key!r}, which "
                         f"{child.name!r} requires; add it to inputs"
                     )
+
+
+def _branch_context_fields(flow: Workflow) -> Iterable[str]:
+    """A guard on `joined` reads `context.<field>` of a child: some child workflow of
+    the state must have that field in its context model."""
+    for edge in flow.transitions:
+        if edge.when is None or not edge.source.parallel:
+            continue
+        known = {
+            name
+            for child in edge.source.parallel
+            if child.context is not None
+            for name in child.context.model_fields
+        }
+        for name in sorted(edge.when.branch_context_fields - known):
+            yield (
+                f"guard {edge.when.expression!r}: no child workflow of "
+                f"{edge.source.name!r} has the context field {name!r}"
+            )
 
 
 def _parallel_exits(flow: Workflow) -> Iterable[str]:

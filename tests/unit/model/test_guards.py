@@ -24,7 +24,7 @@ from stateous.model.guards import GuardError, GuardInput, evaluate, parse_guard
         "ctx['delta'] in [-1, 2.5]",
         "payload.severity in ctx['levels']",
         "branches.all(final == 'approved')",
-        "branches.any(status == 'failed' and payload.count > 0)",
+        "branches.any(status == 'failed' and context.count > 0)",
         "branches.all(workflow in ['security', 'design']) and ctx['repo'] != null",
     ],
 )
@@ -139,12 +139,23 @@ def test_comparing_null_with_a_number_is_false_not_an_error() -> None:
 # ── branches ──────────────────────────────────────────────────────────────
 
 
-def test_a_guard_with_branches_says_so_and_keeps_a_childs_payload_apart() -> None:
-    guard = parse_guard("branches.any(payload.count > 2) and payload.severity == 'high'")
+def test_a_guard_with_branches_says_so_and_keeps_a_childs_context_apart() -> None:
+    guard = parse_guard("branches.any(context.count > 2) and payload.severity == 'high'")
 
     assert guard.branches is True
-    assert guard.payload_fields == {"severity"}  # a child's payload is not the routed one
+    assert guard.payload_fields == {"severity"}
+    assert guard.branch_context_fields == {"count"}
     assert parse_guard("count('failed') < 3").branches is False
+
+
+def test_a_childs_payload_is_not_kept() -> None:
+    with pytest.raises(GuardError, match=r"a child's payload is not kept; read context.<field>"):
+        parse_guard("branches.any(payload.count > 2)")
+
+
+def test_context_with_a_dot_is_for_a_child() -> None:
+    with pytest.raises(GuardError, match=r"context.<field> is for a child in branches"):
+        parse_guard("context.count > 2")
 
 
 CHILDREN: list[dict[str, Any]] = [
@@ -153,14 +164,14 @@ CHILDREN: list[dict[str, Any]] = [
         "token": "T-1.reviews.1.security",
         "status": "completed",
         "final": "approved",
-        "payload": None,
+        "context": {},
     },
     {
         "workflow": "design",
         "token": "T-1.reviews.1.design",
         "status": "failed",
         "final": "rejected",
-        "payload": {"count": 2},
+        "context": {"count": 2},
     },
 ]
 
@@ -170,8 +181,8 @@ CHILDREN: list[dict[str, Any]] = [
     [
         ("branches.all(final == 'approved')", False),
         ("branches.any(final == 'rejected')", True),
-        ("branches.any(payload.count == 2)", True),
-        ("branches.all(payload.count == null)", False),
+        ("branches.any(context.count == 2)", True),
+        ("branches.all(context.count == null)", False),
         ("branches.any(status == 'failed' and workflow == 'design')", True),
         ("branches.all(token != null)", True),
         ("branches.any(final == 'approved') and ctx['repo'] == 'acme/api'", True),
@@ -193,7 +204,7 @@ def test_with_no_children_all_holds_and_any_does_not() -> None:
         ("ctx['a'] == true and ctx['b'] == True", r"True is not a literal of the guard language"),
         ("ctx['a'] == None", r"None is not a literal of the guard language"),
         ("ctx['a'] == b'x'", r"b'x' is not a literal of the guard language"),
-        ("ctx['a'].size == 1", r"only payload.<field> may be read with a dot"),
+        ("ctx['a'].size == 1", r"only payload.<field> and context.<field> may be read with a dot"),
     ],
 )
 def test_a_guard_error_tells_the_person_what_to_change(expression: str, reason: str) -> None:

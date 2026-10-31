@@ -426,17 +426,6 @@ class Transaction:
                 return entry
         return None
 
-    def arrival_payload(self, token: str) -> dict[str, Any] | None:
-        """The payload of the event that brought the token into the last state it
-        entered. For a completed token, that is the state it ended from."""
-        entries = self.entries(token)
-        entered = max((i for i, e in enumerate(entries) if e.kind == "entered"), default=0)
-        for entry in reversed(entries[:entered]):
-            if entry.kind == "event_accepted":
-                payload: dict[str, Any] | None = entry.data.get("payload")
-                return payload
-        return None
-
     # ── tokens ──────────────────────────────────────────────────────────
 
     def token(self, token: str) -> tables.Token | None:

@@ -366,19 +366,3 @@ def test_a_claim_names_a_child_workflows_state_as_workflow_slash_state() -> None
     assert claimed(["a/triage"]) == "T-1.r.1.a"
     assert claimed(["triage"]) == "T-1"
     assert claimed(["b/check", "triage"]) == "T-1.r.1.a.s.1.b"
-
-
-def test_the_arrival_payload_is_that_of_the_event_that_entered_the_last_state() -> None:
-    store = Store("sqlite://")
-    with store.transaction(NOW) as tx:
-        tx.append("C-1", "started", context={})
-        tx.append("C-1", "event_accepted", event="__started__", payload=None, state="__start__")
-        tx.append("C-1", "entered", state="triage", visit=1)
-        tx.append("C-1", "event_accepted", event="deny", payload={"count": 2}, state="triage")
-        tx.append("C-1", "entered", state="rejected", visit=1)
-        tx.append("C-1", "event_accepted", event="recorded", payload=None, state="rejected")
-        tx.append("C-1", "completed")
-
-    with store.transaction(NOW) as tx:
-        assert tx.arrival_payload("C-1") == {"count": 2}
-        assert tx.arrival_payload("NONE") is None

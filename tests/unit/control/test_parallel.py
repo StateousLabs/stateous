@@ -154,13 +154,13 @@ def test_each_ended_child_is_one_entry_of_the_joined_payload() -> None:
     finish(engine, DESIGN, "deny", {"count": 2})
 
     assert engine.get(TOP).state == "coding"  # not both approved: the fallback
-    # `final` and `payload` tell of one moment: the event that brought the child into
-    # its last state, not the one that took it on to END.
+    # `final` is the state that the child was in before END; `context` is the child's
+    # context when it ended. A child's payload is not kept (R1).
     assert joined(engine) == [
         {"workflow": "design", "token": DESIGN, "status": "completed", "final": "rejected",
-         "payload": {"count": 2}},
+         "context": engine.get(DESIGN).context},
         {"workflow": "security", "token": SECURITY, "status": "completed", "final": "approved",
-         "payload": None},
+         "context": engine.get(SECURITY).context},
     ]  # fmt: skip
 
 
@@ -174,8 +174,8 @@ def test_a_failed_child_is_in_the_join_with_the_state_it_failed_in() -> None:
     engine.report(grant.task, Outcome(kind="failed", error="GitHub is down"), supervisor="box")
 
     design = joined(engine)[0]
-    assert (design["status"], design["final"], design["payload"]) == (
-        "failed", "rejected", {"count": 1},
+    assert (design["status"], design["final"], design["context"]) == (
+        "failed", "rejected", engine.get(DESIGN).context,
     )  # fmt: skip
     assert engine.get(DESIGN).status == "failed"
     assert engine.get(TOP).state == "coding"

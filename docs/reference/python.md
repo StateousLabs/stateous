@@ -14,6 +14,12 @@ You write a workflow in `flow.py`, with `Workflow`, `START` and `END`. `stateous
 
 ::: stateous.END
 
+A parallel state with `into=` keeps the data of its join in the context, as `Branches`. See [Parallel and nested work](../concepts/parallel.md).
+
+::: stateous.Branches
+
+::: stateous.Branch
+
 ## Write a routine
 
 A routine is a function in the supervisor's folder. `@on_state` marks it, `ctx` is its `Context`, and it returns an `Occurrence`. The generated `contract.py` gives the `StateRef` of each state. See [Write a routine](../how-to/write-a-routine.md).

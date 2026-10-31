@@ -15,7 +15,7 @@ an expression; then each node is checked against the grammar below. Nothing goes
     children     branches.all(c)    on `joined` only: c holds for each ended child
                  branches.any(c)    on `joined` only: c holds for one ended child
                                     In c: workflow, token, status, final and
-                                    payload.<field> of that child
+                                    context.<field> of that child
 
 `in` and `not in` search a list literal or a value that an accessor reads, never
 a string literal.
@@ -33,7 +33,7 @@ _COMPARISONS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq, ast.In, ast
 
 BRANCH_FIELDS = frozenset({"workflow", "token", "status", "final"})
 """What a condition in `branches.all(...)` or `branches.any(...)` reads of one ended
-child, besides `payload.<field>`: one entry of the `joined` payload."""
+child, besides `context.<field>`: one entry of the `joined` payload."""
 
 
 class GuardError(ValueError):
@@ -49,10 +49,12 @@ class Guard:
     tree: ast.Expression
     context_keys: frozenset[str] = field(default_factory=frozenset[str])
     payload_fields: frozenset[str] = field(default_factory=frozenset[str])
-    """The fields of the routed event's payload. A child's payload is not in it."""
+    """The fields of the routed event's payload."""
     events: frozenset[str] = field(default_factory=frozenset[str])
     branches: bool = False
     """True when the guard reads `branches.all(...)` or `branches.any(...)`."""
+    branch_context_fields: frozenset[str] = field(default_factory=frozenset[str])
+    """The fields of a child's context that `context.<field>` reads in a branch."""
 
 
 def parse_guard(expression: str) -> Guard:
@@ -70,6 +72,7 @@ def parse_guard(expression: str) -> Guard:
         payload_fields=frozenset(checker.payload_fields),
         events=frozenset(checker.events),
         branches=checker.branches,
+        branch_context_fields=frozenset(checker.branch_context_fields),
     )
 
 
@@ -92,6 +95,7 @@ class _Checker:
         self.expression = expression
         self.context_keys: set[str] = set()
         self.payload_fields: set[str] = set()
+        self.branch_context_fields: set[str] = set()
         self.events: set[str] = set()
         self.branches = False
 
@@ -148,6 +152,8 @@ class _Checker:
             return
         if name == "payload":
             raise self.fail("name a payload field, e.g. payload.severity")
+        if name == "context":
+            raise self.fail("name a field of a child's context, e.g. context.verdict")
         if name == "ctx":
             raise self.fail("read one key, e.g. ctx['key']")
         if name in BRANCH_FIELDS:
@@ -166,12 +172,20 @@ class _Checker:
     def attribute(self, node: ast.Attribute, *, in_branch: bool) -> None:
         match node:
             case ast.Attribute(value=ast.Name(id="payload"), attr=attr):
-                if not in_branch:  # a child's payload is not the routed event's payload
-                    self.payload_fields.add(attr)
+                if in_branch:
+                    raise self.fail("a child's payload is not kept; read context.<field>")
+                self.payload_fields.add(attr)
+            case ast.Attribute(value=ast.Name(id="context"), attr=attr):
+                if not in_branch:
+                    raise self.fail(
+                        "context.<field> is for a child in branches.all(...) or "
+                        "branches.any(...); read the token's context as ctx['key']"
+                    )
+                self.branch_context_fields.add(attr)
             case ast.Attribute(value=ast.Name(id="ctx")):
                 raise self.fail("read context as ctx['key']")
             case _:
-                raise self.fail("only payload.<field> may be read with a dot")
+                raise self.fail("only payload.<field> and context.<field> may be read with a dot")
 
     def call(self, node: ast.Call, *, in_branch: bool) -> None:
         match node:
@@ -213,7 +227,7 @@ class GuardInput:
     """Event name -> accepted occurrences on the token, the one being routed included."""
     branches: Sequence[Mapping[str, Any]] = ()
     """For `joined`: one entry for each ended child, with `workflow`, `token`,
-    `status`, `final` and `payload`. Empty for every other event."""
+    `status`, `final` and `context`. Empty for every other event."""
 
 
 def evaluate(guard: Guard, facts: GuardInput) -> bool:
@@ -257,8 +271,8 @@ class _Evaluator:
             case ast.Subscript(slice=ast.Constant(value=str(key))):
                 return self.facts.context.get(key)
             case ast.Attribute(attr=attr):
-                payload = self.facts.payload if branch is None else _payload_of(branch)
-                return payload.get(attr)
+                found = self.facts.payload if branch is None else _context_of(branch)
+                return found.get(attr)
             case ast.Call(func=ast.Name(id="count"), args=[ast.Constant(value=str(event))]):
                 return self.facts.counts.get(event, 0)
             case ast.Call(func=ast.Attribute(attr=quantifier), args=[condition]):
@@ -268,10 +282,10 @@ class _Evaluator:
                 raise GuardError(f"cannot evaluate {ast.dump(node)}")
 
 
-def _payload_of(branch: Mapping[str, Any]) -> Mapping[str, Any]:
-    """A child's payload; an empty one when its event carried none."""
-    payload = branch.get("payload")
-    return cast("Mapping[str, Any]", payload) if isinstance(payload, Mapping) else {}
+def _context_of(branch: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A child's context."""
+    context = branch.get("context")
+    return cast("Mapping[str, Any]", context) if isinstance(context, Mapping) else {}
 
 
 def _compare(op: ast.cmpop, left: Any, right: Any) -> bool:

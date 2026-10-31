@@ -1180,14 +1180,14 @@ class Engine:
             self._fail(tx, parent, f"the join of {parent.state!r} cannot move the token: {refusal}")
 
     def _branch(self, tx: Transaction, child: tables.Token) -> dict[str, Any]:
-        """One entry of the `joined` payload. `final` and `payload` tell of one moment:
-        the event that brought the child into its last state."""
+        """One entry of the `joined` payload: a `Branch`. `final` is the state that the
+        child was in when it ended; `context` is its context then."""
         return {
             "workflow": child.workflow,
             "token": child.token,
             "status": child.status,
             "final": child.state,
-            "payload": tx.arrival_payload(child.token),
+            "context": dict(child.context),
         }
 
     # ── small parts ─────────────────────────────────────────────────────

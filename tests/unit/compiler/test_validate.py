@@ -422,3 +422,25 @@ def test_a_start_guard_that_reads_a_missing_key_names_the_start_transition() -> 
     assert "transition START --> 'a' reads ctx['nothing'], which Ticket does not have" in str(
         caught.value
     )
+
+
+def test_a_branch_guard_reads_only_a_field_of_a_childs_context() -> None:
+    flow = Workflow("sdlc", context=Review)
+    reviews = flow.state("reviews", parallel=[review("security")], inputs=("repo", "branch"))
+    flow.transition(START, reviews)
+    flow.transition(reviews, END, on="joined", when="branches.all(context.nope == 1)")
+    flow.transition(reviews, reviews, on="joined", otherwise=True)
+
+    problem = refused(flow)
+
+    assert "no child workflow of 'reviews' has the context field 'nope'" in problem
+
+
+def test_a_branch_guard_may_read_a_field_of_a_childs_context() -> None:
+    flow = Workflow("sdlc", context=Review)
+    reviews = flow.state("reviews", parallel=[review("security")], inputs=("repo", "branch"))
+    flow.transition(START, reviews)
+    flow.transition(reviews, END, on="joined", when="branches.all(context.repo != null)")
+    flow.transition(reviews, reviews, on="joined", otherwise=True)
+
+    validate(flow)
