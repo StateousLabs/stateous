@@ -253,6 +253,6 @@ def test_the_tutorial_shows_the_starter_flow_as_init_writes_it() -> None:
     blocks = [
         block
         for block in PYTHON.findall(read(DOCS / "getting-started.md"))
-        if block.startswith("# orders/flow.py")
+        if block.startswith("# orders/flow.py:")
     ]
     assert blocks == [flow_text("orders")]

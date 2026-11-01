@@ -117,14 +117,17 @@ class Graph:
         return [] if self._context is None else self._errors(self._context, context)
 
     def with_defaults(self, context: dict[str, Any]) -> dict[str, Any]:
-        """The context, with each field that its schema gives a default filled in."""
+        """The context, with each field that its schema gives a default filled in. The
+        fields are in the order of the context model, then any other keys."""
         if self._context is None:
             return dict(context)
         properties = cast(
             "dict[str, dict[str, Any]]", self._schemas[self._context].get("properties", {})
         )
         filled = {name: spec["default"] for name, spec in properties.items() if "default" in spec}
-        return {**filled, **context}
+        merged = {**filled, **context}
+        ordered = {name: merged[name] for name in properties if name in merged}
+        return {**ordered, **{key: value for key, value in merged.items() if key not in ordered}}
 
     def _errors(self, schema: str, value: Any) -> list[str]:
         validator = Draft202012Validator({"$ref": f"#/schemas/{schema}", "schemas": self._schemas})

@@ -2,7 +2,8 @@
 started): `flow.py` and `schemas.py`, in the folder `NAME/`.
 
 The text is built in Python, as `stateous.compiler.codegen` builds `contract.py`. The
-starter compiles as it is: two states, two events (one with a payload), and a guard."""
+starter compiles as it is: one state, `work`, and one event, `done`, whose payload the
+context keeps. Its comments give the two rules: where data goes, and who decides."""
 
 from __future__ import annotations
 
@@ -18,28 +19,24 @@ def flow_text(name: str) -> str:
 # the graph file, {name}/build/{name}.json.
 from stateous import END, START, Workflow
 
-from schemas import Item, Verdict
+from schemas import Job, Result
 
-# The workflow and its name. Each token has a context: an Item (see schemas.py).
-flow = Workflow("{name}", context=Item)
+# The workflow. Each token has a context: a Job (see schemas.py). The context is
+# the data of a token. A routine reads and writes only the context.
+flow = Workflow("{name}", context=Job)
 
 # The states. A token is in one state at a time. A routine does the work of a state.
-# `timeout=` and `retries=` are optional. See
-# https://stateouslabs.github.io/stateous/how-to/write-a-workflow/
-draft = flow.state("draft")
-review = flow.state("review")
+work = flow.state("work")
 
-# The events: the outcomes that move a token. A payload is optional.
-submitted = flow.event("submitted")  # no payload
-reviewed = flow.event("reviewed", payload=Verdict)  # the payload is a Verdict
+# The events. An event moves a token. Its payload says why the token moved.
+# `into="result"` keeps the payload in the context, as ctx["result"].
+done = flow.event("done", payload=Result, into="result")
 
 # The transitions: where each event takes a token. START and END begin and end each token.
-flow.transition(START, draft)  # a new token goes to `draft` at once
-flow.transition(draft, review, on=submitted)
-# A guard (`when=`) is optional. Here, the payload of `reviewed` chooses the target.
-flow.transition(review, END, on=reviewed, when="payload.approved == true")
-# `otherwise=True` marks the transition to use when no guard matches.
-flow.transition(review, draft, on=reviewed, otherwise=True)
+# A routine decides which event to return. A guard (`when=`) only chooses a transition.
+# See https://stateouslabs.github.io/stateous/concepts/data/
+flow.transition(START, work)
+flow.transition(work, END, on=done)
 """
 
 
@@ -51,15 +48,15 @@ def schemas_text(name: str) -> str:
 from pydantic import BaseModel
 
 
-class Item(BaseModel):
+class Result(BaseModel):
+    """The payload of the event `done`."""
+
+    summary: str
+
+
+class Job(BaseModel):
     """The context of each token of `{name}`."""
 
     title: str
-
-
-class Verdict(BaseModel):
-    """The payload of the event `reviewed`."""
-
-    approved: bool
-    note: str = ""
+    result: Result | None = None  # `done` keeps its payload here
 '''

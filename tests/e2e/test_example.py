@@ -370,12 +370,20 @@ def test_the_example_runs_as_real_processes(tmp_path: Path, processes: Processes
 TUTORIAL = ROOT / "docs" / "getting-started.md"
 ROUTINE_BLOCK = re.compile(r"```python\n(# orders-supervisor/(\w+)\.py\n.*?)```", re.DOTALL)
 TOKEN_START = re.compile(r"^stateous token start (ORDER-\d+) '(\{.*\})'$", re.MULTILINE)
+YOUR_VERSION = re.compile(r"```python\n(# orders/(\w+)\.py \(your version\)\n.*?)```", re.DOTALL)
 
 
 def tutorial_routines() -> dict[str, str]:
     """The routines that the tutorial tells the reader to write, by file name."""
     text = TUTORIAL.read_text(encoding="utf-8")
     return {name: block for block, name in ROUTINE_BLOCK.findall(text)}
+
+
+def tutorial_workflow() -> dict[str, str]:
+    """The files of `orders/` that the tutorial tells the reader to write over the
+    starter, by file name."""
+    text = TUTORIAL.read_text(encoding="utf-8")
+    return {name: block for block, name in YOUR_VERSION.findall(text)}
 
 
 def tutorial_tokens() -> dict[str, str]:
@@ -404,6 +412,12 @@ def test_a_new_workflow_runs_from_init_to_a_completed_token(
     # init workflow writes a starter that compiles; serve runs its graph file
     made = processes.ok("init", "workflow", "orders", cwd=tmp_path)
     assert "stateous serve orders/build/orders.json" in made, made
+    # the reader makes the starter into `orders`, then compiles again
+    written = tutorial_workflow()
+    assert set(written) == {"flow", "schemas"}
+    for name, text in written.items():
+        (tmp_path / "orders" / f"{name}.py").write_text(text, encoding="utf-8", newline="\n")
+    processes.ok("compile", "orders/flow.py", cwd=tmp_path)
     serve_log = tmp_path / "serve.log"
     database = f"sqlite:///{(tmp_path / 'orders.db').as_posix()}"
     processes.start(

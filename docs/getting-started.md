@@ -36,47 +36,98 @@ Next steps:
 
 On Windows, the paths in these lines have `\` in place of `/`.
 
-This is `orders/flow.py`:
+This is `orders/flow.py`, as `init` writes it:
 
 ```python
 # orders/flow.py: the workflow. `stateous compile orders/flow.py` checks it and writes
 # the graph file, orders/build/orders.json.
 from stateous import END, START, Workflow
 
-from schemas import Item, Verdict
+from schemas import Job, Result
 
-# The workflow and its name. Each token has a context: an Item (see schemas.py).
-flow = Workflow("orders", context=Item)
+# The workflow. Each token has a context: a Job (see schemas.py). The context is
+# the data of a token. A routine reads and writes only the context.
+flow = Workflow("orders", context=Job)
 
 # The states. A token is in one state at a time. A routine does the work of a state.
-# `timeout=` and `retries=` are optional. See
-# https://stateouslabs.github.io/stateous/how-to/write-a-workflow/
+work = flow.state("work")
+
+# The events. An event moves a token. Its payload says why the token moved.
+# `into="result"` keeps the payload in the context, as ctx["result"].
+done = flow.event("done", payload=Result, into="result")
+
+# The transitions: where each event takes a token. START and END begin and end each token.
+# A routine decides which event to return. A guard (`when=`) only chooses a transition.
+# See https://stateouslabs.github.io/stateous/concepts/data/
+flow.transition(START, work)
+flow.transition(work, END, on=done)
+```
+
+The starter has one state, `work`, and one event, `done`. Its comments give two rules:
+
+- **Where data goes.** The context is the data of a token. A routine reads and writes only the context. An event's payload says why the token moved. `into=` keeps a payload in the context. See [Where data goes](concepts/data.md).
+- **Who decides.** A routine decides, and returns the event that names its decision. A guard only chooses a transition.
+
+## Make it yours
+
+Now change the starter into `orders`. Replace `orders/schemas.py` with this:
+
+```python
+# orders/schemas.py (your version)
+from pydantic import BaseModel
+
+
+class Verdict(BaseModel):
+    """The payload of the event `reviewed`."""
+
+    approved: bool
+    note: str = ""
+
+
+class Item(BaseModel):
+    """The context of each token of `orders`."""
+
+    title: str
+    verdict: Verdict | None = None  # `reviewed` keeps its payload here
+```
+
+Replace `orders/flow.py` with this:
+
+```python
+# orders/flow.py (your version)
+from stateous import END, START, Workflow
+
+from schemas import Item, Verdict
+
+flow = Workflow("orders", context=Item)
+
 draft = flow.state("draft")
 review = flow.state("review")
 
-# The events: the outcomes that move a token. A payload is optional.
 submitted = flow.event("submitted")  # no payload
-reviewed = flow.event("reviewed", payload=Verdict)  # the payload is a Verdict
+reviewed = flow.event("reviewed", payload=Verdict, into="verdict")
 
-# The transitions: where each event takes a token. START and END begin and end each token.
 flow.transition(START, draft)  # a new token goes to `draft` at once
 flow.transition(draft, review, on=submitted)
-# A guard (`when=`) is optional. Here, the payload of `reviewed` chooses the target.
+# The routine of `review` decides. The guard only routes on its Verdict.
 flow.transition(review, END, on=reviewed, when="payload.approved == true")
-# `otherwise=True` marks the transition to use when no guard matches.
 flow.transition(review, draft, on=reviewed, otherwise=True)
+```
+
+Then compile it again:
+
+```bash
+stateous compile orders/flow.py
 ```
 
 What each part does:
 
 - `Workflow("orders", context=Item)` makes the workflow. A **token** is one run of the workflow. Each token has a **context**: here, an `Item`.
 - `flow.state(...)` adds a **state**. A token is in one state at a time. When a token enters a state, the control plane makes a **task** for it.
-- `flow.event(...)` adds an **event**: an outcome of a state. Only an event moves a token. An event can have a **payload**, for example a `Verdict`.
+- `flow.event(...)` adds an **event**. Only an event moves a token. An event can have a **payload**, for example a `Verdict`. With `into="verdict"`, the context keeps the `Verdict` as `ctx["verdict"]`.
 - `flow.transition(...)` tells where an event takes a token. `START` is where each token begins, and `END` is where it ends.
 - `when=` is a **guard**: a condition on the payload or the context. Here, an approved `Verdict` ends the token.
 - `otherwise=True` marks the transition that applies when no guard matches. Here, a `Verdict` that does not approve sends the token back to `draft`.
-
-`orders/schemas.py` holds the two models. `Item` has one field, `title`. `Verdict` has the fields `approved` and `note`.
 
 This is the graph of `orders`:
 
@@ -88,7 +139,7 @@ stateDiagram-v2
     review --> draft: reviewed (otherwise)
 ```
 
-`init` also compiled `flow.py` to the graph file `orders/build/orders.json`. After you change `flow.py`, compile it again with `stateous compile orders/flow.py`.
+`stateous compile` writes the graph file `orders/build/orders.json`. After each change to `flow.py` or `schemas.py`, compile again.
 
 ## Terminal 1: serve the workflow
 
@@ -167,7 +218,11 @@ stateous token show ORDER-1
 ORDER-1: review, completed
 context:
   {
-    "title": "first order"
+    "title": "first order",
+    "verdict": {
+      "approved": true,
+      "note": ""
+    }
   }
 22:23:31  #1  started
 22:23:31  #2  __started__ in START
@@ -179,9 +234,10 @@ context:
 22:23:32  #8  entered review
 22:23:32  #9  task 2 queued for review
 22:23:32  #10  build-box-1 took task 2 (attempt 1)
-22:23:32  #11  reviewed in review: {"approved": true, "note": ""}
-22:23:32  #12  task 2 done
-22:23:32  #13  completed
+22:23:32  #11  context changed: verdict
+22:23:32  #12  reviewed in review: {"approved": true, "note": ""}
+22:23:32  #13  task 2 done
+22:23:32  #14  completed
 ```
 
 The first line gives the last state and the status. `build-box-1` is the name of the supervisor: by default, the host name of its computer.
@@ -199,7 +255,11 @@ The review sends `ORDER-2` back to `draft`. There, `draft` returns `None`, so th
 ORDER-2: draft (visit 2), active
 context:
   {
-    "title": "reject me"
+    "title": "reject me",
+    "verdict": {
+      "approved": false,
+      "note": ""
+    }
   }
 22:23:40  #1  started
 22:23:40  #2  __started__ in START
@@ -211,13 +271,14 @@ context:
 22:23:40  #8  entered review
 22:23:40  #9  task 4 queued for review
 22:23:40  #10  build-box-1 took task 4 (attempt 1)
-22:23:40  #11  reviewed in review: {"approved": false, "note": ""}
-22:23:40  #12  task 4 done
-22:23:40  #13  entered draft (visit 2)
-22:23:40  #14  task 5 queued for draft
-22:23:40  #15  build-box-1 took task 5 (attempt 1)
-22:23:40  #16  the review sent this order back: a person must change it
-22:23:40  #17  task 5 waits: the work goes on outside
+22:23:40  #11  context changed: verdict
+22:23:40  #12  reviewed in review: {"approved": false, "note": ""}
+22:23:40  #13  task 4 done
+22:23:40  #14  entered draft (visit 2)
+22:23:40  #15  task 5 queued for draft
+22:23:40  #16  build-box-1 took task 5 (attempt 1)
+22:23:40  #17  the review sent this order back: a person must change it
+22:23:40  #18  task 5 waits: the work goes on outside
 ```
 
 The token stays in `draft` until a person acts. For example, `stateous token cancel ORDER-2` cancels it. [Steer tokens](how-to/steer-tokens.md) tells what else a person can do.

@@ -26,6 +26,12 @@ from stateous.model.graph_file import checksum
 
 from ...parallel import parallel_document
 
+STUB_HINT = (
+    '    # Read and write the context: ctx["key"], ctx["key"] = value.\n'
+    "    # Then return the event that names your decision, e.g. events.<event>(...).\n"
+)
+"""The two comment lines above the `raise` of each stub routine."""
+
 EXPECTED = """\
 # GENERATED from the `sdlc` workflow — do not edit.
 # <checksum>
@@ -448,6 +454,7 @@ def test_a_stub_is_a_typed_routine_for_its_state(
         "\n"
         "@on_state(states.testing)\n"
         "def testing(ctx: TicketContext) -> events.passed | events.failed:\n"
+        f"{STUB_HINT}"
         "    raise NotImplementedError(\"do the work of 'testing' here\")\n"
     )
     state = implementation_of(stub.testing)
@@ -613,6 +620,7 @@ def test_a_stub_for_a_child_state_uses_the_childs_names(tmp_path: Path) -> None:
         "\n"
         "@on_state(states.security.triage)\n"
         "def triage(ctx: ReviewContext) -> events.security.lgtm | events.security.deny:\n"
+        f"{STUB_HINT}"
         "    raise NotImplementedError(\"do the work of 'security/triage' here\")\n"
     )
     state = implementation_of(stub.triage)

@@ -161,6 +161,8 @@ def generate_stub(document: dict[str, Any], state: str) -> str:
         "",
         f"@on_state(states.{namespace}{function})",
         f"def {function}(ctx: {ctx_type}) -> {' | '.join(outcomes) or 'None'}:",
+        '    # Read and write the context: ctx["key"], ctx["key"] = value.',
+        "    # Then return the event that names your decision, e.g. events.<event>(...).",
         f"    raise NotImplementedError({message})",
     ]
     return "\n".join(lines) + "\n"

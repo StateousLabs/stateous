@@ -133,3 +133,11 @@ def test_joined_is_stateous_own_event() -> None:
     assert JOINED in OWN_EVENTS
     assert not graph.declares(JOINED)
     assert [t.target for t in graph.candidates("reviews", JOINED)] == ["merging", "coding"]
+
+
+def test_the_defaults_keep_the_order_of_the_context_model() -> None:
+    graph = Graph(sdlc())
+
+    filled = graph.with_defaults({"urgent": True, "repo": "acme/api", "extra": 1})
+
+    assert list(filled) == ["repo", "rejected", "urgent", "extra"]

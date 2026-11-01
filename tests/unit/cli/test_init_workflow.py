@@ -53,13 +53,13 @@ def test_the_starter_graph_is_what_compile_writes(tmp_path: Path) -> None:
     assert written == dump_graph(compile_workflow(load_workflow(tmp_path / "orders/flow.py")))
 
 
-def test_the_starter_has_two_states_two_events_and_a_payload(tmp_path: Path) -> None:
+def test_the_starter_is_one_state_and_one_event_kept_in_the_context(tmp_path: Path) -> None:
     runner.invoke(app, ["init", "workflow", "orders"])
 
     document = json.loads((tmp_path / "orders/build/orders.json").read_text(encoding="utf-8"))
-    assert len(document["states"]) == 2
-    assert len(document["events"]) == 2
-    assert any("payload" in event for event in document["events"].values())
+    assert list(document["states"]) == ["work"]
+    assert document["events"]["done"]["into"] == "result"
+    assert "payload" in document["events"]["done"]
     assert document["context"] is not None
     flow = (tmp_path / "orders" / "flow.py").read_text(encoding="utf-8")
     assert "from schemas import" in flow
