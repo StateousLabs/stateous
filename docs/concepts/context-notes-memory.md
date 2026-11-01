@@ -27,7 +27,7 @@ These are the fields of `ctx`:
 | `ctx.task` | The task's id. |
 | `ctx.visit` | 1 the first time the token is in this state, 2 the next time, and so on. |
 | `ctx.attempt` | 1, then 2 after a retry, and so on. |
-| `ctx.entered_by` | The event that brought the token here: `.name` and `.payload`. In the first state, `.name` is `__started__`. |
+| `ctx.entered_by` | The name of the event that brought the token here, as `ctx.entered_by.name`. In the first state, it is `__started__`. A routine does not get the payload: an event whose payload the token keeps declares `into=`. See [Where data goes](data.md). |
 | `ctx.schedule(event, after="10m")` | A timer. See [Timers and timeouts](timers.md). |
 
 ### The context

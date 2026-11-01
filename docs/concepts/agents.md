@@ -6,7 +6,7 @@ A routine runs a coding agent with the library PHD, and Stateous keeps the agent
 
 ## Why it exists
 
-A coding agent can work for an hour, hang, or crash with its computer. Its answer must be one of the outcomes that the state allows. When it fails, the next try should continue its session, not start again.
+A coding agent can work for an hour, hang, or crash with its computer. Its answer must name one of the events that the state allows. When it fails, the next try should continue its session, not start again.
 
 Stateous and PHD share this work. PHD runs the agent and checks its answer. Stateous keeps the task, the retries and the session id. PHD knows nothing of workflows, and it does not report to Stateous.
 
@@ -137,7 +137,7 @@ async def code(ctx: TicketContext) -> events.done | events.stuck:
 
 ## Guarantees
 
-- Only an outcome that the state can emit is accepted. PHD checks it, and the control plane checks it again.
+- Only an event that the state can emit is accepted. PHD checks it, and the control plane checks it again.
 - The task's lease stays alive while the routine runs, for as long as the agent works.
 - When the token leaves the state, or is cancelled, the supervisor cancels the routine at the next heartbeat, and PHD stops the run.
 - The session id in `ctx.memory` stays after a crash, so the next attempt can resume the session.

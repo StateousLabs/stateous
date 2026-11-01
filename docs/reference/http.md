@@ -147,7 +147,7 @@ If no task is queued, the answer is `204`. Else the answer is the grant:
 }
 ```
 
-`entered_by` is the event that moved the token into the state, with its `payload` if it has one. For the first state of a token, it is `__started__`.
+`entered_by` is the name of the event that moved the token into the state. For the first state of a token, it is `__started__`. It has no payload: an event whose payload the token keeps declares `into=`, and the payload is in `context`.
 
 The control plane keeps the last request id of each supervisor, and the task that it got. A claim with the same id gets the same task again, if the supervisor still holds it. Else the claim takes a new task. So a lost answer loses no task.
 

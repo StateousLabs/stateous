@@ -20,7 +20,7 @@ A task goes through these steps:
 4. **Heartbeat.** While the routine runs, the supervisor sends a heartbeat every 30 seconds. One heartbeat names all of its running tasks, and it renews their leases.
 5. **Report.** The routine returns, and the supervisor reports the outcome. An event moves the token, and the task is done.
 
-The supervisor reports one of three kinds of outcome:
+The supervisor reports the **outcome** of the task. An outcome is one of three kinds:
 
 | Outcome | When | What the control plane does |
 |---|---|---|
@@ -133,4 +133,4 @@ build-box-2 took task 1 (attempt 2)
 - [Timers and timeouts](timers.md): a state's `timeout=` covers all attempts.
 - [Context, notes and memory](context-notes-memory.md): every field of `ctx`.
 - [Reliability](reliability.md): leases, the outbox, and what happens when a supervisor stops.
-- [Write a routine](../how-to/write-a-routine.md): mark a routine, return an outcome, and fail.
+- [Write a routine](../how-to/write-a-routine.md): mark a routine, return an event, and fail.

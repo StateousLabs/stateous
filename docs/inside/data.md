@@ -125,7 +125,7 @@ The data of a token goes from one workflow to the next. This diagram shows where
 ```mermaid
 flowchart LR
     startbody["POST /tokens<br/>token, context"] --> tokenrow["tokens<br/>context, state, visit"]
-    tokenrow --> grant["grant<br/>context, memory, entered_by"]
+    tokenrow --> grant["grant<br/>context, memory, entered_by name"]
     memoryrow["memory<br/>key, value"] --> grant
     grant --> ctx["ctx in the routine<br/>ctx['key'], ctx.memory, ctx.entered_by"]
     ctx -->|"ctx['key'] = value"| outcome["report<br/>event, payload, context, schedules"]
@@ -133,25 +133,28 @@ flowchart LR
     outcome --> accepted["ledger event_accepted<br/>event, payload, state"]
     outcome -->|"context changes"| tokenrow
     outcome -->|"schedules"| timerrow["timers<br/>event, payload, due_at"]
-    accepted -->|"the next state's entered_by"| grant
-    accepted -->|"payload of the last one, of a child"| branches["joined payload<br/>branches"]
+    outcome -->|"payload, by into="| tokenrow
+    accepted -->|"the event's name"| grant
+    tokenrow -->|"a child's context"| branches["joined payload<br/>branches"]
+    branches -->|"by into= of the parallel state"| tokenrow
 ```
 
 - The context starts in `POST /tokens`. The control plane adds the defaults of the model, and keeps it in `tokens.context`.
 - A grant copies the context and the memory of the state to the supervisor. The routine reads them as `ctx`.
 - The routine's writes to `ctx` go back in the report. The control plane checks them against the model, and saves them with the move.
-- The event and its payload of the move go to the ledger. The routine of the next state reads them as `ctx.entered_by`.
-- For a child token, the payload of the event that brought it into its last state goes into the `joined` payload of its parent.
+- The event and its payload of the move go to the ledger. The routine of the next state gets only the event's name, as `ctx.entered_by.name`.
+- An event with `into="key"` also saves its payload in `tokens.context`, before the guards run.
+- When a child token ends, its context goes into the `joined` payload of its parent. A parallel state with `into="key"` saves that payload in the parent's context.
 
 ## A worked example: one token of `orders`
 
-These are the rows of the token `ORDER-1` of the `orders` starter of [Getting started](../getting-started.md), after it completed. They come from a real run on SQLite: `stateous serve`, `stateous supervise`, then `stateous token start ORDER-1 '{"title": "first order"}'`. The host name of the computer is replaced with `build-box-1`.
+These are the rows of the token `ORDER-1` of the `orders` workflow of [Getting started](../getting-started.md), after it completed. They come from a real run on SQLite: `stateous serve`, `stateous supervise`, then `stateous token start ORDER-1 '{"title": "first order"}'`. The host name of the computer is replaced with `build-box-1`.
 
 ### `ledger`
 
 | token | seq | at | kind | key | data |
 |---|---|---|---|---|---|
-| ORDER-1 | 1 | 2026-10-16 20:48:44.845389 | started | | `{"context": {"title": "first order"}}` |
+| ORDER-1 | 1 | 2026-10-16 20:48:44.845389 | started | | `{"context": {"title": "first order", "verdict": null}}` |
 | ORDER-1 | 2 | 2026-10-16 20:48:44.845389 | event_accepted | | `{"event": "__started__", "payload": null, "state": "__start__"}` |
 | ORDER-1 | 3 | 2026-10-16 20:48:44.845389 | entered | | `{"state": "draft", "visit": 1}` |
 | ORDER-1 | 4 | 2026-10-16 20:48:44.845389 | task_queued | | `{"task": 1, "state": "draft"}` |
@@ -161,9 +164,10 @@ These are the rows of the token `ORDER-1` of the `orders` starter of [Getting st
 | ORDER-1 | 8 | 2026-10-16 20:48:45.575304 | entered | | `{"state": "review", "visit": 1}` |
 | ORDER-1 | 9 | 2026-10-16 20:48:45.575304 | task_queued | | `{"task": 2, "state": "review"}` |
 | ORDER-1 | 10 | 2026-10-16 20:48:45.592695 | task_claimed | | `{"task": 2, "supervisor": "build-box-1", "attempt": 1}` |
-| ORDER-1 | 11 | 2026-10-16 20:48:45.609424 | event_accepted | | `{"event": "reviewed", "payload": {"approved": true, "note": ""}, "state": "review"}` |
-| ORDER-1 | 12 | 2026-10-16 20:48:45.609424 | task_done | | `{"task": 2}` |
-| ORDER-1 | 13 | 2026-10-16 20:48:45.609424 | completed | | `{}` |
+| ORDER-1 | 11 | 2026-10-16 20:48:45.609424 | context_changed | | `{"keys": ["verdict"]}` |
+| ORDER-1 | 12 | 2026-10-16 20:48:45.609424 | event_accepted | | `{"event": "reviewed", "payload": {"approved": true, "note": ""}, "state": "review"}` |
+| ORDER-1 | 13 | 2026-10-16 20:48:45.609424 | task_done | | `{"task": 2}` |
+| ORDER-1 | 14 | 2026-10-16 20:48:45.609424 | completed | | `{}` |
 
 Rows with the same `at` were written in one transaction. For example, rows 6 to 9 are the report of task 1: the event, the end of the task, and the entry into `review`.
 
@@ -171,7 +175,7 @@ Rows with the same `at` were written in one transaction. For example, rows 6 to 
 
 | token | state | status | visit | context | entered_at | parent | workflow |
 |---|---|---|---|---|---|---|---|
-| ORDER-1 | review | completed | 1 | `{"title": "first order"}` | 2026-10-16 20:48:45.575304 | | |
+| ORDER-1 | review | completed | 1 | `{"title": "first order", "verdict": {"approved": true, "note": ""}}` | 2026-10-16 20:48:45.575304 | | |
 
 A completed token keeps the state that it came from. `END` is never a value of `state`.
 

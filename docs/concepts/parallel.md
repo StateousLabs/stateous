@@ -47,9 +47,11 @@ When the join is met, the control plane fires the event `joined` on the parent. 
 - `token`: the child's id;
 - `status`: `completed` or `failed`;
 - `final`: the state that the child was in when it ended;
-- `payload`: the payload of the event that brought the child into that state.
+- `context`: the child's context when it ended.
 
-A guard on `joined` can use `branches.all(...)` and `branches.any(...)`. In the parentheses, use `workflow`, `token`, `status`, `final` and `payload.field`. The guard can also use `ctx` and `count`.
+A guard on `joined` can use `branches.all(...)` and `branches.any(...)`. In the parentheses, use `workflow`, `token`, `status`, `final` and `context.field`. `stateous compile` checks that a child workflow of the state has the field. The guard can also use `ctx` and `count`.
+
+To keep the results of the children for later states, give the parallel state `into="reviews"`. The parent's context then keeps the payload of `joined` as `ctx["reviews"]`. Its type in the context model is `Branches` (from `stateous`), or `Branches | None`. So data goes down to the children with `inputs=`, and comes back with `into=`, always through the context. See [Where data goes](data.md).
 
 `stateous compile` cannot prove that two guards with `branches` never overlap. So give the guard to one transition, and make the other the fallback with `otherwise=True`. If no transition takes `joined`, the parent fails.
 

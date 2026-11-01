@@ -10,7 +10,7 @@ A long process has many steps, and each step can take minutes or days. A step ca
 
 Stateous puts the process in one graph. The graph tells all the places where a run can be, and all the ways to go on. A run never moves in a way that the graph does not show.
 
-This page defines each word of Stateous. Every other page uses each word in the same sense.
+This page defines each word that you need to build with Stateous. Every other page uses each word in the same sense. The words of how Stateous works inside, such as lease and outbox, are on [The words inside](../inside/words.md).
 
 ## How it works
 
@@ -44,7 +44,7 @@ Two states are Stateous's own. `START` is where each token begins, and `END` is 
 
 ### event
 
-An outcome of a state, for example `passed` or `failed`. Only an event moves a token. An event can have a payload.
+What happened in a state, for example `passed` or `failed`. Only an event moves a token. Its name and its payload say why the token moved.
 
 Stateous has three events of its own: `timeout`, `error` and `joined`. Your transitions use them by name. You cannot declare them, and you cannot fire them.
 
@@ -62,24 +62,19 @@ The status is `active`, `paused`, `completed`, `failed` or `cancelled`. A token 
 
 ### context
 
-The business data of a token, for example the path of a checkout. A pydantic model gives its fields. A routine reads it as `ctx["key"]`, and can write it.
+The business data of a token, for example the path of a checkout. A pydantic model gives its fields. A routine reads it as `ctx["key"]`, and can write it. It is the only data that a routine reads and writes. See [Where data goes](data.md).
 
 ### payload
 
-The data of one event, for example the numbers of tests that passed and failed. A pydantic model gives its fields. An event without a payload model has no payload.
+The data of one event, for example the numbers of tests that passed and failed. A pydantic model gives its fields. An event without a payload model has no payload. Guards and the history read the payload. To keep it for later states, the event declares `into="key"`, and the context keeps it as `ctx["key"]`.
 
 ### task
 
 "Do state S for token T". The control plane queues one task each time a token enters a state. A supervisor claims the task and runs its routine.
 
-
 ### visit
 
 One stay of a token in one state. The first time that a token enters a state is visit 1, the next time is visit 2. A routine reads it as `ctx.visit`. The history shows it, for example `entered coding (visit 2)`.
-
-### claim
-
-A supervisor's request for a task of the states that it serves. The control plane answers with a grant: one queued task, its token, its visit, its attempt and its context. The task is then claimed.
 
 ### routine
 
@@ -97,44 +92,21 @@ The process that keeps every token, and chooses each next state. You start it wi
 
 The compiled workflow, as JSON, for example `sdlc/build/sdlc.json`. `stateous compile` writes it, and `stateous serve` serves it.
 
-
-### checksum
-
-The hash of the whole graph file, for example `sha256:...`. Each change to the graph file changes it. A supervisor's `contract.py` is for one checksum.
-
-### structure
-
-The hash of the graph file without the `timeout=` and `retries=` of its states. A database serves one structure at a time. See [Change a workflow](../how-to/change-a-workflow.md).
-
 ### contract
 
 The file `contract.py` in the supervisor's folder. `stateous init supervisor` writes it from the graph. It gives the states, the events that each state can emit, and the models. It is all that a supervisor knows of the workflow.
 
-### ledger
-
-The history of each token. Each change adds one row, and the rows are never changed. `stateous token show` prints the ledger of a token.
-
 ### guard
 
-A condition on a transition, written in `when=`. It reads the context, the payload and counts of events. See [Guards](guards.md).
+A condition on a transition, written in `when=`. It reads the context, the payload and counts of events. A guard only routes: a routine makes the decisions. See [Guards](guards.md).
 
 ### timer
 
 An event that the clock fires later, if the token is still in the same state. A state's `timeout=` is a timer too. See [Timers and timeouts](timers.md).
 
-### lease
-
-The time for which a supervisor holds a claimed task. A heartbeat renews it. See [Tasks and routines](tasks-and-routines.md).
-
-
-### heartbeat
-
-The message that a supervisor sends every 30 seconds for all the tasks that it holds. It renews their leases. Its answer names each task that the supervisor does not hold now, for example because the token left the state.
-
 ### attempt
 
 One try of a task. The first claim is attempt 1. When an attempt fails and the state has retries left, the next claim is attempt 2.
-
 
 ### retries
 
@@ -156,23 +128,9 @@ A state whose work is other workflows, which run at the same time. It has no tas
 
 A token that a parallel state starts, one for each workflow of the state. Its parent is the token in the parallel state.
 
-
 ### join
 
 The rule that tells when a parallel state is done. `join="all"` waits for each child token to end. `join="any"` continues when the first child token ends. When the join is met, the control plane fires `joined` on the parent.
-
-### outbox
-
-The supervisor's local file of messages that the control plane did not answer yet: `.stateous/outbox.db`. See [Reliability](reliability.md).
-
-### idempotency key
-
-A key that you give with an event from outside. A second event with the same key applies nothing, and gets the answer "duplicate". See [Reliability](reliability.md).
-
-
-### held event
-
-An event that comes to a paused token. The control plane keeps it, and applies it on resume, in the order of arrival. The history shows `done held while paused`. See [Pause, resume and cancel](pause-resume-cancel.md).
 
 ## Example
 
@@ -240,7 +198,7 @@ stateDiagram-v2
 - A token is in one state at a time. Only an event moves it, and only along a transition of the graph.
 - An event that the token's state cannot take is refused. The token stays where it is, and the ledger records the refusal.
 - The ledger keeps each change. Stateous never changes or deletes a row of the ledger.
-- Not guaranteed: that your routine does the right work. Stateous makes sure only that its outcome is one that the graph allows.
+- Not guaranteed: that your routine does the right work. Stateous makes sure only that its event is one that the graph allows.
 
 ## See also
 

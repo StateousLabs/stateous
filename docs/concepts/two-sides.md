@@ -12,7 +12,7 @@ So Stateous has two sides. The control plane decides, and the supervisors do the
 
 The supervisor never sees the graph, for two reasons:
 
-- A routine cannot depend on the next state. It can only return an outcome, so you can change the graph without a change to the routines.
+- A routine cannot depend on the next state. It can only return an event, so you can change the graph without a change to the routines.
 - A supervisor has only the information that its work needs. The rest of the process stays on the control plane.
 
 ## How it works

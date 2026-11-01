@@ -1,6 +1,6 @@
 # Write a workflow
 
-This guide tells you how to change the `orders` starter into a workflow for your own process, and how to read a compile error.
+This guide tells you how to change the starter of `stateous init workflow` into your own workflow. It also tells you how to read a compile error.
 
 The example is `sdlc`: a ticket goes to `coding`, then to `testing`, and back to `coding` when the tests fail. The words are defined in [The model](../concepts/model.md).
 
@@ -37,6 +37,10 @@ class Tests(BaseModel):
 
 Values must be JSON. A routine reads the context as `ctx["repo"]`.
 
+A context field can have a default, for example `rejected: int = 0` or `verdict: Verdict | None = None`. `stateous token start` can leave out each field that has a default. The control plane fills in the default.
+
+Put in the context all the data that a later state needs. A routine reads and writes only the context. See [Where data goes](../concepts/data.md).
+
 ## 2. Declare the workflow, its states and its events
 
 In `flow.py`, make the workflow with `Workflow(name, context=Model)`. Then add the states and the events.
@@ -46,7 +50,7 @@ In `flow.py`, make the workflow with `Workflow(name, context=Model)`. Then add t
 | `Workflow(name, context=Model)` | A workflow. `context` is optional. |
 | `flow.state(name, timeout=None, retries=0)` | A state. After `timeout`, the token gets the event `timeout`. A failed task is tried again `retries` times. Then the token gets the event `error`. |
 | `flow.state(name, parallel=[wf, ...], join="all", inputs=[keys], timeout=None)` | A parallel state. See [Parallel and nested work](../concepts/parallel.md). |
-| `flow.event(name, payload=Model)` | An event. `payload` is optional. |
+| `flow.event(name, payload=Model, into=None)` | An event. `payload` is optional. `into="key"` keeps the payload in the context, as `ctx["key"]`. The field must be in the context model. |
 | `flow.transition(source, target, on=event, when=None, otherwise=False)` | Where an event takes a token. |
 
 `retries=2` gives three attempts in all. `timeout=` covers all attempts of a task. See [Timers and timeouts](../concepts/timers.md).
@@ -55,7 +59,7 @@ In `flow.py`, make the workflow with `Workflow(name, context=Model)`. Then add t
 
 Each transition goes from a source state, on an event, to a target state. Start each token with a transition from `START`, without `on=`. End a token with a transition to `END`.
 
-When one event can go to two targets, give each transition a guard with `when=`. Mark one transition `otherwise=True`: it applies when no guard matches. See [Guards](../concepts/guards.md).
+When one event can go to two targets, give the transitions guards with `when=`, and make one of them the fallback with `otherwise=True`. [Guards](../concepts/guards.md) gives the full rule of `otherwise=True`.
 
 This is the full `flow.py` of `sdlc`:
 

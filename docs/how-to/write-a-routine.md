@@ -1,6 +1,6 @@
 # Write a routine
 
-This guide tells you how to write the routine of a state. You mark it, return an outcome, and fail when the work fails.
+This guide tells you how to write the routine of a state. You mark it, return an event, and fail when the work fails.
 
 A routine is your function that does the work of one state. It is in the supervisor's folder. See [Tasks and routines](../concepts/tasks-and-routines.md) for what happens around it.
 
@@ -22,10 +22,14 @@ from contract import TicketContext, events, states
 
 @on_state(states.coding)
 def coding(ctx: TicketContext) -> events.done | events.stuck:
+    # Read and write the context: ctx["key"], ctx["key"] = value.
+    # Then return the event that names your decision, e.g. events.<event>(...).
     raise NotImplementedError("do the work of 'coding' here")
 ```
 
 A stub raises `NotImplementedError`, so each task of a stub fails. Replace the body with the work of the state.
+
+A routine can be in a file with any name. The supervisor imports each module of its folder, and `@on_state` tells which state a function is for. So you can rename `coding.py`, or put two routines in one file. Each state has at most one routine.
 
 ## 2. Write the routine
 
@@ -34,6 +38,8 @@ A routine imports only `contract.py` and its own helpers. It never imports `flow
 - Mark the function with `@on_state(states.X)`. Each state has at most one routine in the folder.
 - Its argument is `ctx`. The type is the context type of `contract.py`, for example `TicketContext`.
 - Its return type names the events that it can return, for example `-> events.passed | events.failed`.
+- It reads and writes only the context. The data that a later state needs goes in the context. See [Where data goes](../concepts/data.md).
+- It makes the decisions of the state. It returns the event that names the decision, for example `urgent` or `normal`. A guard in `flow.py` only routes on that event: it does not decide.
 
 This is the routine of `testing` in the `sdlc` example. It runs pytest in the checkout, and returns `passed` or `failed` with the counts:
 
@@ -103,7 +109,7 @@ An event without a payload has no argument, for example `events.done()`. An even
 
 When the token leaves the state, the supervisor cancels an `async def` routine at the next heartbeat. It cannot stop a `def` routine, so it ignores the result of that routine. Never block the event loop in an `async def` routine: the heartbeats of all routines stop.
 
-## 4. Return the outcome
+## 4. Return the event
 
 A routine returns one of these:
 

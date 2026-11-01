@@ -34,15 +34,9 @@ WORDS = [
     "control plane",
     "graph file",
     "contract",
-    "ledger",
     "visit",
-    "claim",
-    "checksum",
-    "structure",
     "guard",
     "timer",
-    "lease",
-    "heartbeat",
     "attempt",
     "retries",
     "note",
@@ -50,11 +44,20 @@ WORDS = [
     "parallel state",
     "child token",
     "join",
+]
+"""The words that you need to build with Stateous. `concepts/model.md` defines each one."""
+INSIDE_WORDS = [
+    "claim",
+    "lease",
+    "heartbeat",
+    "ledger",
+    "checksum",
+    "structure",
     "outbox",
     "idempotency key",
     "held event",
 ]
-"""Each Stateous word that the pages use. `concepts/model.md` defines each one."""
+"""The words of how Stateous works inside. `inside/words.md` defines each one."""
 
 FACTS: dict[str, list[str]] = {
     "concepts/model.md": [f"### {word}" for word in WORDS]
@@ -64,6 +67,19 @@ FACTS: dict[str, list[str]] = {
         "otherwise=True",
         "three events of its own: `timeout`, `error` and `joined`",
         "```mermaid",
+        "inside/words.md",
+    ],
+    "concepts/data.md": [
+        "A routine reads and writes only the context",
+        "into=",
+        "ctx.memory",
+        "ctx.note",
+        "inputs=",
+        "Branches",
+        "the payload wins",
+        "ctx.entered_by",
+        "Routines decide",
+        "stateous token show",
     ],
     "concepts/two-sides.md": [
         "contract.py",
@@ -83,7 +99,15 @@ FACTS: dict[str, list[str]] = {
         "`error`",
         "```mermaid",
     ],
-    "concepts/guards.md": ["when=", "otherwise=True", "count(", "payload.", "ctx.", "overlap"],
+    "concepts/guards.md": [
+        "when=",
+        "otherwise=True",
+        "count(",
+        "payload.",
+        "ctx.",
+        "overlap",
+        "Routines decide, and guards only route",
+    ],
     "concepts/timers.md": ["timeout=", "ctx.schedule", "`timeout`", "after="],
     "concepts/context-notes-memory.md": [
         'ctx["key"]',
@@ -117,7 +141,9 @@ FACTS: dict[str, list[str]] = {
         "`token`",
         "`status`",
         "`final`",
-        "`payload`",
+        "`context`",
+        "context.field",
+        'into="reviews"',
         "`states.design_review.triage`",
         "otherwise=True",
         "### Tokens that a routine starts",
@@ -156,7 +182,12 @@ FACTS: dict[str, list[str]] = {
 NOT_SAID: dict[str, list[str]] = {
     "concepts/agents.md": ["not released", "start()"],
     "concepts/model.md": ["no nested or parallel states", "The engine has no nested states"],
-    "concepts/parallel.md": ["no nested or parallel states", "The engine has no nested states"],
+    "concepts/parallel.md": [
+        "no nested or parallel states",
+        "The engine has no nested states",
+        "the payload of the event that brought the child",
+    ],
+    "concepts/context-notes-memory.md": ["`.payload`"],
 }
 """Old sentences that are no longer true."""
 EXAMPLE_FILE = re.compile(r"\A# (sdlc[\w-]*/\w+\.py)\b")
@@ -223,3 +254,9 @@ def test_the_two_sides_page_shows_the_contract_as_init_writes_it() -> None:
     ]
 
     assert blocks == [contract]
+
+
+def test_the_inside_words_page_defines_each_inside_word_once() -> None:
+    headings = re.findall(r"^### (.+)$", page("inside/words.md"), re.MULTILINE)
+
+    assert sorted(headings) == sorted(INSIDE_WORDS)

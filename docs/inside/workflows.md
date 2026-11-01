@@ -49,7 +49,7 @@ Actor-initiated. A person runs `stateous compile FLOW`. `stateous init workflow`
 | | Fields |
 |---|---|
 | In | `flow.py` (a `Workflow`: name, context model, states, events, transitions) and `schemas.py` (the models). |
-| Out | The graph document: `stateous` (the file format, 1), `workflow`, `context`, `states` (each with `emits`, or `parallel`, `join`, `inputs`; and `timeout`, `retries`), `events` (each with `payload`), `transitions` (`from`, `to`, `on`, `when`, `otherwise`), `workflows` (the child workflows), `schemas`. |
+| Out | The graph document: `stateous` (the file format, 1), `workflow`, `context`, `states` (each with `emits`, or `parallel`, `join`, `inputs`, `into`; and `timeout`, `retries`), `events` (each with `payload` and `into`), `transitions` (`from`, `to`, `on`, `when`, `otherwise`), `workflows` (the child workflows), `schemas`. |
 
 ## Serve
 
@@ -213,7 +213,7 @@ Event-initiated and scheduled. The claim loop of a supervisor starts after [Supe
 | | Fields |
 |---|---|
 | In | `supervisor`, `states` (a child's state is `<workflow>/<state>`), `request`. |
-| Out | The grant: `task`, `token`, `state`, `visit`, `attempt`, `context`, `memory`, `entered_by` (`name`, `payload`). `tasks`: `status`, `attempt`, `claimed_by`, `lease_until`. `claims`: `supervisor`, `request`, `task_id`, `attempt`. |
+| Out | The grant: `task`, `token`, `state`, `visit`, `attempt`, `context`, `memory`, `entered_by` (`name`). `tasks`: `status`, `attempt`, `claimed_by`, `lease_until`. `claims`: `supervisor`, `request`, `task_id`, `attempt`. |
 
 ## Heartbeat
 

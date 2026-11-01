@@ -6,9 +6,11 @@ A guard is a small condition in `when=` that chooses which transition an event t
 
 ## Why it exists
 
-One outcome can lead to different places. For example, a failed test run goes back to `coding` two times, but the third failure ends the token. The routine must not know this rule, because it does not see the graph.
+One event can lead to different places. For example, a failed test run goes back to `coding` two times, but the third failure ends the token. The routine must not know this rule, because it does not see the graph.
 
 So the graph holds the rule, as a guard on the transition. Stateous checks the guards when you compile, so a token never has two ways to go.
+
+Routines decide, and guards only route. A decision about the work, such as "the body of the ticket has the word 'down'", is the work of a routine. The routine returns the event that names the decision, for example `urgent` or `normal`. A guard only chooses a transition from data that is already there: a count, a field of the payload, a field of the context. So the guard language has no text search and no arithmetic. See [Where data goes](data.md).
 
 ## How it works
 
@@ -38,6 +40,14 @@ When an event comes, the control plane looks at the transitions from the token's
 2. If no guard matches, the token takes the transition with `otherwise=True`.
 3. If no guard matches and there is no `otherwise=True`, the control plane refuses the event. The token stays where it is.
 
+**The rule of `otherwise=True`.** This is the one place where the docs give this rule:
+
+- A transition that is the only one from its state on its event needs no guard and no `otherwise=True`.
+- When a state has two or more transitions on one event, each has a guard, except at most one. That one has no guard, and it must have `otherwise=True`: it is the fallback.
+- The fallback is optional. With no fallback, an event that no guard matches is refused.
+
+Compile stops if a transition breaks this rule.
+
 ### The overlap check
 
 `stateous compile` makes sure that the guards on one state and one event never overlap. Two guards overlap when some data can make both of them true.
@@ -45,8 +55,6 @@ When an event comes, the control plane looks at the transitions from the token's
 If two guards can overlap, compile stops with an error, and it gives an example of such data. Stateous never chooses between two matching guards at run time.
 
 Compile also stops when it cannot prove that two guards never overlap. This occurs when a guard compares two values with each other, orders a list, or uses `branches`. Then make one transition the fallback with `otherwise=True`.
-
-Next to transitions with guards, a transition without a guard must have `otherwise=True`. Compile stops if it does not.
 
 ## Example
 

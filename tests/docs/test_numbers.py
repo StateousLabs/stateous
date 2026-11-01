@@ -64,7 +64,7 @@ SAID: dict[str, list[str]] = {
         f"no heartbeat for {LEASE}",
         f"up to {seconds(HEARTBEAT_EVERY)} later",
     ],
-    "concepts/model.md": [f"every {seconds(HEARTBEAT_EVERY)} for all the tasks"],
+    "inside/words.md": [f"every {seconds(HEARTBEAT_EVERY)} for all the tasks"],
     "concepts/reliability.md": [
         f"a lease of {LEASE}",
         f"no heartbeat for {LEASE}",
