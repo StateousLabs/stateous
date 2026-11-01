@@ -102,12 +102,27 @@ def _refuse_bad_settings(document: dict[str, Any]) -> None:
         raise GraphFileError("the graph file's 'workflows' is not an object")
     workflows = cast("dict[str, Any]", children)
     _refuse_bad_states(document["states"], set(workflows))
+    _refuse_bad_events(document["events"])
     for name, body in workflows.items():
         found = cast("dict[str, Any]", body) if isinstance(body, dict) else {}
         for key in CHILD_REQUIRED:
             if key not in found:
                 raise GraphFileError(f"the graph file's workflow {name!r} has no {key!r}")
         _refuse_bad_states(found["states"], set(workflows))
+        _refuse_bad_events(found["events"])
+
+
+def _refuse_bad_events(events: Any) -> None:
+    """Each event's `into` is a context field, by name."""
+    if not isinstance(events, dict):
+        raise GraphFileError("the graph file's 'events' is not an object")
+    for name, spec in cast("dict[str, Any]", events).items():
+        found = cast("dict[str, Any]", spec) if isinstance(spec, dict) else {}
+        into = found.get("into")
+        if into is not None and not (isinstance(into, str) and into):
+            raise GraphFileError(
+                f"the graph file's event {name!r}: 'into' is a context field, by name"
+            )
 
 
 def _refuse_bad_states(states: Any, workflows: set[str]) -> None:
@@ -136,7 +151,16 @@ def _refuse_bad_states(states: Any, workflows: set[str]) -> None:
             )
         parallel: Any = settings.get("parallel")
         if parallel is None:
+            if "into" in settings:
+                raise GraphFileError(
+                    f"the graph file's state {name!r}: 'into' is for a parallel state"
+                )
             continue
+        into: Any = settings.get("into")
+        if into is not None and not (isinstance(into, str) and into):
+            raise GraphFileError(
+                f"the graph file's state {name!r}: 'into' is a context field, by name"
+            )
         named = cast("list[Any]", parallel) if isinstance(parallel, list) else []
         if not named or any(not isinstance(c, str) or c not in workflows for c in named):
             raise GraphFileError(

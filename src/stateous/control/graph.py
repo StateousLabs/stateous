@@ -39,6 +39,8 @@ class StateSpec:
     """A parallel state's child workflows, by name. Empty for a state with a task."""
     join: str = "all"
     inputs: tuple[str, ...] = ()
+    into: str | None = None
+    """A parallel state's context field for the join's branches."""
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,14 @@ class Graph:
         """The transitions an event can take from a state, in declaration order."""
         return [t for t in self._transitions if t.source == state and t.event == event]
 
+    def into(self, state: str, event: str) -> str | None:
+        """The context field that keeps the payload of `event` in `state`: for
+        `joined`, the parallel state's `into`; else the event's `into`; or None."""
+        if event == JOINED:
+            return self._states[state].into
+        found: str | None = self._events.get(event, {}).get("into")
+        return found
+
     def payload_errors(self, event: str, payload: dict[str, Any] | None) -> list[str]:
         schema = self._events.get(event, {}).get("payload")
         if schema is None:
@@ -135,6 +145,7 @@ def _state(name: str, spec: dict[str, Any]) -> StateSpec:
         parallel=tuple(spec.get("parallel", ())),
         join=spec.get("join", "all"),
         inputs=tuple(spec.get("inputs", ())),
+        into=spec.get("into"),
     )
 
 

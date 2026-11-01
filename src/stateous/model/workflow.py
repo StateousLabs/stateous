@@ -13,12 +13,14 @@ which the engine fires itself. Entering END completes the token.
 from __future__ import annotations
 
 import re
+import types
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, Union, cast, get_args, get_origin
 
 from pydantic import BaseModel
 
+from stateous.model.branches import Branches
 from stateous.model.durations import duration_problem
 from stateous.model.guards import Guard, GuardError, parse_guard
 
@@ -62,6 +64,8 @@ class Event:
     """The model its occurrences carry; None for an event with no payload."""
     workflow: str | None
     """The declaring workflow; None for Stateous's own events."""
+    into: str | None = None
+    """The context field that keeps the payload when the event is accepted."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -81,6 +85,8 @@ class State:
     """For a parallel state: `all` or `any` (see JOINS)."""
     inputs: tuple[str, ...] = ()
     """For a parallel state: the context keys that each child starts with."""
+    into: str | None = None
+    """For a parallel state: the context field that keeps the join's `Branches`."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -159,6 +165,7 @@ class Workflow:
         parallel: Sequence[Workflow] = (),
         join: str = "all",
         inputs: Sequence[str] = (),
+        into: str | None = None,
     ) -> State:
         """Add a state to the workflow.
 
@@ -181,6 +188,8 @@ class Workflow:
                 first child ends, and cancel the others.
             inputs: The context keys that each child's context starts with. They
                 must give each field that a child's context requires.
+            into: For a parallel state: the context field that keeps the join's
+                `Branches`, so that the routines of later states can read them.
 
         Returns:
             The state, to use in transitions.
@@ -188,7 +197,8 @@ class Workflow:
         Raises:
             DefinitionError: The name is not valid, is used, or is Stateous's own.
                 Or the timeout is not a duration, `retries` is not 0 or more, or
-                `parallel`, `join` or `inputs` breaks a rule of a parallel state.
+                `parallel`, `join`, `inputs` or `into` breaks a rule of a parallel
+                state.
         """
         if name in (START.name, END.name):
             raise DefinitionError(
@@ -217,6 +227,12 @@ class Workflow:
             raise DefinitionError(
                 f"state {name!r}: join and inputs are for a parallel state; add parallel=[...]"
             )
+        if into is not None:
+            if not children:
+                raise DefinitionError(
+                    f"state {name!r}: into is for a parallel state; add parallel=[...]"
+                )
+            _check_into(f"state {name!r}", self.context, into, Branches)
         declared = State(
             name,
             workflow=self.name,
@@ -225,6 +241,7 @@ class Workflow:
             parallel=children,
             join=join,
             inputs=tuple(inputs),
+            into=into,
         )
         self.states[name] = declared
         return declared
@@ -256,7 +273,9 @@ class Workflow:
             )
         return children
 
-    def event(self, name: str, *, payload: type[BaseModel] | None = None) -> Event:
+    def event(
+        self, name: str, *, payload: type[BaseModel] | None = None, into: str | None = None
+    ) -> Event:
         """Add an event to the workflow. An event is an outcome: only an event
         moves a token.
 
@@ -265,14 +284,18 @@ class Workflow:
                 Stateous's own events, `timeout`, `error` and `joined`: a
                 transition uses them by name.
             payload: The Pydantic model of the data that the event carries. None:
-                no data.
+                no data. Guards read it; routines do not.
+            into: The context field that keeps the payload when the event is
+                accepted, so that routines can read it. Its type must take the
+                payload model.
 
         Returns:
             The event, to use in transitions.
 
         Raises:
             DefinitionError: The name is not valid, is used, or is Stateous's own.
-                Or the payload is not a Pydantic model class.
+                Or the payload is not a Pydantic model class, or `into` is not a
+                context field that takes the payload.
         """
         if name in _RESERVED:
             raise DefinitionError(
@@ -283,7 +306,11 @@ class Workflow:
         if name in self.events:
             raise DefinitionError(f"event {name!r} is already declared")
         _check_model(f"event {name!r}: payload", payload)
-        declared = Event(name, payload=payload, workflow=self.name)
+        if into is not None:
+            if payload is None:
+                raise DefinitionError(f"event {name!r}: into= needs a payload")
+            _check_into(f"event {name!r}", self.context, into, payload)
+        declared = Event(name, payload=payload, workflow=self.name, into=into)
         self.events[name] = declared
         return declared
 
@@ -432,6 +459,31 @@ def _refuse_before_anything_happened(guard: Guard) -> None:
 def _require_field(event: Event, name: str) -> None:
     if event.payload is None or name not in event.payload.model_fields:
         raise DefinitionError(f"{event.name!r} payload has no field {name!r}")
+
+
+def _check_into(
+    what: str, context: type[BaseModel] | None, key: str, model: type[BaseModel]
+) -> None:
+    """`into=key` names a field of the context model whose type takes `model`: the
+    model itself, or a union of the model and None."""
+    if context is None:
+        raise DefinitionError(
+            f"{what}: into= needs a context model; give Workflow(..., context=Model)"
+        )
+    field = context.model_fields.get(key)
+    if field is None:
+        raise DefinitionError(
+            f"{what}: into={key!r} is not a field of the context model {context.__name__!r}"
+        )
+    annotation: Any = field.annotation
+    parts = (
+        get_args(annotation)
+        if get_origin(annotation) in (Union, types.UnionType)
+        else (annotation,)
+    )
+    if model not in parts or not all(part in (model, type(None)) for part in parts):
+        shown = getattr(annotation, "__name__", None) or repr(annotation).replace("typing.", "")
+        raise DefinitionError(f"{what}: field {key!r} is a {shown}, not {model.__name__}")
 
 
 def _check_name(what: str, name: str) -> None:

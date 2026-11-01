@@ -20,6 +20,7 @@ from stateous.model.workflow import (
     RESERVED_EVENTS,
     START,
     DefinitionError,
+    Event,
     State,
     Transition,
     Workflow,
@@ -49,12 +50,18 @@ def _body(flow: Workflow, names: dict[type[BaseModel], str]) -> dict[str, Any]:
     if flow.context is not None:
         body["context"] = names[flow.context]
     body["states"] = {state.name: _state(flow, state) for state in flow.states.values()}
-    body["events"] = {
-        event.name: {"payload": names[event.payload]} if event.payload else {}
-        for event in flow.events.values()
-    }
+    body["events"] = {event.name: _event(event, names) for event in flow.events.values()}
     body["transitions"] = [_transition(edge) for edge in flow.transitions]
     return body
+
+
+def _event(event: Event, names: dict[type[BaseModel], str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if event.payload is not None:
+        out["payload"] = names[event.payload]
+    if event.into is not None:
+        out["into"] = event.into
+    return out
 
 
 def _state(flow: Workflow, state: State) -> dict[str, Any]:
@@ -68,6 +75,8 @@ def _state(flow: Workflow, state: State) -> dict[str, Any]:
         out["join"] = state.join
         if state.inputs:
             out["inputs"] = list(state.inputs)
+        if state.into is not None:
+            out["into"] = state.into
     else:
         out["emits"] = _emits(flow, state)
     return out
