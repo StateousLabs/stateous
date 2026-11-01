@@ -212,3 +212,10 @@ def test_a_guard_error_tells_the_person_what_to_change(expression: str, reason: 
         parse_guard(expression)
 
     assert str(caught.value).startswith(f"guard {expression!r}: ")
+
+
+def test_context_alone_is_refused() -> None:
+    with pytest.raises(
+        GuardError, match=r"name a field of a child's context, e.g. context.verdict"
+    ):
+        parse_guard("branches.any(context == 1)")

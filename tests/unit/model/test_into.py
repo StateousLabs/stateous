@@ -172,3 +172,21 @@ def test_the_runtime_graph_names_the_field_for_each_state_and_event() -> None:
 
 def approved_flow_document() -> dict[str, Any]:
     return compile_workflow(approved_flow())
+
+
+def test_a_graph_file_whose_events_are_not_an_object_is_refused() -> None:
+    document = copy.deepcopy(approved_flow_document())
+    document["events"] = []
+
+    with pytest.raises(GraphFileError, match="the graph file's 'events' is not an object"):
+        load_graph(dump_graph(document))
+
+
+def test_a_parallel_state_whose_into_is_not_a_name_is_refused() -> None:
+    document = copy.deepcopy(compile_workflow(reviews_flow()))
+    document["states"]["reviews"]["into"] = ""
+
+    with pytest.raises(
+        GraphFileError, match="the graph file's state 'reviews': 'into' is a context field, by name"
+    ):
+        load_graph(dump_graph(document))
