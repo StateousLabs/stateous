@@ -1265,12 +1265,13 @@ def _kept(
     graph: Graph, state: str, event: str, payload: dict[str, Any] | None, context: dict[str, Any]
 ) -> tuple[dict[str, Any], str | None]:
     """The context with the payload of `event` in its `into=` field, and that field; or
-    the context as it is, and None. The payload wins over a routine's write to the
-    same field (R1)."""
+    the context as it is, and None. The payload is kept with the defaults of its model,
+    so a missing or partial payload never breaks the context. It wins over a routine's
+    write to the same field (R1)."""
     field = graph.into(state, event)
     if field is None:
         return context, None
-    return {**context, field: payload}, field
+    return {**context, field: graph.kept_payload(event, payload)}, field
 
 
 def _settled(result: Fired | Exception) -> Fired:

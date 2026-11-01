@@ -146,3 +146,42 @@ def test_a_join_of_any_keeps_one_branch() -> None:
 
     kept = Branches.model_validate(engine.get(T).context["reviews"])
     assert [branch.token for branch in kept.branches] == [SECURITY]
+
+
+class Defaulted(BaseModel):
+    by: str = "nobody"
+
+
+class Lenient(BaseModel):
+    repo: str
+    approval: Defaulted = Defaulted()
+
+
+def lenient() -> dict[str, Any]:
+    flow = Workflow("sdlc", context=Lenient)
+    waiting = flow.state("waiting")
+    checked = flow.state("checked")
+    flow.transition(START, waiting)
+    flow.transition(waiting, checked, on=flow.event("approved", payload=Defaulted, into="approval"))
+    flow.transition(checked, END, on=flow.event("done"))
+    return compile_workflow(flow)
+
+
+def test_a_missing_payload_is_kept_with_its_defaults() -> None:
+    engine = engine_of(lenient())
+
+    engine.fire(T, "approved", None)
+
+    assert engine.get(T).context["approval"] == {"by": "nobody"}
+    grant = engine.claim("box", ["checked"])
+    assert grant is not None
+    engine.report(grant.task, Outcome(kind="event", event="done"), supervisor="box")
+    assert engine.get(T).status == "completed"
+
+
+def test_a_partial_payload_is_kept_with_its_defaults() -> None:
+    engine = engine_of(lenient())
+
+    engine.fire(T, "approved", {})
+
+    assert engine.get(T).context["approval"] == {"by": "nobody"}

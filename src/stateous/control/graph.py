@@ -121,11 +121,20 @@ class Graph:
         fields are in the order of the context model, then any other keys."""
         if self._context is None:
             return dict(context)
-        properties = cast(
-            "dict[str, dict[str, Any]]", self._schemas[self._context].get("properties", {})
-        )
+        return self._filled(self._context, context)
+
+    def kept_payload(self, event: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+        """The payload of `event` as `into=` keeps it: with each field that its model
+        gives a default filled in. A missing payload is an empty one, as the payload
+        check reads it. `joined` has no model here: its payload is kept as it is."""
+        schema: str | None = self._events.get(event, {}).get("payload")
+        given = payload if payload is not None else {}
+        return given if schema is None else self._filled(schema, given)
+
+    def _filled(self, schema: str, value: dict[str, Any]) -> dict[str, Any]:
+        properties = cast("dict[str, dict[str, Any]]", self._schemas[schema].get("properties", {}))
         filled = {name: spec["default"] for name, spec in properties.items() if "default" in spec}
-        merged = {**filled, **context}
+        merged = {**filled, **value}
         ordered = {name: merged[name] for name in properties if name in merged}
         return {**ordered, **{key: value for key, value in merged.items() if key not in ordered}}
 
