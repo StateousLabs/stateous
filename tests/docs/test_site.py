@@ -105,7 +105,7 @@ def site(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The site, built once with `--strict` for the tests of this module."""
     folder = tmp_path_factory.mktemp("built") / "site"
     built = subprocess.run(
-        ["uv", "run", "--group", "docs", "mkdocs", "build", "--strict", "--quiet",
+        ["uv", "run", "--group", "docs", "mkdocs", "build", "--strict",
          "--site-dir", str(folder)],
         cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace", timeout=300,
         check=False, env={**os.environ, "NO_MKDOCS_2_WARNING": "1"},

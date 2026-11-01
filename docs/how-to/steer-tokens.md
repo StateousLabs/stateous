@@ -163,6 +163,6 @@ The `Idempotency-Key` header is the key. A payload goes in the body, as `{"paylo
 - [Pause, resume and cancel](../concepts/pause-resume-cancel.md): held events, and the order of replay.
 - [Reliability](../concepts/reliability.md): idempotency keys.
 - [Tasks and routines](../concepts/tasks-and-routines.md): tasks that wait.
-- [The model](../concepts/model.md): the words [token](../concepts/model.md#token) and [idempotency key](../concepts/model.md#idempotency-key).
+- [The model](../concepts/model.md): the words [token](../concepts/model.md#token) and [idempotency key](../inside/words.md#idempotency-key).
 - [The commands](../reference/cli.md): every `token` command and its options.
 - [The HTTP API](../reference/http.md): every route, and the refusal codes.

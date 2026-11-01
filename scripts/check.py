@@ -20,7 +20,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("format", ["uv", "run", "ruff", "format", "--check", "."]),
     ("types", ["uv", "run", "pyright"]),
     ("imports", ["uv", "run", "lint-imports"]),
-    ("docs", ["uv", "run", "--group", "docs", "mkdocs", "build", "--strict", "--quiet"]),
+    ("docs", ["uv", "run", "--group", "docs", "mkdocs", "build", "--strict"]),
     ("tests", ["uv", "run", "pytest"]),
 ]
 QUIET: dict[str, dict[str, str]] = {"docs": {"NO_MKDOCS_2_WARNING": "1"}}

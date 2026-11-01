@@ -220,4 +220,4 @@ After the run, the table `messages` of `orders-supervisor/.stateous/outbox.db` i
 
 - [The internal workflows](workflows.md): the steps that write these rows.
 - [Reliability](../concepts/reliability.md): the ledger, leases and the outbox.
-- [The model](../concepts/model.md): the words [ledger](../concepts/model.md#ledger) and [outbox](../concepts/model.md#outbox).
+- [The words inside](words.md): [ledger](words.md#ledger) and [outbox](words.md#outbox).

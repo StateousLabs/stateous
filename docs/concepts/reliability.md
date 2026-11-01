@@ -130,7 +130,7 @@ build-box-2 took task 1 (attempt 2)
 
 ## See also
 
-- [The model](model.md): the words [ledger](model.md#ledger), [lease](model.md#lease), [outbox](model.md#outbox) and [idempotency key](model.md#idempotency-key).
+- [The words inside](../inside/words.md): [ledger](../inside/words.md#ledger), [lease](../inside/words.md#lease), [outbox](../inside/words.md#outbox) and [idempotency key](../inside/words.md#idempotency-key).
 - [Tasks and routines](tasks-and-routines.md): claims, heartbeats and attempts.
 - [Context, notes and memory](context-notes-memory.md): the routine's memory.
 - [Pause, resume and cancel](pause-resume-cancel.md).
