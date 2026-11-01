@@ -900,9 +900,9 @@ class Engine:
         as the claim names it."""
         row = self._existing(tx, task.token)
         last = tx.last_accepted(task.token)
-        entered_by = (
-            None if last is None else EventRecord(last.data["event"], last.data.get("payload"))
-        )
+        # The routine gets the event's name only: a payload that the token keeps is in
+        # the context, by `into=` (R1).
+        entered_by = None if last is None else EventRecord(last.data["event"])
         state = task.state if row.workflow is None else f"{row.workflow}/{task.state}"
         return TaskGrant(
             task=task.id,

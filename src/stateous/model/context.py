@@ -15,15 +15,26 @@ from __future__ import annotations
 import copy
 import json
 from collections.abc import Callable, Iterator, Mapping, MutableMapping
+from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
 from stateous.model.durations import duration_problem
 from stateous.model.events import Occurrence
-from stateous.model.wire import EventRecord, Schedule, TaskGrant
+from stateous.model.wire import Schedule, TaskGrant
 
 C = TypeVar("C", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class EnteredBy:
+    """The event that brought the token into this state, by name, for example
+    `timeout` or `error`. Its payload is not here: an event whose payload the token
+    must keep declares `into=`, and the routine reads it from the context."""
+
+    name: str
+
 
 MAX_NOTE = 500
 """The longest note, in characters."""
@@ -108,8 +119,10 @@ class Context(Generic[C]):
         """1 the first time the token is in this state, 2 the next time, and so on."""
         self.attempt: int = grant.attempt
         """1, then 2 after a retry."""
-        self.entered_by: EventRecord | None = grant.entered_by
-        """The event that brought the token here, with its payload."""
+        self.entered_by: EnteredBy | None = (
+            None if grant.entered_by is None else EnteredBy(grant.entered_by.name)
+        )
+        """The name of the event that brought the token here."""
         self.memory: Memory = Memory(grant.memory, save_memory)
         """The routine's own memory, for this token and this state: a mapping of
         keys to JSON values. Each change is saved at once. `del ctx.memory[key]`

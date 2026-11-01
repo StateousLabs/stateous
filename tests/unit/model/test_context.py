@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel
 
 from stateous import Context, Occurrence
-from stateous.model.context import Memory
+from stateous.model.context import EnteredBy, Memory
 from stateous.model.wire import EventRecord, Schedule, TaskGrant
 
 GRANT = TaskGrant(
@@ -19,7 +19,7 @@ GRANT = TaskGrant(
     attempt=1,
     context={"repo": "acme/api", "pr": 88},
     memory={"dev": "session-1"},
-    entered_by=EventRecord("failed", {"passed": 3, "failed": 1}),
+    entered_by=EventRecord("failed"),
 )
 
 
@@ -48,8 +48,16 @@ def test_a_context_carries_the_facts_of_its_task() -> None:
     ctx = context(Calls())
 
     assert (ctx.token, ctx.task, ctx.visit, ctx.attempt) == ("TICKET-1", 7, 2, 1)
-    assert ctx.entered_by == EventRecord("failed", {"passed": 3, "failed": 1})
+    assert ctx.entered_by == EnteredBy("failed")
     assert dict(ctx.memory) == {"dev": "session-1"}
+
+
+def test_a_routine_does_not_see_the_payload_of_the_event_that_brought_it() -> None:
+    ctx = context(Calls())
+
+    assert ctx.entered_by is not None
+    with pytest.raises(AttributeError):
+        ctx.entered_by.payload  # type: ignore[attr-defined]  # noqa: B018
 
 
 # ── the token's context ───────────────────────────────────────────────────

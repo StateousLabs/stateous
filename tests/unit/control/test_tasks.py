@@ -93,7 +93,8 @@ def test_the_next_task_is_told_which_event_brought_the_token() -> None:
 
     coding = claimed(engine)
     assert (coding.state, coding.visit) == ("coding", 2)
-    assert coding.entered_by == EventRecord("failed", TESTS_FAILED)
+    # The routine gets the name only; a payload that the token keeps has into= (R1).
+    assert coding.entered_by == EventRecord("failed")
 
 
 # ── reporting ────────────────────────────────────────────────────────────
