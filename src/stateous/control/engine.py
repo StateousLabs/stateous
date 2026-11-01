@@ -582,6 +582,7 @@ class Engine:
         candidates = graph.candidates(row.state, event)
         if not candidates:
             return _Refusal(f"no transition for {event!r} from {row.state!r}")
+        context, _ = _kept(graph, row.state, event, payload, context)
         counts = tx.counts(row.token)
         counts[event] = counts.get(event, 0) + 1  # count() includes the event being routed
         branches = cast("list[dict[str, Any]]", (payload or {}).get("branches", []))
@@ -620,7 +621,12 @@ class Engine:
         *,
         key: str | None,
     ) -> None:
-        """Move the token along the chosen transition, and record it."""
+        """Move the token along the chosen transition, and record it. An event with
+        `into=` first keeps its payload in the context."""
+        context, field = _kept(self._graph(row), row.state, event, payload, row.context)
+        if field is not None:
+            row.context = context
+            tx.append(row.token, "context_changed", keys=[field])
         tx.append(
             row.token, "event_accepted", key=key, event=event, payload=payload, state=row.state
         )
@@ -1253,6 +1259,18 @@ def child_id(parent: str, state: str, visit: int, workflow: str) -> str:
 
 def _entry(row: tables.LedgerEntry) -> Entry:
     return Entry(seq=row.seq, at=row.at.replace(tzinfo=UTC), kind=row.kind, data=dict(row.data))
+
+
+def _kept(
+    graph: Graph, state: str, event: str, payload: dict[str, Any] | None, context: dict[str, Any]
+) -> tuple[dict[str, Any], str | None]:
+    """The context with the payload of `event` in its `into=` field, and that field; or
+    the context as it is, and None. The payload wins over a routine's write to the
+    same field (R1)."""
+    field = graph.into(state, event)
+    if field is None:
+        return context, None
+    return {**context, field: payload}, field
 
 
 def _settled(result: Fired | Exception) -> Fired:
