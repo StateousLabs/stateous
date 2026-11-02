@@ -133,7 +133,7 @@ def insert_a_token(url: str) -> None:
 
 def test_the_baseline_is_the_first_revision_kept_in_its_own_table() -> None:
     assert (BASELINE, VERSION_TABLE) == ("0001", "stateous_version")
-    assert head() == "0003"
+    assert head() == "0001"
 
 
 def test_a_new_database_is_made_at_the_newest_revision(tmp_path: Path) -> None:
@@ -143,9 +143,20 @@ def test_a_new_database_is_made_at_the_newest_revision(tmp_path: Path) -> None:
 
     assert version_of(url) == head()
     assert table_names(url) == [
-        "claims", "control_plane", "ledger", "memory", "stateous_version", "tasks", "timers",
-        "tokens",
+        "claims", "control_plane", "ledger", "memory", "notices", "stateous_version", "tasks",
+        "timers", "tokens",
     ]  # fmt: skip
+
+
+def test_a_new_database_has_notices_off(tmp_path: Path) -> None:
+    url = sqlite_url(tmp_path / "s.db")
+
+    Store(url).close()
+
+    engine = create_engine(url)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT notices FROM control_plane")).scalars().all() == [0]
+    engine.dispose()
 
 
 # SQLite cannot reflect an expression index, so the comparison skips `tokens_folded`
@@ -194,27 +205,6 @@ def test_both_ways_to_make_a_database_give_it_one_control_plane_row(tmp_path: Pa
 
     assert control_plane_ids(made) == [1]
     assert control_plane_ids(migrated) == [1]
-
-
-def test_a_database_at_the_baseline_gets_the_claims_table_and_keeps_its_rows(
-    tmp_path: Path,
-) -> None:
-    url = sqlite_url(tmp_path / "baseline.db")
-    engine = create_engine(url)
-    upgrade_from_empty(engine, revision=BASELINE)
-    engine.dispose()
-    insert_a_token(url)
-    assert "claims" not in table_names(url)
-
-    Store(url).close()
-
-    assert version_of(url) == head()
-    assert "claims" in table_names(url)
-    assert control_plane_ids(url) == [1]
-    engine = create_engine(url)
-    with engine.connect() as connection:
-        assert connection.execute(text("SELECT token FROM tokens")).scalars().all() == ["T-1"]
-    engine.dispose()
 
 
 def test_a_database_behind_the_newest_revision_is_upgraded_keeping_its_rows(
@@ -297,36 +287,6 @@ def test_a_database_that_lost_a_table_is_refused(tmp_path: Path) -> None:
         Store(url)
 
 
-def test_a_database_at_the_newest_revision_that_lost_the_claims_table_is_refused(
-    tmp_path: Path,
-) -> None:
-    url = sqlite_url(tmp_path / "no-claims.db")
-    Store(url).close()
-    engine = create_engine(url)
-    with engine.begin() as connection:
-        connection.execute(text("DROP TABLE claims"))
-    engine.dispose()
-
-    with pytest.raises(ForeignDatabase, match="claims"):
-        Store(url)
-
-
-def test_a_database_at_the_baseline_with_a_claims_table_of_its_own_is_refused_untouched(
-    tmp_path: Path,
-) -> None:
-    url = sqlite_url(tmp_path / "foreign-claims.db")
-    engine = create_engine(url)
-    upgrade_from_empty(engine, revision=BASELINE)
-    with engine.begin() as connection:
-        connection.execute(text("CREATE TABLE claims (id INTEGER PRIMARY KEY)"))
-    engine.dispose()
-
-    with pytest.raises(ForeignDatabase, match="a table named claims that Stateous did not make"):
-        Store(url)
-
-    assert version_of(url) == BASELINE
-
-
 def test_a_new_database_that_fails_to_be_stamped_is_left_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -373,29 +333,3 @@ def test_opening_a_database_twice_changes_nothing(tmp_path: Path) -> None:
 
     assert table_names(url) == before
     assert version_of(url) == head()
-
-
-def test_a_database_at_0002_gets_the_parent_and_workflow_of_each_token(tmp_path: Path) -> None:
-    url = sqlite_url(tmp_path / "claims.db")
-    engine = create_engine(url)
-    upgrade_from_empty(engine, revision="0002")
-    engine.dispose()
-    insert_a_token(url)
-    assert "parent" not in token_columns(url)
-
-    Store(url).close()
-
-    assert version_of(url) == head()
-    assert {"parent", "workflow"} <= token_columns(url)
-    engine = create_engine(url)
-    with engine.connect() as connection:
-        rows = connection.execute(text("SELECT token, parent, workflow FROM tokens")).all()
-    engine.dispose()
-    assert [tuple(row) for row in rows] == [("T-1", None, None)]
-    engine = create_engine(url)
-    with engine.connect() as connection:
-        sql = connection.scalar(
-            text("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'tokens_folded'")
-        )
-    engine.dispose()
-    assert sql is not None and sql.startswith("CREATE UNIQUE INDEX")

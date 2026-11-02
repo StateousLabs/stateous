@@ -29,10 +29,6 @@ VERSION_TABLE = "stateous_version"
 """Where Stateous keeps its revision. It is its own table, so that an application
 that uses Alembic in the same database keeps `alembic_version` for itself."""
 
-ADDED: dict[str, str] = {"claims": "0002"}
-"""The tables that a revision after the baseline added, and that revision. A
-database at an older revision does not have them yet: the upgrade makes them."""
-
 HERE = Path(__file__).parent
 """The package's migrations: env.py, the template, and versions/."""
 
@@ -69,16 +65,9 @@ def migrate(engine: Engine, *, script_location: Path | None = None) -> None:
                 f"this database was made by another version of Stateous (schema {current}); "
                 "use that version, or start a new database"
             )
-        if missing := sorted(_expected(location, current) - present):
+        if missing := sorted(_ours() - present):
             raise ForeignDatabase(
                 f"this database has no {', '.join(missing)} table; start a new database"
-            )
-        added = _expected(location, newest) - _expected(location, current)
-        if foreign := sorted(added & present):  # the upgrade cannot make them
-            names = ", ".join(foreign)
-            raise ForeignDatabase(
-                f"this database has a table named {names} that Stateous did not make; "
-                "start a new database"
             )
         if current != newest:
             command.upgrade(_config(location, connection), "head")
@@ -135,14 +124,6 @@ def _head(location: Path) -> str:
 @cache
 def _known(location: Path) -> frozenset[str]:
     return frozenset(script.revision for script in _scripts(location).walk_revisions())
-
-
-@cache
-def _expected(location: Path, revision: str) -> frozenset[str]:
-    """The tables that a database at `revision` has: ours, less those that a later
-    revision adds."""
-    lineage = {script.revision for script in _scripts(location).iterate_revisions(revision, "base")}
-    return _ours() - {table for table, added in ADDED.items() if added not in lineage}
 
 
 @cache

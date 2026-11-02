@@ -16,6 +16,7 @@ erDiagram
     tokens ||--o{ memory : "token, the memory of routines"
     tokens |o--o{ tokens : "parent, the child tokens"
     tasks |o--o| claims : "task_id, the last claim"
+    tokens ||--o{ notices : "token, changes for your handler"
 
     tokens {
         string token PK
@@ -76,6 +77,19 @@ erDiagram
         string checksum
         string serving
         datetime since
+        bool notices
+    }
+    notices {
+        int id PK
+        string family
+        string token
+        string parent
+        string workflow
+        string kind
+        string event
+        json payload
+        string state
+        datetime at
     }
     stateous_version {
         string version_num PK
@@ -90,7 +104,8 @@ erDiagram
 | `timers` | The timeout of a state (`kind` is `timeout`), and the timers of routines (`kind` is `timer`). | Start a token, Fire an event, Report an outcome, Lease expiry, Timer fires, Pause and resume, Cancel, Join. |
 | `memory` | The routine's memory: one key and its value, for one token and one state. The rows of a token are deleted when it ends. | Report an outcome (memory writes), and the end of a token. |
 | `claims` | The last claim of each supervisor: the request id, and the task and attempt that it got. An empty `task_id` means that the claim got no task. | Claim a task. |
-| `control_plane` | One row. The structure and the checksum of the graph on record, and the control plane that holds the database now. | Serve, and its clock. |
+| `control_plane` | One row. The structure and the checksum of the graph on record, and the control plane that holds the database now. `notices` says if each change also writes a notice. | Serve, and its clock. |
+| `notices` | Changes that your handler did not get yet: an accepted event, the end of a token, the last failure of a task. A row is deleted when the handler has it. `family` is the top token of the token's family. The table stays empty while `notices` is off. | Fire an event, Report an outcome, Timer fires, Pause and resume, Cancel, Join. |
 | `stateous_version` | The version of the schema of the tables. It has its own name, so a different application can use Alembic in the same database. | Serve, at start. |
 
 Times are in UTC, without a time zone. `stateous token show` prints them in local time.

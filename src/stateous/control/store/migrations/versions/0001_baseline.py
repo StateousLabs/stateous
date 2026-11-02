@@ -18,7 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Make every table and index, and the control plane's one row."""
+    """Make every table and index, and the control plane's one row (notices off)."""
     op.create_table(
         "control_plane",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -26,10 +26,21 @@ def upgrade() -> None:
         sa.Column("checksum", sa.String(length=80), nullable=True),
         sa.Column("serving", sa.String(length=256), nullable=True),
         sa.Column("since", sa.DateTime(), nullable=True),
+        sa.Column("notices", sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    control_plane = sa.table("control_plane", sa.column("id", sa.Integer()))
-    op.bulk_insert(control_plane, [{"id": 1}])
+    control_plane = sa.table(
+        "control_plane", sa.column("id", sa.Integer()), sa.column("notices", sa.Boolean())
+    )
+    op.bulk_insert(control_plane, [{"id": 1, "notices": False}])
+    op.create_table(
+        "claims",
+        sa.Column("supervisor", sa.String(length=256), nullable=False),
+        sa.Column("request", sa.String(length=64), nullable=False),
+        sa.Column("task_id", sa.Integer(), nullable=True),
+        sa.Column("attempt", sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint("supervisor"),
+    )
     op.create_table(
         "ledger",
         sa.Column("token", sa.String(length=256), nullable=False),
@@ -41,6 +52,21 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("token", "seq"),
     )
     op.create_index("ledger_key", "ledger", ["token", "key"], unique=True)
+    op.create_table(
+        "notices",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("family", sa.String(length=256), nullable=False),
+        sa.Column("token", sa.String(length=256), nullable=False),
+        sa.Column("parent", sa.String(length=256), nullable=True),
+        sa.Column("workflow", sa.String(length=256), nullable=False),
+        sa.Column("kind", sa.String(length=32), nullable=False),
+        sa.Column("event", sa.String(length=256), nullable=True),
+        sa.Column("payload", sa.JSON(), nullable=True),
+        sa.Column("state", sa.String(length=256), nullable=False),
+        sa.Column("at", sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("notices_family", "notices", ["family", "id"], unique=False)
     op.create_table(
         "memory",
         sa.Column("token", sa.String(length=256), nullable=False),
@@ -86,13 +112,17 @@ def upgrade() -> None:
         sa.Column("visit", sa.Integer(), nullable=False),
         sa.Column("context", sa.JSON(), nullable=False),
         sa.Column("entered_at", sa.DateTime(), nullable=False),
+        sa.Column("parent", sa.String(length=256), nullable=True),
+        sa.Column("workflow", sa.String(length=64), nullable=True),
         sa.PrimaryKeyConstraint("token"),
     )
-    op.create_index("tokens_folded", "tokens", [sa.text("lower(token)")], unique=False)
+    op.create_index("tokens_folded", "tokens", [sa.text("lower(token)")], unique=True)
+    op.create_index("tokens_parent", "tokens", ["parent"], unique=False)
 
 
 def downgrade() -> None:
     """Drop everything that `upgrade` made."""
+    op.drop_index("tokens_parent", table_name="tokens")
     op.drop_index("tokens_folded", table_name="tokens")
     op.drop_table("tokens")
     op.drop_index("timers_due", table_name="timers")
@@ -100,6 +130,9 @@ def downgrade() -> None:
     op.drop_index("tasks_queue", table_name="tasks")
     op.drop_table("tasks")
     op.drop_table("memory")
+    op.drop_index("notices_family", table_name="notices")
+    op.drop_table("notices")
     op.drop_index("ledger_key", table_name="ledger")
     op.drop_table("ledger")
+    op.drop_table("claims")
     op.drop_table("control_plane")

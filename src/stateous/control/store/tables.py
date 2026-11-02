@@ -131,6 +131,9 @@ class ControlPlane(Base):
     """The control plane that holds the database: `host:pid:id`."""
     since: Mapped[datetime | None] = mapped_column(default=None)
     """When that control plane last said that it still serves."""
+    notices: Mapped[bool] = mapped_column(default=False)
+    """Whether each change also writes its notice (`Notice`). `stateous migrate
+    --notices` sets it for the namespace."""
 
 
 class Claim(Base):
@@ -147,3 +150,24 @@ class Claim(Base):
     """The task the claim got; None when there was no task."""
     attempt: Mapped[int | None] = mapped_column(default=None)
     """The attempt of that task that the claim started."""
+
+
+class Notice(Base):
+    """One change that the developer's handler has not had yet: an accepted event, the
+    end of a token, or the last failure of a task. Written in the transaction of the
+    change; deleted when the handler has it."""
+
+    __tablename__ = "notices"
+    __table_args__ = (Index("notices_family", "family", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    family: Mapped[str] = mapped_column(String(256))
+    """The top token of the token's family. The notices of one family arrive in order."""
+    token: Mapped[str] = mapped_column(String(256))
+    parent: Mapped[str | None] = mapped_column(String(256), default=None)
+    workflow: Mapped[str] = mapped_column(String(256))
+    kind: Mapped[str] = mapped_column(String(32))
+    event: Mapped[str | None] = mapped_column(String(256), default=None)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+    state: Mapped[str] = mapped_column(String(256))
+    at: Mapped[datetime]
