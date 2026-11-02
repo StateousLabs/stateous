@@ -12,7 +12,7 @@ import re
 import socket
 import threading
 import uuid
-from collections.abc import Collection, Generator
+from collections.abc import Callable, Collection, Generator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -245,6 +245,7 @@ class Store:
             threading.RLock() if url.startswith("sqlite") else nullcontext()
         )
         self._closed = False
+        self._on_ready: list[Callable[[str], None]] = []
         self.notices_on = False
         """Whether each change also writes its notice. Read when the store opens, and
         set by `migrate(notices=...)`."""
@@ -400,7 +401,29 @@ class Store:
                 # A developer's engine has its own connection settings: the time
                 # limits hold for each transaction of Stateous only.
                 session.execute(text(_GIVEN_LIMITS))
-            yield Transaction(session, utc(now), namespace=self.namespace, notices=self.notices_on)
+            tx = Transaction(session, utc(now), namespace=self.namespace, notices=self.notices_on)
+            yield tx
+        # Committed: say which states have a task that can be claimed now.
+        for state in tx.readied:
+            for callback in list(self._on_ready):
+                try:
+                    callback(state)
+                except Exception as error:  # a hook must not fail the change
+                    log.error(
+                        "a task-ready callback failed (%s)",
+                        " ".join(str(error).split()) or type(error).__name__,
+                    )
+
+    def on_ready(self, callback: Callable[[str], None]) -> Callable[[], None]:
+        """Call `callback(state)` after each commit that makes a task of `state`
+        claimable. Returns the function that removes the callback."""
+        self._on_ready.append(callback)
+
+        def remove() -> None:
+            if callback in self._on_ready:
+                self._on_ready.remove(callback)
+
+        return remove
 
 
 class Transaction:
@@ -441,6 +464,8 @@ class Transaction:
         self._namespace = namespace
         self._notices = notices
         """Whether `notify` writes: the store's `notices_on`."""
+        self.readied: list[str] = []
+        """The states, as a claim names them, whose task became claimable here."""
         self._locks = session.get_bind().dialect.name == "postgresql"
         self._locked: set[str] = set()
         self._families: dict[str, str] = {}
@@ -533,6 +558,12 @@ class Transaction:
             )
         )
         self._session.flush()
+
+    def ready(self, state: str) -> None:
+        """A task of `state` (`<workflow>/<state>` for a child) can be claimed once this
+        transaction commits."""
+        if state not in self.readied:
+            self.readied.append(state)
 
     def next_notice_family(self, tried: Collection[str]) -> str | None:
         """The family of the oldest notice, of the families not in `tried`; None when

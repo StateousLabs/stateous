@@ -82,7 +82,11 @@ HEARTBEAT_EVERY = 30.0
 """Seconds between heartbeats. The control plane's lease is 2 minutes."""
 
 IDLE = 1.0
-"""Seconds to wait after a claim that got no task."""
+"""Seconds that a claim may wait for a task (at most `MAX_CLAIM_WAIT`), and then
+seconds between two claims when there is no task."""
+
+MAX_CLAIM_WAIT = 30.0
+"""The most seconds that a claim may wait for a task at the control plane."""
 
 CANCEL_WAIT = 5.0
 """After the second signal: seconds to wait for the cancelled routines to end."""
@@ -380,6 +384,10 @@ class Supervisor:
         """Send the messages left in the outbox. Then claim tasks until the stop. The
         stop does not cut a claim request in flight.
 
+        A claim may wait up to `idle` seconds at the control plane for a task (a
+        transport that cannot wait answers at once). After a claim with no task, the
+        supervisor rests for the rest of `idle`.
+
         Each claim has a random request id. A claim that failed with no answer is
         sent again with the same id: if the control plane granted a task but its
         answer was lost, the claim gets that task again. After an answer (a task,
@@ -391,9 +399,14 @@ class Supervisor:
             if len(self._running) >= self.tasks:
                 await self._rest(None)
                 continue
+            started = asyncio.get_running_loop().time()
             try:
                 grant = await self.api.claim(
-                    self.name, served, stop=self._stopping, request=request
+                    self.name,
+                    served,
+                    stop=self._stopping,
+                    request=request,
+                    wait=min(self.idle, MAX_CLAIM_WAIT),
                 )
             except Refused as error:
                 log.warning("the control plane refused a claim: %s", error.message)
@@ -405,7 +418,9 @@ class Supervisor:
             else:
                 request = uuid.uuid4().hex
             if grant is None:
-                await self._rest(self.idle)
+                # The claim may have waited at the control plane: rest only the rest.
+                spent = asyncio.get_running_loop().time() - started
+                await self._rest(max(0.0, self.idle - spent))
             else:
                 self._start(grant)
 

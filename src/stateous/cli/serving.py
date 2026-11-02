@@ -36,6 +36,7 @@ from stateous.control.errors import GraphConflict
 from stateous.control.graph import Graph
 from stateous.control.plane import ControlPlane
 from stateous.control.store import DatabaseHeld, ForeignDatabase
+from stateous.control.waiting import WaitingClaims
 from stateous.model.graph_file import GraphFileError, load_graph
 
 log = logging.getLogger("stateous.serve")
@@ -157,6 +158,7 @@ class Serving:
     url: str
     plane: ControlPlane
     clock: Clock
+    waiting: WaitingClaims
 
     def on_lost(self, callback: Callable[[], None]) -> None:
         """Call `callback()` once when another control plane takes the database. The
@@ -189,19 +191,42 @@ def prepare_serve(graph: Path, db: str, listen: str, *, namespace: str | None = 
     try:
         if (warning := listen_warning(host)) is not None:
             typer.echo(warning, err=True)
-        app = ClockedApp(create_app(plane), plane.clock)
+        waiting = WaitingClaims()
+        app = ClockedApp(create_app(plane, waiting=waiting), plane.clock)
         config = uvicorn.Config(app, log_level="warning", timeout_graceful_shutdown=SHUTDOWN_WITHIN)
         url = _url(host, listener)
     except BaseException:
         plane.close()
         listener.close()
         raise
-    return Serving(config=config, listener=listener, url=url, plane=plane, clock=plane.clock)
+    return Serving(
+        config=config,
+        listener=listener,
+        url=url,
+        plane=plane,
+        clock=plane.clock,
+        waiting=waiting,
+    )
 
 
 class GracefulServer(uvicorn.Server):
     """Uvicorn's server. A first signal stops it gracefully, and a second stops it at
-    once. It does not raise the signal again after it stops, so `serve` exits 0."""
+    once. It does not raise the signal again after it stops, so `serve` exits 0.
+
+    `on_exit` is called when the server begins to stop, by a signal or by code: it wakes
+    the claims that wait, so the stop does not wait for them."""
+
+    on_exit: Callable[[], None] | None = None
+
+    @property
+    def should_exit(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
+        return bool(self.__dict__.get("_should_exit", False))
+
+    @should_exit.setter
+    def should_exit(self, value: bool) -> None:
+        self.__dict__["_should_exit"] = value
+        if value and self.on_exit is not None:
+            self.on_exit()
 
     def handle_exit(self, sig: int, frame: FrameType | None) -> None:
         if self.should_exit:

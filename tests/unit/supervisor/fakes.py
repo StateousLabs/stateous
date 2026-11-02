@@ -62,6 +62,8 @@ class FakeApi:
         self.claim_waits = 0
         """The claims that wait for `claim_gate` now."""
         self.claim_requests: list[str | None] = []
+        self.claim_wait_seen: list[float] = []
+        """The `wait` of each claim, in order."""
         """The request id of each claim, in order."""
         self.claim_errors: list[Exception] = []
         """The next claims raise these, in order, as if their answers were lost."""
@@ -88,6 +90,7 @@ class FakeApi:
     ) -> TaskGrant | None:
         self.calls.append(("claim", supervisor, tuple(states)))
         self.claim_requests.append(request)
+        self.claim_wait_seen.append(wait)
         if self.claim_errors:
             raise self.claim_errors.pop(0)
         if self.claim_gate is not None:

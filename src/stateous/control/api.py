@@ -9,6 +9,7 @@ runs on a thread from the pool."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable, Collection
 from datetime import UTC, datetime
@@ -40,6 +41,7 @@ from stateous.control.errors import (
     TokenNotActive,
     TokenNotFound,
 )
+from stateous.control.waiting import WaitingClaims
 from stateous.model.wire import Outcome, TaskGrant, WireError
 
 MAX_BODY = 1024 * 1024
@@ -72,6 +74,8 @@ class Served(Protocol):
     def document(self) -> dict[str, Any]: ...
 
     def health(self) -> dict[str, Any]: ...
+
+    def on_task_ready(self, callback: Callable[[str], None]) -> Callable[[], None]: ...
 
     def start(self, token: str, context: dict[str, Any]) -> Token: ...
 
@@ -120,10 +124,15 @@ class Served(Protocol):
     ) -> None: ...
 
 
-def create_app(engine: Served) -> Starlette:
-    """The API over one control plane. It has no clock: `stateous serve` runs the clock."""
+def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starlette:
+    """The API over one control plane. It has no clock: `stateous serve` runs the clock.
+    `waiting` holds the claims that wait for a task; `serve` closes it when it stops,
+    so they answer at once."""
     document = engine.document
     health = engine.health()
+    if waiting is None:
+        waiting = WaitingClaims()
+    engine.on_task_ready(waiting.ready)
 
     async def start(request: Request) -> Response:
         body = await body_of(request)
@@ -183,9 +192,18 @@ def create_app(engine: Served) -> Starlette:
         supervisor = checks.supervisor_name(body.get("supervisor"))
         states = checks.state_names(body.get("states"), "states")
         request_id = checks.request_id(body.get("request"))
-        grant = await run_in_threadpool(
-            lambda: engine.claim(supervisor, states, request=request_id)
-        )
+        wait = checks.claim_wait(body.get("wait"))
+
+        def claimed() -> TaskGrant | None:
+            return engine.claim(supervisor, states, request=request_id)
+
+        if wait == 0:
+            grant = await run_in_threadpool(claimed)
+        else:
+            with waiting.waiting(states) as ready:
+                grant = await run_in_threadpool(claimed)
+                if grant is None and await _woken(ready, request, wait):
+                    grant = await run_in_threadpool(claimed)
         if grant is None:
             return Response(status_code=204)
         return JSONResponse(grant.to_json())
@@ -248,6 +266,26 @@ def create_app(engine: Served) -> Starlette:
 
 
 # ── what the API sends ──────────────────────────────────────────────────
+
+
+async def _woken(ready: asyncio.Event, request: Request, wait: float) -> bool:
+    """Wait up to `wait` seconds for `ready`. False when the client went away first:
+    no one reads the answer, so the claim must not take a task."""
+    readied = asyncio.ensure_future(ready.wait())
+    gone = asyncio.ensure_future(_disconnected(request))
+    try:
+        await asyncio.wait({readied, gone}, timeout=wait, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        readied.cancel()
+        gone.cancel()
+    return not (gone.done() and not gone.cancelled())
+
+
+async def _disconnected(request: Request) -> None:
+    """Return when the client goes away. The body is read already, so the next message
+    is the disconnect."""
+    while (await request.receive())["type"] != "http.disconnect":
+        pass
 
 
 def token_json(token: Token) -> dict[str, Any]:

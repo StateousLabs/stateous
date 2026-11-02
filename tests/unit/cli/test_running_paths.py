@@ -16,6 +16,7 @@ import pytest
 import typer
 
 from stateous.cli import running
+from stateous.control.waiting import WaitingClaims
 from stateous.supervisor.supervisor import SupervisorError
 
 
@@ -196,6 +197,7 @@ class FakeServingSockets(FakeServing):
     config = object()
     listener: Any = None
     plane: Any = object()
+    waiting = WaitingClaims()
 
     def on_lost(self, callback: object) -> None:
         return None

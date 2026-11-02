@@ -73,6 +73,7 @@ def serve(
     try:
         if folder is None:
             server = GracefulServer(serving.config)
+            server.on_exit = serving.waiting.close
 
             def stop() -> None:
                 server.should_exit = True
@@ -261,6 +262,7 @@ async def serve_and_supervise(serving: Serving, folder: Folder) -> int:
     signal at the start). The supervisor calls the control plane in this process; the
     HTTP API serves the clients."""
     server = SupervisedServer(serving.config)
+    server.on_exit = serving.waiting.close
     serving.on_lost(server.stop_all)
     serving_task = asyncio.create_task(server.serve(sockets=[serving.listener]))
     api = in_process_api(serving.plane)

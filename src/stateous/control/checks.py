@@ -64,6 +64,25 @@ def state_names(value: Any, what: str) -> list[str]:
     return cast("list[str]", items)
 
 
+MAX_CLAIM_WAIT = 30.0
+"""The most seconds that a claim may wait for a task."""
+
+
+def claim_wait(value: Any) -> float:
+    """The seconds that a claim may wait for a task; 0 when it names none."""
+    if value is None:
+        return 0.0
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not (0 <= value <= MAX_CLAIM_WAIT)
+    ):
+        raise Problem(
+            422, f"'wait' is a number of seconds from 0 to {MAX_CLAIM_WAIT:g}", "invalid_argument"
+        )
+    return float(value)
+
+
 def request_id(value: Any) -> str | None:
     """A claim's request id; None when the body names none."""
     if value is None:

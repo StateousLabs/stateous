@@ -472,3 +472,19 @@ def test_stop_now_before_run_stops_it_at_once() -> None:
 
     assert asyncio.run(supervisor.run()) == 1
     assert api.claims() == 0
+
+
+def test_a_claim_waits_for_work_and_an_empty_one_rests_only_the_rest_of_idle() -> None:
+    api = FakeApi()
+    supervisor = make(api)
+
+    async def scenario() -> None:
+        running = asyncio.create_task(supervisor.run())
+        while api.claims() < 2:
+            await asyncio.sleep(0.01)
+        supervisor.stop_now()
+        await running
+
+    asyncio.run(scenario())
+
+    assert api.claim_wait_seen[0] == min(supervisor.idle, supervisor_module.MAX_CLAIM_WAIT)

@@ -98,6 +98,17 @@ class ControlPlane:
         """What `GET /health` answers: the workflow's name and its checksum."""
         return {"workflow": self._graph.name, "checksum": self._graph.checksum}
 
+    def on_task_ready(self, callback: Callable[[str], None]) -> Callable[[], None]:
+        """Call `callback(state)` after each commit that makes a task of `state`
+        claimable: a new task, a retry, or a resume. A child's state is
+        `<workflow>/<state>`, as a claim names it. The callback runs on the thread of
+        the change; it must be quick. A callback that raises is logged, and the change
+        stays. Returns the function that removes the callback.
+
+        A transport uses it to wake a claim that waits, or to publish "work for these
+        states" to a queue. It is a hint: the claim is still the only way to a task."""
+        return self._engine.on_task_ready(callback)
+
     # ── tokens ──────────────────────────────────────────────────────────
 
     def start(self, token: str, context: dict[str, Any]) -> Token:

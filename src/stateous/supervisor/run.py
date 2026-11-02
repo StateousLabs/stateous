@@ -11,22 +11,30 @@ from pathlib import Path
 
 from stateous.supervisor.folder import FolderError, load_folder
 from stateous.supervisor.retrying import Retrying
-from stateous.supervisor.supervisor import SupervisorError, open_supervisor
+from stateous.supervisor.supervisor import IDLE, SupervisorError, open_supervisor
 from stateous.transport import Transport
 
 
 async def supervise(
-    folder: str | Path, transport: Transport, *, stop: asyncio.Event | None = None
+    folder: str | Path,
+    transport: Transport,
+    *,
+    stop: asyncio.Event | None = None,
+    idle: float = IDLE,
 ) -> int:
     """Run the supervisor of `folder` over `transport`, until `stop` is set (then it
     stops as on Ctrl-C: the running routines end and report) or until it ends.
     Returns its exit code. A folder that cannot run raises `SupervisorError` with one
-    sentence, for example a contract for another version of the workflow."""
+    sentence, for example a contract for another version of the workflow.
+
+    `idle` is how long a claim may wait for a task at the control plane (at most 30
+    seconds), and the time between two claims when there is none. A longer `idle`
+    sends fewer claims; a stop then can wait up to `idle` for the claim in flight."""
     try:
         loaded = load_folder(Path(folder))
     except FolderError as error:
         raise SupervisorError(str(error)) from None
-    supervisor = await open_supervisor(loaded, Retrying(transport))
+    supervisor = await open_supervisor(loaded, Retrying(transport), idle=idle)
     watcher: asyncio.Task[None] | None = None
     if stop is not None:
 
