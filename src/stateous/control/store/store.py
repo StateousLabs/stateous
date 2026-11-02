@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import socket
 import threading
 import uuid
@@ -81,6 +82,27 @@ may take it."""
 
 RENEW_EVERY = timedelta(seconds=10)
 """`keep_serving` writes `since` again when it is older than this."""
+
+DEFAULT_NAMESPACE = "stateous"
+"""Postgres: the schema that holds the tables when no namespace is given. It is not
+`public`, so the tables never meet an application's own tables."""
+
+_NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,62}")
+
+
+def check_namespace(name: str) -> str:
+    """`name` if it can be a namespace: a Postgres schema name that needs no quotes."""
+    if not _NAMESPACE.fullmatch(name):
+        raise ValueError(
+            "a namespace is a lower-case letter, then up to 62 lower-case letters, digits or '_'"
+        )
+    return name
+
+
+def lock_key(namespace: str | None, key: str) -> str:
+    """The advisory-lock key of `key` in `namespace`. Two namespaces in one database
+    never share a lock."""
+    return key if namespace is None else f"{namespace}/{key}"
 
 
 def database_url(url: str) -> str:
@@ -161,9 +183,22 @@ def wall_clock() -> datetime:
 class Store:
     """A database that holds the ledger and the rows it explains."""
 
-    def __init__(self, url: str, *, hold: bool = False) -> None:
+    def __init__(self, url: str, *, namespace: str | None = None, hold: bool = False) -> None:
         url = database_url(url)
-        self.engine = open_engine(url)
+        postgres = url.startswith("postgresql")
+        if namespace is not None and not postgres:
+            raise ValueError("a namespace is for Postgres; SQLite keeps one workflow in each file")
+        self.namespace: str | None = (
+            check_namespace(namespace or DEFAULT_NAMESPACE) if postgres else None
+        )
+        """The Postgres schema of the tables; None on SQLite."""
+        self._engine = open_engine(url)
+        self.engine: Engine = (
+            self._engine
+            if self.namespace is None
+            else self._engine.execution_options(schema_translate_map={None: self.namespace})
+        )
+        """The engine that Stateous uses: on Postgres, each table is in the namespace."""
         self.holder = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         """How this store names itself in the `control_plane` row when it serves."""
         self._serving: Connection | None = None
@@ -179,7 +214,7 @@ class Store:
             # never changes the schema under the one that serves.
             if hold and self.is_postgres and not self._try_take():
                 raise DatabaseHeld("another control plane serves this database; stop it first")
-            migrate(self.engine)
+            migrate(self.engine, namespace=self.namespace)
             if hold and not self.hold_serving():
                 raise DatabaseHeld(self._held_message())
         except BaseException:
@@ -205,7 +240,7 @@ class Store:
             self._serving.invalidate()  # its session ends, and the advisory lock with it
             self._serving.close()
             self._serving = None
-        self.engine.dispose()
+        self._engine.dispose()
 
     def hold_serving(self) -> bool:
         """Take this database for this control plane, until `close()`. False if
@@ -265,7 +300,7 @@ class Store:
         held = bool(
             connection.scalar(
                 text("SELECT pg_try_advisory_lock(hashtextextended(:key, 0))"),
-                {"key": SERVING_LOCK},
+                {"key": lock_key(self.namespace, SERVING_LOCK)},
             )
         )
         if held:
@@ -292,7 +327,7 @@ class Store:
         """All that is done inside commits together, or not at all. `now` is the time
         of the transaction. Transactions do not nest."""
         with self._turns, self._sessions.begin() as session:
-            yield Transaction(session, utc(now))
+            yield Transaction(session, utc(now), namespace=self.namespace)
 
 
 class Transaction:
@@ -320,9 +355,10 @@ class Transaction:
     stopped call once more.
     """
 
-    def __init__(self, session: Session, now: datetime) -> None:
+    def __init__(self, session: Session, now: datetime, *, namespace: str | None = None) -> None:
         self._session = session
         self.now = now
+        self._namespace = namespace
         self._locks = session.get_bind().dialect.name == "postgresql"
         self._locked: set[str] = set()
         self._families: dict[str, str] = {}
@@ -334,7 +370,7 @@ class Transaction:
         case, so `t-1` waits for `T-1` and then finds it (`token_folded`)."""
         if not self._locks:
             return True
-        key = TOKEN_LOCK + self.family(token).lower()
+        key = lock_key(self._namespace, TOKEN_LOCK + self.family(token).lower())
         if key in self._locked:
             return True
         if wait and self._locked:  # pragma: no cover - a programming-error guard

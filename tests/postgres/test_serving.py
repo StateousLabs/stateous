@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, inspect, text
 
 import stateous.control.store.store as store_module
 from stateous.control.store import DatabaseHeld, Store
-from stateous.control.store.store import SERVING_LOCK, database_url
+from stateous.control.store.store import DEFAULT_NAMESPACE, SERVING_LOCK, database_url, lock_key
 
 from ..conftest import fresh_postgres_database, needs_postgres
 
@@ -50,11 +50,11 @@ def test_a_refused_store_migrates_nothing(url: str) -> None:
         with holder.connect() as held:
             held.scalar(
                 text("SELECT pg_try_advisory_lock(hashtextextended(:key, 0))"),
-                {"key": SERVING_LOCK},
+                {"key": lock_key(DEFAULT_NAMESPACE, SERVING_LOCK)},
             )
             with pytest.raises(DatabaseHeld):
                 Store(url, hold=True)
-            assert inspect(held).get_table_names() == []
+            assert DEFAULT_NAMESPACE not in inspect(held).get_schema_names()
     finally:
         holder.dispose()
 
@@ -65,12 +65,12 @@ def test_a_failed_migration_after_the_hold_releases_it(
     real_migrate = store_module.migrate
     calls = 0
 
-    def fail_once(engine: Any) -> None:
+    def fail_once(engine: Any, **options: Any) -> None:
         nonlocal calls
         calls += 1
         if calls == 1:
             raise RuntimeError("the migration failed")
-        real_migrate(engine)
+        real_migrate(engine, **options)
 
     monkeypatch.setattr(store_module, "migrate", fail_once)
 

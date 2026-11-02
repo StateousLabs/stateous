@@ -37,19 +37,26 @@ MIGRATE_LOCK = "@stateous/migrate"
 can never be equal."""
 
 
-def migrate(engine: Engine, *, script_location: Path | None = None) -> None:
-    """Bring the database to this version's schema, and keep its data.
+def migrate(
+    engine: Engine, *, namespace: str | None = None, script_location: Path | None = None
+) -> None:
+    """Bring the database to this version's schema, and keep its data. On Postgres,
+    `namespace` is the schema that holds the tables (the engine maps each table to
+    it); it is made if it is not there.
 
     `script_location` is for tests, which add revisions to a copy of the package's
     migrations."""
     location = script_location or HERE
     with engine.begin() as connection:
         no_statement_limit(connection)
-        _lock(connection)
-        context = MigrationContext.configure(connection, opts={"version_table": VERSION_TABLE})
+        _lock(connection, namespace)
+        if namespace is not None:
+            # `namespace` passed `check_namespace`: a name that needs no quotes.
+            connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {namespace}"))
+        context = MigrationContext.configure(connection, opts=_version_options(namespace))
         current = context.get_current_revision()
         newest = _head(location)
-        present = set(inspect(connection).get_table_names())
+        present = set(inspect(connection).get_table_names(schema=namespace))
         if current is None:
             if _ours() & present:
                 raise ForeignDatabase(
@@ -70,7 +77,7 @@ def migrate(engine: Engine, *, script_location: Path | None = None) -> None:
                 f"this database has no {', '.join(missing)} table; start a new database"
             )
         if current != newest:
-            command.upgrade(_config(location, connection), "head")
+            command.upgrade(_config(location, connection, namespace), "head")
 
 
 def no_statement_limit(connection: Connection) -> None:
@@ -99,11 +106,17 @@ def _seed(connection: Connection) -> None:
     connection.execute(insert(tables.ControlPlane).values(id=1))
 
 
-def _config(location: Path, connection: Connection) -> Config:
+def _version_options(namespace: str | None) -> dict[str, str | None]:
+    """Where Alembic keeps the revision: `VERSION_TABLE`, in the namespace."""
+    return {"version_table": VERSION_TABLE, "version_table_schema": namespace}
+
+
+def _config(location: Path, connection: Connection, namespace: str | None = None) -> Config:
     """Alembic's configuration, to run env.py on a connection that is already open."""
     config = Config()
     config.set_main_option("script_location", str(location))
     config.attributes["connection"] = connection
+    config.attributes["namespace"] = namespace
     return config
 
 
@@ -131,11 +144,11 @@ def _ours() -> frozenset[str]:
     return frozenset(table.name for table in tables.Base.metadata.sorted_tables)
 
 
-def _lock(connection: Connection) -> None:
-    """On Postgres, one process migrates at a time. A second control plane that
-    starts at the same moment waits, then finds nothing to do."""
+def _lock(connection: Connection, namespace: str | None) -> None:
+    """On Postgres, one process migrates a namespace at a time. A second control plane
+    that starts at the same moment waits, then finds nothing to do."""
     if connection.dialect.name == "postgresql":
+        key = MIGRATE_LOCK if namespace is None else f"{namespace}/{MIGRATE_LOCK}"
         connection.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": MIGRATE_LOCK},
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key}
         )

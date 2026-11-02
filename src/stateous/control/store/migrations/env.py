@@ -17,7 +17,7 @@ def run() -> None:
     """Migrate the connection Stateous handed over, or else the database `alembic.ini` names."""
     connection = config.attributes.get("connection")
     if isinstance(connection, Connection):
-        _migrate(connection)
+        _migrate(connection, config.attributes.get("namespace"))
         return
     engine = engine_from_config(
         config.get_section(config.config_ini_section) or {},
@@ -29,12 +29,13 @@ def run() -> None:
     engine.dispose()
 
 
-def _migrate(connection: Connection) -> None:
+def _migrate(connection: Connection, namespace: str | None = None) -> None:
     context.configure(
         connection=connection,
         target_metadata=tables.Base.metadata,
         render_as_batch=True,  # SQLite cannot ALTER most things; batch mode rebuilds the table
         version_table=VERSION_TABLE,
+        version_table_schema=namespace,
         compare_server_default=True,
     )
     with context.begin_transaction():

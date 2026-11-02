@@ -15,7 +15,13 @@ from stateous.control.engine import Engine
 from stateous.control.graph import Graph
 from stateous.control.store import Store
 from stateous.control.store.migrations import no_statement_limit
-from stateous.control.store.store import POSTGRES_LOCK_WAIT, TOKEN_LOCK, database_url
+from stateous.control.store.store import (
+    DEFAULT_NAMESPACE,
+    POSTGRES_LOCK_WAIT,
+    TOKEN_LOCK,
+    database_url,
+    lock_key,
+)
 
 from ..conftest import fresh_postgres_database, needs_postgres
 from ..unit.control.support import TICKET, sdlc
@@ -62,7 +68,7 @@ def test_a_request_that_waits_for_a_held_lock_answers_database_busy(url: str, st
         with other.connect() as holder:
             holder.execute(
                 text("SELECT pg_advisory_lock(hashtextextended(:key, 0))"),
-                {"key": TOKEN_LOCK + "t-1"},
+                {"key": lock_key(DEFAULT_NAMESPACE, TOKEN_LOCK + "t-1")},
             )
             # A daemon thread: if the request waits for ever, the test fails and the
             # run goes on. The teardown drops the database, and that ends the wait.
@@ -71,7 +77,7 @@ def test_a_request_that_waits_for_a_held_lock_answers_database_busy(url: str, st
             thread.join(timeout=ANSWER_WITHIN)
             holder.execute(
                 text("SELECT pg_advisory_unlock(hashtextextended(:key, 0))"),
-                {"key": TOKEN_LOCK + "t-1"},
+                {"key": lock_key(DEFAULT_NAMESPACE, TOKEN_LOCK + "t-1")},
             )
     finally:
         other.dispose()
