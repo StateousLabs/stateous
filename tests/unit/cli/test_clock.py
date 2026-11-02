@@ -12,7 +12,8 @@ from sqlalchemy.exc import OperationalError
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-from stateous.cli.serving import Clock, ClockedApp
+from stateous.cli.serving import ClockedApp
+from stateous.control.clock import Clock
 
 
 class Ticks:

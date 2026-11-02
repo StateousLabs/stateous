@@ -22,7 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Protocol
+from typing import Any
 
 import typer
 import uvicorn
@@ -31,9 +31,11 @@ from sqlalchemy.exc import ArgumentError
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from stateous.control.api import create_app, refusal
-from stateous.control.engine import Engine, RecordedGraph
+from stateous.control.clock import LOST, Clock
+from stateous.control.errors import GraphConflict
 from stateous.control.graph import Graph
-from stateous.control.store import DatabaseHeld, ForeignDatabase, Store
+from stateous.control.plane import ControlPlane
+from stateous.control.store import DatabaseHeld, ForeignDatabase
 from stateous.model.graph_file import GraphFileError, load_graph
 
 log = logging.getLogger("stateous.serve")
@@ -41,18 +43,8 @@ log = logging.getLogger("stateous.serve")
 LOCAL_HOSTS = ("127.0.0.1", "::1", "localhost")
 """The hosts that only this computer reaches: no warning."""
 
-TICK_EVERY = 1.0
-"""Seconds between two ticks of the clock. `keep_serving` must run at least every
-10 seconds; the clock calls it on each tick."""
-
 SHUTDOWN_WITHIN = 5
 """Seconds a graceful stop waits for the requests in progress."""
-
-LOST = (
-    "another control plane took this database; this control plane does no more work; "
-    "trying again does not help: stop this server"
-)
-"""The error line of a lost hold, and the answer (503) to each request after it."""
 
 _IN_USE: frozenset[int] = frozenset(
     {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", errno.EADDRINUSE)}
@@ -116,93 +108,6 @@ def bound(host: str, port: int) -> socket.socket:
 # ── the clock ───────────────────────────────────────────────────────────
 
 
-class Ticking(Protocol):
-    def tick(self) -> int: ...
-
-
-class Holding(Protocol):
-    def keep_serving(self) -> bool: ...
-
-
-class Clock:
-    """The control plane's clock. Every `every` seconds it
-    renews the hold on the database (`Store.keep_serving`) and then calls
-    `engine.tick()` (due timers, timeouts, ended leases). Both are synchronous, so
-    they run on a thread from the pool. When another control plane took the hold, it sets
-    `lost`, logs one error line, calls `on_lost` (if set) once, and ends. A tick that
-    fails, or a database that does not answer, is logged; the clock goes on."""
-
-    def __init__(
-        self,
-        engine: Ticking,
-        hold: Holding,
-        *,
-        every: float = TICK_EVERY,
-        on_lost: Callable[[], None] | None = None,
-    ) -> None:
-        self.engine = engine
-        self.hold = hold
-        self.every = every
-        self.lost = False
-        """True when another control plane took the database while this one served."""
-        self.on_lost = on_lost
-        """Called once, with no arguments, on the server's event loop, after the line
-        of a lost hold. It must not block: e.g. it sets `server.should_exit`."""
-        self._stopping = asyncio.Event()
-
-    async def run(self) -> None:
-        """Tick until `stop()`, or until the hold is lost. A tick in progress ends
-        before `run` returns, so the store can close after it."""
-        while not self.lost:
-            try:
-                await asyncio.wait_for(self._stopping.wait(), timeout=self.every)
-            except TimeoutError:
-                await self.step()
-            else:
-                return
-
-    async def step(self) -> None:
-        """One tick: renew the hold, then tick the engine. A renewal that raises
-        skips the engine's tick for this step; it is not a lost hold."""
-        kept = await self._kept()
-        if kept is None:
-            return
-        if not kept:
-            self.lost = True
-            log.error(LOST)
-            if self.on_lost is not None:
-                self.on_lost()
-            return
-        try:
-            await asyncio.to_thread(self.engine.tick)
-        except Exception as error:  # e.g. the database stopped answering: one line
-            log.error(
-                "the clock's tick failed (%s); it tries again in %s seconds",
-                _one_line(error),
-                self.every,
-            )
-
-    def stop(self) -> None:
-        """End `run` after the tick in progress, if there is one."""
-        self._stopping.set()
-
-    async def _kept(self) -> bool | None:
-        """Whether this control plane still holds the database: True, False (the
-        hold is lost), or None when the renewal raised. A database that does not
-        answer is not a lost hold: the clock skips this step's tick and tries
-        again on the next one."""
-        try:
-            return await asyncio.to_thread(self.hold.keep_serving)
-        except Exception as error:
-            log.warning(
-                "cannot renew this control plane's hold on the database (%s); "
-                "trying again in %s seconds",
-                _one_line(error),
-                self.every,
-            )
-            return None
-
-
 class ClockedApp:
     """The API as `serve` runs it. Its ASGI lifespan runs the clock while the server
     serves: the clock starts when the server starts, and the server's stop waits for
@@ -250,7 +155,7 @@ class Serving:
     config: uvicorn.Config
     listener: socket.socket
     url: str
-    store: Store
+    plane: ControlPlane
     clock: Clock
 
     def on_lost(self, callback: Callable[[], None]) -> None:
@@ -262,10 +167,10 @@ class Serving:
         self.clock.on_lost = callback
 
     def close(self) -> None:
-        """Close the listener and the store. Closing the store gives up the hold. A
-        second call does nothing more."""
+        """Close the listener and the control plane. Closing the control plane gives up
+        the hold. A second call does nothing more."""
         self.listener.close()
-        self.store.close()
+        self.plane.close()
 
 
 def prepare_serve(graph: Path, db: str, listen: str) -> Serving:
@@ -274,27 +179,24 @@ def prepare_serve(graph: Path, db: str, listen: str) -> Serving:
     is a `ServeRefused` with one sentence, and leaves no port and no database open.
     Then print the warning line for a wide `--listen`."""
     host, port = host_and_port(listen)
-    workflow = _load(graph)
+    document = _load(graph)
     listener = _listen(host, port)
     try:
-        store = _open(db)
+        plane = _open(document, db)
     except BaseException:
         listener.close()
         raise
     try:
-        engine = Engine(store, workflow)
-        _check_structure(engine)
         if (warning := listen_warning(host)) is not None:
             typer.echo(warning, err=True)
-        clock = Clock(engine, store)
-        app = ClockedApp(create_app(engine), clock)
+        app = ClockedApp(create_app(plane), plane.clock)
         config = uvicorn.Config(app, log_level="warning", timeout_graceful_shutdown=SHUTDOWN_WITHIN)
         url = _url(host, listener)
     except BaseException:
-        store.close()
+        plane.close()
         listener.close()
         raise
-    return Serving(config=config, listener=listener, url=url, store=store, clock=clock)
+    return Serving(config=config, listener=listener, url=url, plane=plane, clock=plane.clock)
 
 
 class GracefulServer(uvicorn.Server):
@@ -316,9 +218,9 @@ def configure_logging() -> None:
     logging.getLogger("stateous").setLevel(logging.INFO)
 
 
-def _load(path: Path) -> Graph:
-    """The graph in the file at `path`. A file that `load_graph` accepts but that
-    `Graph` cannot read is also not a graph file."""
+def _load(path: Path) -> dict[str, Any]:
+    """The graph document in the file at `path`. A file that `load_graph` accepts but
+    that `Graph` cannot read is also not a graph file."""
     try:
         document = load_graph(path.read_text(encoding="utf-8"))
     except OSError as error:
@@ -328,9 +230,10 @@ def _load(path: Path) -> Graph:
     except (GraphFileError, UnicodeDecodeError) as error:
         raise ServeRefused(f"{path} is not a graph file: {_one_line(error)}") from None
     try:
-        return Graph(document)
+        Graph(document)
     except Exception as error:
         raise ServeRefused(f"{path} is not a graph file: {_one_line(error)}") from None
+    return document
 
 
 def _listen(host: str, port: int) -> socket.socket:
@@ -345,39 +248,19 @@ def _listen(host: str, port: int) -> socket.socket:
         raise ServeRefused(f"cannot listen on {host}:{port}: {error.strerror or error}") from None
 
 
-def _open(db: str) -> Store:
-    """The store, with this control plane's hold on the database."""
+def _open(document: dict[str, Any], db: str) -> ControlPlane:
+    """The control plane, with its hold on the database, its tables migrated and its
+    graph on record."""
     try:
-        return Store(db, hold=True)
+        return ControlPlane(document, database=db, migrate=True)
     except DatabaseHeld as error:
         raise ServeRefused(_one_line(error)) from None
     except ForeignDatabase as error:
         raise ServeRefused(f"cannot use the database {_shown(db)}: {_one_line(error)}") from None
+    except GraphConflict as error:
+        raise ServeRefused(_one_line(error)) from None
     except Exception as error:  # a driver, a connection or a migration: one sentence
         raise ServeRefused(f"cannot open the database {_shown(db)}: {_one_line(error)}") from None
-
-
-def _check_structure(engine: Engine) -> None:
-    """A stored structure that differs, while tokens are active
-    or paused: refuse. Else put this graph on record, if it is not there yet (a new
-    database, a new structure, or the same structure with another checksum)."""
-    graph = engine.graph
-    try:
-        recorded = engine.recorded_graph()
-        if recorded is not None and recorded.structure != graph.structure:
-            live = engine.live_tokens()
-            if live > 0:
-                raise ServeRefused(
-                    f"refusing to serve: {live} token(s) are active or paused on another "
-                    f"structure of the workflow {graph.name!r}; serve the graph file they "
-                    "started on until they end, or cancel them"
-                )
-        if recorded != RecordedGraph(graph.structure, graph.checksum):
-            engine.record_graph()
-    except ServeRefused:
-        raise
-    except Exception as error:
-        raise ServeRefused(f"cannot use the database: {_one_line(error)}") from None
 
 
 def _url(host: str, listener: socket.socket) -> str:

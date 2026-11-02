@@ -10,7 +10,7 @@ from typer.core import TyperGroup
 
 import stateous
 import stateous.client
-from stateous.control import engine
+from stateous.control import errors
 from stateous.supervisor.folder import _config_text  # pyright: ignore[reportPrivateUsage]
 
 from .pages import ROOT, TYPER_OWN, Command, child, cli, commands, options, page, section
@@ -42,9 +42,9 @@ def real_routes() -> set[str]:
     return found
 
 
-def subclasses(cls: type[engine.EngineError]) -> set[type[engine.EngineError]]:
+def subclasses(cls: type[errors.ControlPlaneError]) -> set[type[errors.ControlPlaneError]]:
     """Every subclass of `cls`, at every depth."""
-    found: set[type[engine.EngineError]] = set(cls.__subclasses__())
+    found: set[type[errors.ControlPlaneError]] = set(cls.__subclasses__())
     for sub in list(found):
         found |= subclasses(sub)
     return found
@@ -53,8 +53,11 @@ def subclasses(cls: type[engine.EngineError]) -> set[type[engine.EngineError]]:
 def real_codes() -> set[str]:
     """Each refusal code: those of the engine's errors, and those that the API and
     `serve` write as text."""
-    codes: set[str] = {cls.code for cls in subclasses(engine.EngineError)}
-    codes.add(engine.EngineError.code)
+    library_only = {errors.GraphConflict}  # raised when a control plane opens, never sent
+    codes: set[str] = {
+        cls.code for cls in subclasses(errors.ControlPlaneError) if cls not in library_only
+    }
+    codes.add(errors.ControlPlaneError.code)
     for name in ("src/stateous/control/api.py", "src/stateous/cli/serving.py"):
         text = (ROOT / name).read_text(encoding="utf-8")
         for groups in LITERAL_CODE.findall(text):
@@ -165,7 +168,7 @@ def real_statuses() -> dict[str, int]:
     source = (ROOT / "src/stateous/control/api.py").read_text(encoding="utf-8")
     handled = {name: int(status) for name, status in HANDLED.findall(source)}
     found: dict[str, int] = {}
-    for cls in subclasses(engine.EngineError):
+    for cls in subclasses(errors.ControlPlaneError):
         status = next((handled[c.__name__] for c in cls.__mro__ if c.__name__ in handled), None)
         if status is not None:
             found[cls.code] = status

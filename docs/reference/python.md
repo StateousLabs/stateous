@@ -50,3 +50,53 @@ A program outside uses `Client` to start, fire, read and steer tokens. Each meth
 ::: stateous.client.Refused
 
 ::: stateous.client.Unreachable
+
+## Run a control plane in your service
+
+`ControlPlane` is one workflow over one database, in your own process. `stateous serve` uses it too.
+
+::: stateous.ControlPlane
+
+::: stateous.Token
+
+::: stateous.HistoryEntry
+
+::: stateous.Fired
+
+Each error of a control plane has `code`, the stable code of its refusal. The HTTP API sends the same codes.
+
+::: stateous.ControlPlaneError
+
+::: stateous.TokenNotFound
+
+::: stateous.TaskNotFound
+
+::: stateous.InvalidContext
+
+::: stateous.InvalidPayload
+
+::: stateous.InvalidArgument
+
+::: stateous.InvalidTokenId
+
+::: stateous.EventNotAllowed
+
+::: stateous.TokenNotActive
+
+::: stateous.TaskNotHeld
+
+::: stateous.AttemptOver
+
+::: stateous.ChildToken
+
+::: stateous.GraphConflict
+
+::: stateous.HoldLost
+
+These errors come from the database, when a control plane opens.
+
+::: stateous.SchemaNotReady
+
+::: stateous.DatabaseHeld
+
+::: stateous.ForeignDatabase

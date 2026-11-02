@@ -33,10 +33,23 @@ from collections.abc import Callable, Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, ClassVar, Literal, ParamSpec, TypeVar, cast
+from typing import Any, Literal, ParamSpec, TypeVar, cast
 
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from stateous.control.errors import (
+    AttemptOver,
+    ChildToken,
+    EventNotAllowed,
+    InvalidArgument,
+    InvalidContext,
+    InvalidPayload,
+    InvalidTokenId,
+    TaskNotFound,
+    TaskNotHeld,
+    TokenNotActive,
+    TokenNotFound,
+)
 from stateous.control.graph import (
     END,
     ERROR,
@@ -104,88 +117,6 @@ def _retried(call: Callable[_P, _R]) -> Callable[_P, _R]:
     return once_more
 
 
-class EngineError(Exception):
-    """The base of every error that the engine raises for a request. `code` is the
-    stable code of the refusal (see the docs, Reference > The HTTP API): the API sends it,
-    and clients read it, never the sentence."""
-
-    code: ClassVar[str] = "unexpected"
-
-
-class TokenNotFound(EngineError, LookupError):
-    """No token has this id."""
-
-    code: ClassVar[str] = "token_not_found"
-
-
-class TaskNotFound(EngineError, LookupError):
-    """No task has this id."""
-
-    code: ClassVar[str] = "task_not_found"
-
-
-class InvalidContext(EngineError, ValueError):
-    """A context, or a routine's changes to it, breaks the workflow's context schema;
-    or no transition from START holds on the starting context."""
-
-    code: ClassVar[str] = "invalid_context"
-
-
-class InvalidPayload(EngineError, ValueError):
-    """A payload breaks its event's schema; or a schedule, a note, a memory key or
-    value, or an idempotency key is not valid."""
-
-    code: ClassVar[str] = "invalid_payload"
-
-
-class InvalidArgument(EngineError, ValueError):
-    """A supervisor name, a claim's request id or a listing limit is out of its range;
-    or a report's `attempt` argument and its outcome's `attempt` differ."""
-
-    code: ClassVar[str] = "invalid_argument"
-
-
-class InvalidTokenId(EngineError, ValueError):
-    """A token id does not match the allowed pattern, or differs only in case from
-    an existing one."""
-
-    code: ClassVar[str] = "invalid_token_id"
-
-
-class EventNotAllowed(EngineError, ValueError):
-    """The event cannot move the token: the workflow does not declare it, it is
-    Stateous's own, the state has no transition on it, or no guard holds."""
-
-    code: ClassVar[str] = "event_not_allowed"
-
-
-class TokenNotActive(EngineError, ValueError):
-    """The token is in a status that does not allow the request."""
-
-    code: ClassVar[str] = "token_not_active"
-
-
-class TaskNotHeld(EngineError, ValueError):
-    """The task is not this supervisor's, or no one works on it now (or on the
-    attempt that the request names)."""
-
-    code: ClassVar[str] = "task_not_held"
-
-
-class AttemptOver(TaskNotHeld):
-    """The request is for an attempt of the task that is over: the task moved to a
-    new attempt. It is a `TaskNotHeld`, so `except TaskNotHeld` also catches it."""
-
-    code: ClassVar[str] = "attempt_over"
-
-
-class ChildToken(EngineError, ValueError):
-    """The token is a child of a parallel state: it is part of its parent's work. It
-    cannot be paused, resumed or cancelled on its own; steer its top token."""
-
-    code: ClassVar[str] = "child_token"
-
-
 @dataclass(frozen=True)
 class Token:
     token: str
@@ -199,7 +130,7 @@ class Token:
 
 
 @dataclass(frozen=True)
-class Entry:
+class HistoryEntry:
     seq: int
     at: datetime
     kind: str
@@ -250,6 +181,15 @@ class Engine:
         for name in graph.workflows:
             self.graphs[name] = graph.child(name)
 
+    @property
+    def document(self) -> dict[str, Any]:
+        """The graph document of the main workflow."""
+        return self.graph.document
+
+    def health(self) -> dict[str, Any]:
+        """The workflow's name and its checksum."""
+        return {"workflow": self.graph.name, "checksum": self.graph.checksum}
+
     # ── tokens ──────────────────────────────────────────────────────────
 
     @_retried
@@ -287,7 +227,7 @@ class Engine:
             return [_token(row) for row in tx.find_tokens(status, limit, parent=parent)]
 
     @_retried
-    def history(self, token: str) -> list[Entry]:
+    def history(self, token: str) -> list[HistoryEntry]:
         with self._transaction() as tx:
             self._existing(tx, token)
             return [_entry(entry) for entry in tx.entries(token)]
@@ -1257,8 +1197,10 @@ def child_id(parent: str, state: str, visit: int, workflow: str) -> str:
     return f"{parent}.{state}.{visit}.{workflow}"
 
 
-def _entry(row: tables.LedgerEntry) -> Entry:
-    return Entry(seq=row.seq, at=row.at.replace(tzinfo=UTC), kind=row.kind, data=dict(row.data))
+def _entry(row: tables.LedgerEntry) -> HistoryEntry:
+    return HistoryEntry(
+        seq=row.seq, at=row.at.replace(tzinfo=UTC), kind=row.kind, data=dict(row.data)
+    )
 
 
 def _kept(

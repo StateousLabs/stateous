@@ -6,10 +6,10 @@ import math
 import pytest
 
 from stateous.control import engine as engine_module
+from stateous.control import errors as errors_module
 from stateous.control.engine import (
     AttemptOver,
     ChildToken,
-    EngineError,
     EventNotAllowed,
     InvalidArgument,
     InvalidContext,
@@ -20,6 +20,7 @@ from stateous.control.engine import (
     TokenNotActive,
     TokenNotFound,
 )
+from stateous.control.errors import ControlPlaneError
 from stateous.model.wire import Outcome, Schedule, TaskGrant
 
 from .support import TESTS_FAILED, TICKET, kinds, new_engine
@@ -42,18 +43,18 @@ def test_every_engine_error_is_an_engine_error_and_keeps_its_base() -> None:
         ChildToken: ValueError,
     }
     for error, base in expected.items():
-        assert issubclass(error, EngineError), error
+        assert issubclass(error, ControlPlaneError), error
         assert issubclass(error, base), error
 
 
 def test_the_test_above_names_every_error_of_the_engine() -> None:
     errors = {
         value
-        for value in vars(engine_module).values()
+        for value in vars(errors_module).values()
         if isinstance(value, type)
         and issubclass(value, Exception)
-        and value.__module__ == engine_module.__name__
-        and value is not EngineError
+        and value.__module__ == errors_module.__name__
+        and value not in (ControlPlaneError, errors_module.GraphConflict, errors_module.HoldLost)
     }
     assert errors == {
         TokenNotFound, TaskNotFound, InvalidContext, InvalidPayload, InvalidTokenId,

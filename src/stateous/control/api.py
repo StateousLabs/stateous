@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from sqlalchemy.exc import OperationalError
 from starlette.applications import Starlette
@@ -25,12 +25,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from stateous.control.engine import (
-    REQUEST_PATTERN,
+from stateous.control.engine import REQUEST_PATTERN, Fired, HistoryEntry, Token
+from stateous.control.errors import (
     ChildToken,
-    Engine,
-    EngineError,
-    Entry,
+    ControlPlaneError,
     EventNotAllowed,
     InvalidArgument,
     InvalidContext,
@@ -38,11 +36,10 @@ from stateous.control.engine import (
     InvalidTokenId,
     TaskNotFound,
     TaskNotHeld,
-    Token,
     TokenNotActive,
     TokenNotFound,
 )
-from stateous.model.wire import Outcome, WireError
+from stateous.model.wire import Outcome, TaskGrant, WireError
 
 MAX_BODY = 1024 * 1024
 """The largest request body the API reads, in bytes: 1 MiB."""
@@ -96,10 +93,65 @@ class Problem(Exception):
         self.code = code
 
 
-def create_app(engine: Engine) -> Starlette:
-    """The API over one engine. It has no clock: `stateous serve` runs the clock."""
-    document = engine.graph.document
-    health = {"workflow": engine.graph.name, "checksum": engine.graph.checksum}
+class Served(Protocol):
+    """What the API serves: a `ControlPlane`. The tests also give the internal engine."""
+
+    @property
+    def document(self) -> dict[str, Any]: ...
+
+    def health(self) -> dict[str, Any]: ...
+
+    def start(self, token: str, context: dict[str, Any]) -> Token: ...
+
+    def get(self, token: str) -> Token: ...
+
+    def tokens(
+        self, *, status: str | None = None, limit: int = 100, parent: str | None = None
+    ) -> list[Token]: ...
+
+    def history(self, token: str) -> list[HistoryEntry]: ...
+
+    def fire(
+        self,
+        token: str,
+        event: str,
+        payload: dict[str, Any] | None,
+        *,
+        key: str | None = None,
+    ) -> Fired: ...
+
+    def pause(self, token: str) -> Token: ...
+
+    def resume(self, token: str) -> Token: ...
+
+    def cancel(self, token: str) -> Token: ...
+
+    def claim(
+        self, supervisor: str, states: Collection[str], *, request: str | None = None
+    ) -> TaskGrant | None: ...
+
+    def report(
+        self,
+        task: int,
+        outcome: Outcome,
+        *,
+        supervisor: str | None = None,
+        attempt: int | None = None,
+    ) -> Fired: ...
+
+    def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]: ...
+
+    def note(self, task: int, text: str, *, attempt: int | None = None) -> None: ...
+
+    def set_memory(
+        self, task: int, key: str, value: Any, *, attempt: int | None = None
+    ) -> None: ...
+
+
+def create_app(engine: Served) -> Starlette:
+    """The API over one control plane. It has no clock: `stateous serve` runs the clock."""
+    document = engine.document
+    health = engine.health()
 
     async def start(request: Request) -> Response:
         body = await body_of(request)
@@ -241,7 +293,7 @@ def token_json(token: Token) -> dict[str, Any]:
     return out
 
 
-def entry_json(entry: Entry) -> dict[str, Any]:
+def entry_json(entry: HistoryEntry) -> dict[str, Any]:
     return {"seq": entry.seq, "at": iso(entry.at), "kind": entry.kind, "data": entry.data}
 
 
@@ -262,7 +314,7 @@ def token_id(value: Any) -> str:
     return value
 
 
-def _exists(engine: Engine, token: str) -> bool:
+def _exists(engine: Served, token: str) -> bool:
     try:
         engine.get(token)
     except TokenNotFound:
@@ -527,9 +579,9 @@ def _answer(status: int, code: str | None = None) -> Handler:
         message = str(error.args[0]) if error.args else type(error).__name__
         if code is not None:
             named = code
-        elif isinstance(error, EngineError):
+        elif isinstance(error, ControlPlaneError):
             named = error.code
-        else:  # pragma: no cover - every exception registered without a code is an EngineError
+        else:  # pragma: no cover - each exception registered without a code is a ControlPlaneError
             named = "unexpected"
         return refusal(status, message, named)
 

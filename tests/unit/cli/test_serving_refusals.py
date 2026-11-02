@@ -39,32 +39,31 @@ def test_a_port_error_other_than_in_use_shows_the_system_text(
 def test_a_database_of_another_program_is_refused_in_one_sentence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def foreign(db: str, *, hold: bool) -> object:
+    def foreign(document: dict[str, Any], **options: Any) -> object:
         raise ForeignDatabase("a table  has\nanother shape")
 
-    monkeypatch.setattr(serving, "Store", foreign)
+    monkeypatch.setattr(serving, "ControlPlane", foreign)
 
     with pytest.raises(ServeRefused) as raised:
-        serving._open("postgresql://user:secret@host/db")
+        serving._open({}, "postgresql://user:secret@host/db")
 
     assert str(raised.value) == (
         "cannot use the database postgresql://user:***@host/db: a table has another shape"
     )
 
 
-def test_a_failure_while_reading_the_stored_graph_is_one_sentence() -> None:
-    class Engine:
-        graph = object()
+def test_a_failure_while_reading_the_stored_graph_is_one_sentence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def lost(document: dict[str, Any], **options: Any) -> object:
+        raise RuntimeError("the connection\nwas lost")
 
-        def recorded_graph(self) -> object:
-            raise RuntimeError("the connection\nwas lost")
-
-    engine: Any = Engine()
+    monkeypatch.setattr(serving, "ControlPlane", lost)
 
     with pytest.raises(ServeRefused) as raised:
-        serving._check_structure(engine)
+        serving._open({}, "sqlite:///s.db")
 
-    assert str(raised.value) == "cannot use the database: the connection was lost"
+    assert str(raised.value) == "cannot open the database sqlite:///s.db: the connection was lost"
 
 
 def test_a_database_text_that_is_not_a_url_shows_as_it_is() -> None:

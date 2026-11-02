@@ -8,7 +8,6 @@ from stateous.control.engine import (
     AttemptOver,
     ChildToken,
     Engine,
-    EngineError,
     EventNotAllowed,
     InvalidArgument,
     InvalidContext,
@@ -19,6 +18,7 @@ from stateous.control.engine import (
     TokenNotActive,
     TokenNotFound,
 )
+from stateous.control.errors import ControlPlaneError
 from stateous.model.wire import EventRecord, Outcome, TaskGrant
 
 from .support import TESTS_FAILED, TESTS_PASSED, TICKET, Clock, kinds, new_engine
@@ -549,7 +549,7 @@ def test_a_request_for_a_task_that_is_not_held_is_task_not_held() -> None:
         (AttemptOver, "attempt_over"),
     ],
 )
-def test_each_engine_error_declares_its_code(error: type[EngineError], code: str) -> None:
+def test_each_engine_error_declares_its_code(error: type[ControlPlaneError], code: str) -> None:
     assert error.code == code
     assert error("x").code == code
 
