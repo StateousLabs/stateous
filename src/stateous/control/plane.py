@@ -80,6 +80,12 @@ class ControlPlane:
         self.clock = Clock(self._engine, self._store)
         """The clock that `run_clock` runs. `stateous serve` runs it in its app."""
         self._closed = threading.Event()
+        self._lost = False
+
+    @property
+    def lost(self) -> bool:
+        """True after another control plane took the database: this one must stop."""
+        return self._lost or self.clock.lost
 
     # ── the workflow ────────────────────────────────────────────────────
 
@@ -177,6 +183,7 @@ class ControlPlane:
         timers. Returns how many. Raises `HoldLost` when another control plane took
         the database."""
         if not self._store.keep_serving():
+            self._lost = True
             raise HoldLost(LOST)
         return self._engine.tick()
 

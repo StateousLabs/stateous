@@ -10,7 +10,6 @@ runs on a thread from the pool."""
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Awaitable, Callable, Collection
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
@@ -25,7 +24,9 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from stateous.control.engine import REQUEST_PATTERN, Fired, HistoryEntry, Token
+from stateous.control import checks
+from stateous.control.checks import MAX_TASK, Problem
+from stateous.control.engine import Fired, HistoryEntry, Token
 from stateous.control.errors import (
     ChildToken,
     ControlPlaneError,
@@ -56,41 +57,12 @@ MAX_LIMIT = 1000
 MAX_KEY = 256
 """The longest idempotency key: the size of the ledger's `key` column."""
 
-MAX_NAME = 128
-"""The longest memory key."""
-
-MAX_STATE = 129
-"""The longest state name in a claim: `<workflow>/<state>`, 64 + 1 + 64 characters."""
-
 MAX_TOKEN = 128
 """The longest token id that a listing's `parent` names."""
-
-MAX_ITEMS = 1000
-"""The most state names in a claim, and the most task ids in a heartbeat."""
-
-MAX_SUPERVISOR = 256
-"""The longest supervisor name: the engine's own limit."""
-
-MAX_NOTE = 500
-"""The longest note, after the spaces at its two ends are removed."""
-
-MAX_TASK = 2**63 - 1
-"""The largest task id that a database integer holds."""
 
 STATUSES = ("active", "paused", "completed", "failed", "cancelled")
 
 Handler = Callable[[Request, Exception], Awaitable[Response]]
-
-
-class Problem(Exception):
-    """A request that the API refuses, with the status, one plain sentence and the
-    code of the refusal (see the docs, Reference > The HTTP API). The code is `bad_request`
-    when the request names none."""
-
-    def __init__(self, status: int, message: str, code: str = "bad_request") -> None:
-        super().__init__(message)
-        self.status = status
-        self.code = code
 
 
 class Served(Protocol):
@@ -208,9 +180,9 @@ def create_app(engine: Served) -> Starlette:
 
     async def claim(request: Request) -> Response:
         body = await body_of(request)
-        supervisor = _supervisor(body.get("supervisor"))
-        states = _names(body.get("states"), "states")
-        request_id = _request_id(body.get("request"))
+        supervisor = checks.supervisor_name(body.get("supervisor"))
+        states = checks.state_names(body.get("states"), "states")
+        request_id = checks.request_id(body.get("request"))
         grant = await run_in_threadpool(
             lambda: engine.claim(supervisor, states, request=request_id)
         )
@@ -222,32 +194,32 @@ def create_app(engine: Served) -> Starlette:
         task = _task(request)
         body = await body_of(request)
         named = body.pop("supervisor", None)
-        supervisor = None if named is None else _supervisor(named)
+        supervisor = None if named is None else checks.supervisor_name(named)
         outcome = Outcome.from_json(body)
         fired = await run_in_threadpool(lambda: engine.report(task, outcome, supervisor=supervisor))
         return JSONResponse(token_json(fired.token))
 
     async def heartbeat(request: Request) -> Response:
         body = await body_of(request)
-        supervisor = _supervisor(body.get("supervisor"))
-        tasks = _task_ids(body.get("tasks"))
+        supervisor = checks.supervisor_name(body.get("supervisor"))
+        tasks = checks.task_ids(body.get("tasks"))
         lost = await run_in_threadpool(lambda: engine.heartbeat(supervisor, tasks))
         return JSONResponse({"lost": lost})
 
     async def note(request: Request) -> Response:
         task = _task(request)
         body = await body_of(request)
-        text, attempt = _note(body.get("text")), _attempt(body.get("attempt"))
+        text, attempt = checks.note_text(body.get("text")), checks.attempt(body.get("attempt"))
         await run_in_threadpool(lambda: engine.note(task, text, attempt=attempt))
         return Response(status_code=204)
 
     async def memory(request: Request) -> Response:
         task = _task(request)
         body = await body_of(request)
-        key = _name(body.get("key"), "key", code="invalid_payload")
+        key = checks.name(body.get("key"), "key", code="invalid_payload")
         if "value" not in body:
             raise Problem(422, "memory needs a 'value'; null deletes the key", "invalid_body")
-        value, attempt = body["value"], _attempt(body.get("attempt"))
+        value, attempt = body["value"], checks.attempt(body.get("attempt"))
         await run_in_threadpool(lambda: engine.set_memory(task, key, value, attempt=attempt))
         return Response(status_code=204)
 
@@ -366,66 +338,6 @@ def _task(request: Request) -> int:
     if task > MAX_TASK:
         raise Problem(404, f"there is no task {task}", "task_not_found")
     return task
-
-
-def _name(value: Any, what: str, limit: int = MAX_NAME, *, code: str) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= limit:
-        raise Problem(422, f"'{what}' is a string of 1 to {limit} characters", code)
-    return value
-
-
-def _supervisor(value: Any) -> str:
-    """A supervisor's name, as the engine takes it; else 422 `invalid_argument`."""
-    return _name(value, "supervisor", MAX_SUPERVISOR, code="invalid_argument")
-
-
-def _names(value: Any, what: str) -> list[str]:
-    items = cast("list[Any]", value) if isinstance(value, list) else None
-    if items is None or not all(isinstance(i, str) and 1 <= len(i) <= MAX_STATE for i in items):
-        raise Problem(422, f"'{what}' is a list of state names", "invalid_body")
-    if len(items) > MAX_ITEMS:
-        raise Problem(422, f"'{what}' has at most {MAX_ITEMS} state names", "invalid_argument")
-    return cast("list[str]", items)
-
-
-def _request_id(value: Any) -> str | None:
-    """A claim's request id; None when the body names none."""
-    if value is None:
-        return None
-    if not isinstance(value, str) or not re.fullmatch(REQUEST_PATTERN, value):
-        raise Problem(
-            422, "'request' is 1 to 64 letters, digits, '.', '_' or '-'", "invalid_argument"
-        )
-    return value
-
-
-def _task_ids(value: Any) -> list[int]:
-    items = cast("list[Any]", value) if isinstance(value, list) else None
-    if items is None or not all(
-        isinstance(i, int) and not isinstance(i, bool) and 0 < i <= MAX_TASK for i in items
-    ):
-        raise Problem(422, "'tasks' is a list of task ids", "invalid_body")
-    if len(items) > MAX_ITEMS:
-        raise Problem(422, f"'tasks' has at most {MAX_ITEMS} task ids", "invalid_argument")
-    return cast("list[int]", items)
-
-
-def _attempt(value: Any) -> int | None:
-    """The attempt a request is for; None when the body names none."""
-    if value is None:
-        return None
-    if type(value) is not int or not 1 <= value <= MAX_TASK:
-        raise Problem(422, "'attempt' is a whole number of 1 or more", "invalid_argument")
-    return value
-
-
-def _note(value: Any) -> str:
-    text = value.strip() if isinstance(value, str) else ""
-    if not 1 <= len(text) <= MAX_NOTE:
-        raise Problem(
-            422, f"a note needs a 'text' of 1 to {MAX_NOTE} characters", "invalid_payload"
-        )
-    return text
 
 
 async def body_of(request: Request) -> dict[str, Any]:
