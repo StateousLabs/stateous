@@ -99,3 +99,9 @@ class HoldLost(ControlPlaneError, RuntimeError):
     """Another control plane took this database. This one does no more work: stop it."""
 
     code: ClassVar[str] = "not_serving"
+
+
+class NoticesOff(ControlPlaneError, RuntimeError):
+    """The database has notices off. Turn them on with `stateous migrate --notices`."""
+
+    code: ClassVar[str] = "notices_off"

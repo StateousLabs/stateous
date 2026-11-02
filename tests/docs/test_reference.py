@@ -53,7 +53,7 @@ def subclasses(cls: type[errors.ControlPlaneError]) -> set[type[errors.ControlPl
 def real_codes() -> set[str]:
     """Each refusal code: those of the engine's errors, and those that the API and
     `serve` write as text."""
-    library_only = {errors.GraphConflict}  # raised when a control plane opens, never sent
+    library_only = {errors.GraphConflict, errors.NoticesOff}  # the library's own: never sent
     codes: set[str] = {
         cls.code for cls in subclasses(errors.ControlPlaneError) if cls not in library_only
     }

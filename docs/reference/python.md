@@ -63,6 +63,12 @@ A program outside uses `Client` to start, fire, read and steer tokens. Each meth
 
 ::: stateous.Fired
 
+A notice tells your handler of a change. See `ControlPlane.deliver_notices`.
+
+::: stateous.Notice
+
+::: stateous.NoticeKind
+
 Each error of a control plane has `code`, the stable code of its refusal. The HTTP API sends the same codes.
 
 ::: stateous.ControlPlaneError
@@ -92,6 +98,8 @@ Each error of a control plane has `code`, the stable code of its refusal. The HT
 ::: stateous.GraphConflict
 
 ::: stateous.HoldLost
+
+::: stateous.NoticesOff
 
 These errors come from the database, when a control plane opens.
 

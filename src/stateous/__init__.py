@@ -32,11 +32,13 @@ if TYPE_CHECKING:
         InvalidContext,
         InvalidPayload,
         InvalidTokenId,
+        NoticesOff,
         TaskNotFound,
         TaskNotHeld,
         TokenNotActive,
         TokenNotFound,
     )
+    from stateous.control.notices import Notice, NoticeKind
     from stateous.control.plane import ControlPlane
     from stateous.control.store.errors import DatabaseHeld, ForeignDatabase, SchemaNotReady
 
@@ -45,6 +47,8 @@ _LAZY: dict[str, str] = {
     "Fired": "stateous.control.engine",
     "HistoryEntry": "stateous.control.engine",
     "Token": "stateous.control.engine",
+    "Notice": "stateous.control.notices",
+    "NoticeKind": "stateous.control.notices",
     "DatabaseHeld": "stateous.control.store.errors",
     "ForeignDatabase": "stateous.control.store.errors",
     "SchemaNotReady": "stateous.control.store.errors",
@@ -61,6 +65,7 @@ _LAZY: dict[str, str] = {
             "InvalidContext",
             "InvalidPayload",
             "InvalidTokenId",
+            "NoticesOff",
             "TaskNotFound",
             "TaskNotHeld",
             "TokenNotActive",
@@ -102,6 +107,9 @@ __all__ = [
     "InvalidContext",
     "InvalidPayload",
     "InvalidTokenId",
+    "Notice",
+    "NoticeKind",
+    "NoticesOff",
     "Occurrence",
     "OutcomeError",
     "SchemaNotReady",

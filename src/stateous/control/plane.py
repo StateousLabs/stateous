@@ -8,7 +8,9 @@ supervisors. `stateous serve` is a small program on top of it.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from collections.abc import Callable, Collection
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -27,11 +29,15 @@ from stateous.control.engine import (
     Token,
     utcnow,
 )
-from stateous.control.errors import GraphConflict, HoldLost
+from stateous.control.errors import GraphConflict, HoldLost, NoticesOff
 from stateous.control.graph import Graph
+from stateous.control.notices import Notice, deliver
 from stateous.control.store import Store
 from stateous.model.graph_file import load_graph
 from stateous.model.wire import Outcome, TaskGrant
+
+NOTICES_EVERY = 1.0
+"""Seconds between two rounds of `run_notices` when no notice waits."""
 
 
 class ControlPlane:
@@ -70,6 +76,7 @@ class ControlPlane:
             raise
         self.clock = Clock(self._engine, self._store)
         """The clock that `run_clock` runs. `stateous serve` runs it in its app."""
+        self._closed = threading.Event()
 
     # ── the workflow ────────────────────────────────────────────────────
 
@@ -179,8 +186,35 @@ class ControlPlane:
         if self.clock.lost:
             raise HoldLost(LOST)
 
+    # ── notices ─────────────────────────────────────────────────────────
+
+    def deliver_notices(self, handler: Callable[[Notice], None], *, limit: int = 100) -> int:
+        """Hand the waiting notices to `handler`, and delete each one that it has.
+        Returns how many. The notices of one token family arrive in order. A handler
+        that raises gets the same notices again on the next call. Keep the handler
+        short: hand slow work to your own queue. Raises `NoticesOff` when the
+        database has notices off."""
+        if not self._store.notices_on:
+            raise NoticesOff(
+                "notices are off for this database; run: stateous migrate --db URL --notices"
+            )
+        return deliver(self._store, self.name, handler, limit=limit)
+
+    async def run_notices(
+        self, handler: Callable[[Notice], None], *, every: float = NOTICES_EVERY
+    ) -> None:
+        """Deliver the notices in this event loop, until `close()`. Each round runs on
+        a worker thread; when no notice waits, the next round is `every` seconds
+        later."""
+        while not self._closed.is_set():
+            delivered = await asyncio.to_thread(self.deliver_notices, handler)
+            if delivered == 0 and not self._closed.is_set():
+                await asyncio.sleep(every)
+
     def close(self) -> None:
-        """Stop the clock, give up the hold and let go of the connections."""
+        """Stop the clock and the notices, give up the hold and let go of the
+        connections."""
+        self._closed.set()
         self.clock.stop()
         self._store.close()
 

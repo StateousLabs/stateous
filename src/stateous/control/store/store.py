@@ -70,6 +70,10 @@ about a minute, and a statement on it fails and does not wait for ever."""
 TOKEN_LOCK = "token:"
 """The start of each token's advisory-lock key: `token:<id in lower case>`."""
 
+NOTICE_LOCK = "notice:"
+"""The start of the advisory-lock key of a family's notices: `notice:<top token id in
+lower case>`."""
+
 CANDIDATES = 20
 """How many queued tasks one claim looks at."""
 
@@ -518,6 +522,44 @@ class Transaction:
                 at=self.now,
             )
         )
+        self._session.flush()
+
+    def next_notice_family(self, tried: Collection[str]) -> str | None:
+        """The family of the oldest notice, of the families not in `tried`; None when
+        no notice is left."""
+        query = select(tables.Notice.family).order_by(tables.Notice.id).limit(1)
+        if tried:
+            query = query.where(tables.Notice.family.not_in(list(tried)))
+        return self._session.scalar(query)
+
+    def try_notice_lock(self, family: str) -> bool:
+        """Take the lock of the family's notices until this transaction ends, if no
+        one else holds it. Only one deliverer has a family at a time, so its notices
+        arrive in order. The key is not the token lock's: a handler that changes the
+        family's tokens does not wait for it. SQLite: always True."""
+        if not self._locks:
+            return True
+        key = lock_key(self._namespace, NOTICE_LOCK + family.lower())
+        return bool(
+            self._session.scalar(
+                text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": key},
+            )
+        )
+
+    def family_notices(self, family: str, limit: int) -> list[tables.Notice]:
+        """The family's notices, oldest first, at most `limit`."""
+        return list(
+            self._session.scalars(
+                select(tables.Notice)
+                .where(tables.Notice.family == family)
+                .order_by(tables.Notice.id)
+                .limit(limit)
+            )
+        )
+
+    def delete_notice(self, notice: tables.Notice) -> None:
+        self._session.delete(notice)
         self._session.flush()
 
     def entries(self, token: str) -> list[tables.LedgerEntry]:

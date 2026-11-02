@@ -54,7 +54,13 @@ def test_the_test_above_names_every_error_of_the_engine() -> None:
         if isinstance(value, type)
         and issubclass(value, Exception)
         and value.__module__ == errors_module.__name__
-        and value not in (ControlPlaneError, errors_module.GraphConflict, errors_module.HoldLost)
+        and value
+        not in (
+            ControlPlaneError,
+            errors_module.GraphConflict,
+            errors_module.HoldLost,
+            errors_module.NoticesOff,
+        )
     }
     assert errors == {
         TokenNotFound, TaskNotFound, InvalidContext, InvalidPayload, InvalidTokenId,
