@@ -37,6 +37,10 @@ A routine is a function in the supervisor's folder. `@on_state` marks it, `ctx` 
 
 ::: stateous.OutcomeError
 
+To run a supervisor from your own program, over a transport that you choose, call `supervise`.
+
+::: stateous.supervise
+
 ## Talk to the control plane
 
 A program outside uses `Client` to start, fire, read and steer tokens. Each method sends one request of [the HTTP API](http.md). See [Steer tokens](../how-to/steer-tokens.md).

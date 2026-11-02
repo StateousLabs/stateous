@@ -195,6 +195,7 @@ class FakeApi:
 class FakeServingSockets(FakeServing):
     config = object()
     listener: Any = None
+    plane: Any = object()
 
     def on_lost(self, callback: object) -> None:
         return None
@@ -215,7 +216,11 @@ def run_serve_and_supervise(
 
     monkeypatch.setattr(running, "SupervisedServer", Server)
 
-    monkeypatch.setattr(running, "http_api", FakeApi)
+    def no_http(url: str) -> FakeApi:
+        raise AssertionError("serve --supervise must not call itself over HTTP")
+
+    monkeypatch.setattr(running, "http_api", no_http)
+    monkeypatch.setattr(running, "in_process_api", FakeApi)
     monkeypatch.setattr(running, "supervise_beside", beside)
     serving: Any = FakeServingSockets()
     folder: Any = object()

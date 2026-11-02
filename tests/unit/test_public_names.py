@@ -40,6 +40,7 @@ def test_the_public_names_are_the_contracts() -> None:
         "TokenNotFound",
         "Workflow",
         "on_state",
+        "supervise",
     ]
     for name in stateous.__all__:
         assert getattr(stateous, name) is not None

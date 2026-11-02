@@ -29,6 +29,8 @@ from stateous.cli.serving import (
     configure_logging,
     prepare_serve,
 )
+from stateous.control.inprocess import InProcess
+from stateous.control.plane import ControlPlane
 from stateous.supervisor.folder import Folder, FolderError, load_folder
 from stateous.supervisor.remote import HttpTransport
 from stateous.supervisor.retrying import Retrying
@@ -197,6 +199,11 @@ def http_api(url: str) -> Retrying:
     return Retrying(HttpTransport(url))
 
 
+def in_process_api(plane: ControlPlane) -> Retrying:
+    """The control plane of this process, each call tried until it is answered."""
+    return Retrying(InProcess(plane))
+
+
 async def supervise_folder(folder: Folder) -> int:
     """Open and run the supervisor of `folder`. Returns its exit code."""
     api = http_api(folder.config.url)
@@ -251,11 +258,12 @@ async def serve_and_supervise(serving: Serving, folder: Folder) -> int:
     """The control plane and the supervisor of `folder` in one loop. The supervisor
     speaks HTTP to the server's own address. Returns the supervisor's exit code:
     1 also when the server stopped before the supervisor ran (a lost hold, or a
-    signal at the start)."""
+    signal at the start). The supervisor calls the control plane in this process; the
+    HTTP API serves the clients."""
     server = SupervisedServer(serving.config)
     serving.on_lost(server.stop_all)
     serving_task = asyncio.create_task(server.serve(sockets=[serving.listener]))
-    api = http_api(serving.url)
+    api = in_process_api(serving.plane)
     supervising = asyncio.create_task(supervise_beside(server, folder, api))
     try:
         await asyncio.wait({serving_task, supervising}, return_when=asyncio.FIRST_COMPLETED)

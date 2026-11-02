@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from stateous.control.notices import Notice, NoticeKind
     from stateous.control.plane import ControlPlane
     from stateous.control.store.errors import DatabaseHeld, ForeignDatabase, SchemaNotReady
+    from stateous.supervisor.run import supervise
 
 _LAZY: dict[str, str] = {
     "ControlPlane": "stateous.control.plane",
@@ -52,6 +53,7 @@ _LAZY: dict[str, str] = {
     "DatabaseHeld": "stateous.control.store.errors",
     "ForeignDatabase": "stateous.control.store.errors",
     "SchemaNotReady": "stateous.control.store.errors",
+    "supervise": "stateous.supervisor.run",
     **{
         name: "stateous.control.errors"
         for name in (
@@ -121,4 +123,5 @@ __all__ = [
     "TokenNotFound",
     "Workflow",
     "on_state",
+    "supervise",
 ]
