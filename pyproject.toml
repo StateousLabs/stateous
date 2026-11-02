@@ -169,6 +169,19 @@ forbidden_modules = [
     "stateous.supervisor",
     "stateous.client",
     "stateous.cli",
+    "stateous.transport",
+]
+
+[[tool.importlinter.contracts]]
+name = "The transport is shared and imports neither side"
+type = "forbidden"
+source_modules = ["stateous.transport"]
+forbidden_modules = [
+    "stateous.compiler",
+    "stateous.control",
+    "stateous.supervisor",
+    "stateous.client",
+    "stateous.cli",
 ]
 
 [[tool.importlinter.contracts]]

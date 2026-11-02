@@ -15,6 +15,7 @@ import pytest
         "stateous.supervisor",
         "stateous.client",
         "stateous.cli",
+        "stateous.transport",
     ],
 )
 def test_each_part_of_the_package_imports(name: str) -> None:
