@@ -53,7 +53,7 @@ A program outside uses `Client` to start, fire, read and steer tokens. Each meth
 
 ## Run a control plane in your service
 
-`ControlPlane` is one workflow over one database, in your own process. `stateous serve` uses it too.
+`ControlPlane` is one workflow over one database, in your own process. `stateous serve` uses it too. See [Embed a control plane](../how-to/embed-a-control-plane.md).
 
 ::: stateous.ControlPlane
 
@@ -63,7 +63,7 @@ A program outside uses `Client` to start, fire, read and steer tokens. Each meth
 
 ::: stateous.Fired
 
-A notice tells your handler of a change. See `ControlPlane.deliver_notices`.
+A notice tells your handler of a change. See [Notices](../concepts/notices.md).
 
 ::: stateous.Notice
 

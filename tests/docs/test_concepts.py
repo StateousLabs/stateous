@@ -60,6 +60,14 @@ INSIDE_WORDS = [
 """The words of how Stateous works inside. `inside/words.md` defines each one."""
 
 FACTS: dict[str, list[str]] = {
+    "concepts/notices.md": [
+        "stateous migrate --notices",
+        "At least once",
+        "In order for each token family",
+        "idempotency key",
+        "task_failed",
+        "deliver_notices",
+    ],
     "concepts/model.md": [f"### {word}" for word in WORDS]
     + [
         "START",

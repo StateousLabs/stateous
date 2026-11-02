@@ -896,14 +896,14 @@ wheels = [
 
 [[package]]
 name = "poly-harness-dispatcher"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/e8/ee5d2a7e7f673f1ea27b7e12274a4cb5a2ff564742b7fd123b394fa029cf/poly_harness_dispatcher-0.1.0.tar.gz", hash = "sha256:048767a945782d29b82b3992e1b8cde4dab05ede2432b7ed5619f1493a086d07", size = 332954, upload-time = "2026-10-12T20:45:43.602Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/57/50baf44d4a852e1bd7f4faa9bf771e71fb27786f6fad748d288d015ce549/poly_harness_dispatcher-0.2.0.tar.gz", hash = "sha256:fa177d449b2f5ca894dbda4a34afcfc56396aec66c887586ded594b7c8b073e2", size = 380654, upload-time = "2026-10-31T22:30:50.677Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/3c/67975aa83a218068c8db8c6b50f222dff51bc013808bbdf67af7fee0d254/poly_harness_dispatcher-0.1.0-py3-none-any.whl", hash = "sha256:a80a6d18afbd1e03b65ddfd212a14d12236927b7d9791b888440a374fb7cbd28", size = 120687, upload-time = "2026-10-12T20:45:42.227Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/90/eca03b5fd47e89f72ccb0e24317b76a4c9d08af09c6565ef48c696321d7d/poly_harness_dispatcher-0.2.0-py3-none-any.whl", hash = "sha256:9f6cd021fb8ed53fa7397a93c6cb0e9330901bd55b9496410ae56c6cfcc3f421", size = 127682, upload-time = "2026-10-31T22:30:49.201Z" },
 ]
 
 [[package]]
@@ -1466,7 +1466,7 @@ wheels = [
 
 [[package]]
 name = "stateous"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -1508,7 +1508,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13,<2" },
     { name = "httpx2", specifier = ">=2.13" },
     { name = "jsonschema", specifier = ">=4.21" },
-    { name = "poly-harness-dispatcher", marker = "extra == 'phd'", specifier = ">=0.1" },
+    { name = "poly-harness-dispatcher", marker = "extra == 'phd'", specifier = ">=0.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.6,<3" },
     { name = "pyyaml", specifier = ">=6,<7" },
@@ -1523,7 +1523,7 @@ provides-extras = ["phd"]
 dev = [
     { name = "coverage", specifier = ">=7.10" },
     { name = "import-linter", specifier = ">=2.0" },
-    { name = "poly-harness-dispatcher", specifier = ">=0.1" },
+    { name = "poly-harness-dispatcher", specifier = ">=0.2" },
     { name = "pyright", specifier = ">=1.1.380" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },

@@ -1,6 +1,6 @@
 [project]
 name = "stateous"
-version = "0.3.0"
+version = "0.4.0"
 description = "A process as a graph of states. A control plane keeps every token durable."
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -41,7 +41,7 @@ Documentation = "https://stateouslabs.github.io/stateous/"
 
 [project.optional-dependencies]
 # Agents in routines: PHD runs them (see the docs, Concepts > Agents, with PHD).
-phd = ["poly-harness-dispatcher>=0.1"]
+phd = ["poly-harness-dispatcher>=0.2"]
 
 [project.scripts]
 stateous = "stateous.cli.main:main"
@@ -55,7 +55,7 @@ dev = [
     "import-linter>=2.0",
     "types-pyyaml>=6",
     "types-jsonschema",
-    "poly-harness-dispatcher>=0.1",
+    "poly-harness-dispatcher>=0.2",
 ]
 docs = [
     "mkdocs>=1.6",

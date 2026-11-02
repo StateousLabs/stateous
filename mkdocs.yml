@@ -96,6 +96,7 @@ nav:
       - Parallel and nested work: concepts/parallel.md
       - Reliability: concepts/reliability.md
       - Agents, with PHD: concepts/agents.md
+      - Notices: concepts/notices.md
   - How-to guides:
       - Write a workflow: how-to/write-a-workflow.md
       - Write a routine: how-to/write-a-routine.md
@@ -103,6 +104,7 @@ nav:
       - Use Postgres: how-to/use-postgres.md
       - Steer tokens: how-to/steer-tokens.md
       - Change a workflow: how-to/change-a-workflow.md
+      - Embed a control plane: how-to/embed-a-control-plane.md
   - How Stateous works inside:
       - The words inside: inside/words.md
       - The event graph: inside/event-graph.md

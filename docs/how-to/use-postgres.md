@@ -15,7 +15,7 @@ stateous serve sdlc/build/sdlc.json --db postgresql://stateous:secret@db.interna
 
 `--db` takes a URL that starts with `postgresql://` or `postgres://`. Without `--db`, the database is `sqlite:///stateous.db` in the current folder.
 
-At the first start, `serve` makes its tables in the database. It keeps its schema version in its own table, `stateous_version`. So a different application can use Alembic in the same database.
+At the first start, `serve` makes its tables in the database. They go in a Postgres schema, the namespace. The default namespace is `stateous`; `--namespace` gives another. It keeps its schema version in its own table, `stateous_version`, in the namespace. So a different application can use Alembic in the same database.
 
 When an older Stateous made the database, `serve` upgrades the tables in place at start, and keeps the data.
 
@@ -25,9 +25,9 @@ When an older Stateous made the database, `serve` upgrades the tables in place a
 - The database has tables with the names that Stateous uses, but no version of Stateous. Use a new database.
 - The database does not have a table that its version of Stateous made, or it has a table that the upgrade must make. Use a new database.
 
-## 2. Run one control plane for each database
+## 2. Run one control plane for each namespace
 
-One control plane serves one database. A second `stateous serve` on the same database does not start:
+One control plane serves one namespace. Several workflows can share one database, each in its own namespace. A second `stateous serve` on the same namespace does not start:
 
 ```text
 error: another control plane serves this database; stop it first
@@ -70,4 +70,5 @@ Each token moves one step at a time on both databases.
 - [Reliability](../concepts/reliability.md): the ledger, and the time limits among the other mechanisms.
 - [Run supervisors](run-supervisors.md): supervisors on other computers.
 - [Change a workflow](change-a-workflow.md): what `serve` checks in the database at start.
+- [Embed a control plane](embed-a-control-plane.md): a control plane in your own service, and `stateous migrate`.
 - [The commands](../reference/cli.md): every option of `stateous serve`.

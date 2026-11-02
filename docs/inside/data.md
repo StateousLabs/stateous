@@ -108,6 +108,8 @@ erDiagram
 | `notices` | Changes that your handler did not get yet: an accepted event, the end of a token, the last failure of a task. A row is deleted when the handler has it. `family` is the top token of the token's family. The table stays empty while `notices` is off. | Fire an event, Report an outcome, Timer fires, Pause and resume, Cancel, Join. |
 | `stateous_version` | The version of the schema of the tables. It has its own name, so a different application can use Alembic in the same database. | Serve, at start. |
 
+On Postgres, the tables of one workflow are in its namespace, a schema. The default namespace is `stateous`.
+
 Times are in UTC, without a time zone. `stateous token show` prints them in local time.
 
 ## The statuses
