@@ -62,7 +62,7 @@ def test_a_refused_store_migrates_nothing(url: str) -> None:
 def test_a_failed_migration_after_the_hold_releases_it(
     url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real_migrate = store_module.migrate
+    real_migrate = store_module.migrate_schema
     calls = 0
 
     def fail_once(engine: Any, **options: Any) -> None:
@@ -72,7 +72,7 @@ def test_a_failed_migration_after_the_hold_releases_it(
             raise RuntimeError("the migration failed")
         real_migrate(engine, **options)
 
-    monkeypatch.setattr(store_module, "migrate", fail_once)
+    monkeypatch.setattr(store_module, "migrate_schema", fail_once)
 
     with pytest.raises(RuntimeError, match="the migration failed"):
         Store(url, hold=True)

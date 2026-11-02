@@ -80,6 +80,16 @@ def migrate(
             command.upgrade(_config(location, connection, namespace), "head")
 
 
+def is_current(engine: Engine, *, namespace: str | None = None) -> bool:
+    """Whether the database (in `namespace`) has this version's tables at the newest
+    revision. Reads only."""
+    with engine.connect() as connection:
+        context = MigrationContext.configure(connection, opts=_version_options(namespace))
+        if context.get_current_revision() != head():
+            return False
+        return _ours() <= set(inspect(connection).get_table_names(schema=namespace))
+
+
 def no_statement_limit(connection: Connection) -> None:
     """On Postgres, turn off the statement limit for the rest of this transaction
     only: a big upgrade can take longer than the limit that requests have. The lock

@@ -8,3 +8,8 @@ class ForeignDatabase(Exception):
 
 class DatabaseHeld(Exception):
     """Another control plane serves this database (`Store.hold_serving`)."""
+
+
+class SchemaNotReady(Exception):
+    """The database has no Stateous tables, or tables of another version, and the store
+    may not migrate them (`Store(..., migrate=False)`). The message names the command."""

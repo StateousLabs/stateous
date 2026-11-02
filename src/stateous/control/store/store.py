@@ -37,8 +37,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from stateous.control.store import tables
-from stateous.control.store.errors import DatabaseHeld
-from stateous.control.store.migrations import migrate
+from stateous.control.store.errors import DatabaseHeld, SchemaNotReady
+from stateous.control.store.migrations import head, is_current
+from stateous.control.store.migrations import migrate as migrate_schema
 
 log = logging.getLogger("stateous.store")
 
@@ -160,6 +161,14 @@ def _postgres_limits() -> dict[str, Any]:
     }
 
 
+_GIVEN_LIMITS = (
+    f"SET LOCAL statement_timeout = {POSTGRES_STATEMENT_WITHIN * 1000}; "
+    f"SET LOCAL lock_timeout = {POSTGRES_LOCK_WAIT * 1000}"
+)
+"""Postgres, on a developer's engine: the time limits of `_postgres_limits`, set at the
+start of each transaction of Stateous."""
+
+
 def _no_implicit_transactions(dbapi_connection: Any, _record: Any) -> None:
     dbapi_connection.isolation_level = None  # SQLAlchemy, not the driver, says BEGIN
 
@@ -183,16 +192,33 @@ def wall_clock() -> datetime:
 class Store:
     """A database that holds the ledger and the rows it explains."""
 
-    def __init__(self, url: str, *, namespace: str | None = None, hold: bool = False) -> None:
-        url = database_url(url)
-        postgres = url.startswith("postgresql")
+    def __init__(
+        self,
+        database: str | Engine,
+        *,
+        namespace: str | None = None,
+        hold: bool = False,
+        migrate: bool = True,
+    ) -> None:
+        """`database` is a URL, or a Postgres engine that the developer gives: Stateous
+        uses it and never disposes it. With `migrate=False`, the store never changes
+        the schema; tables that are missing or out of date raise `SchemaNotReady`."""
+        self._given = isinstance(database, Engine)
+        if isinstance(database, Engine):
+            if database.dialect.name != "postgresql":
+                raise ValueError("give SQLite as a URL; an engine is for Postgres")
+            url = ""
+            postgres = True
+        else:
+            url = database_url(database)
+            postgres = url.startswith("postgresql")
         if namespace is not None and not postgres:
             raise ValueError("a namespace is for Postgres; SQLite keeps one workflow in each file")
         self.namespace: str | None = (
             check_namespace(namespace or DEFAULT_NAMESPACE) if postgres else None
         )
         """The Postgres schema of the tables; None on SQLite."""
-        self._engine = open_engine(url)
+        self._engine = database if isinstance(database, Engine) else open_engine(url)
         self.engine: Engine = (
             self._engine
             if self.namespace is None
@@ -209,17 +235,45 @@ class Store:
         self._turns: AbstractContextManager[Any] = (
             threading.RLock() if url.startswith("sqlite") else nullcontext()
         )
+        self.notices_on = False
+        """Whether each change also writes its notice. Read when the store opens, and
+        set by `migrate(notices=...)`."""
         try:
             # Postgres: refuse before the migration, so that a refused control plane
             # never changes the schema under the one that serves.
             if hold and self.is_postgres and not self._try_take():
                 raise DatabaseHeld("another control plane serves this database; stop it first")
-            migrate(self.engine, namespace=self.namespace)
+            if migrate:
+                migrate_schema(self.engine, namespace=self.namespace)
+            elif not is_current(self.engine, namespace=self.namespace):
+                raise SchemaNotReady(self._not_ready())
+            self.notices_on = self._read_notices()
             if hold and not self.hold_serving():
                 raise DatabaseHeld(self._held_message())
         except BaseException:
             self.close()  # gives up the hold, if taken, and the connections
             raise
+
+    def migrate(self, *, notices: bool | None = None) -> None:
+        """Bring the tables to this version's schema. `notices` turns the notices of
+        the namespace on or off; None keeps the setting."""
+        migrate_schema(self.engine, namespace=self.namespace)
+        if notices is not None:
+            with self.transaction(wall_clock()) as tx:
+                tx.control_plane().notices = notices
+        self.notices_on = self._read_notices()
+
+    def _read_notices(self) -> bool:
+        with self.transaction(wall_clock()) as tx:
+            return bool(tx.control_plane().notices)
+
+    def _not_ready(self) -> str:
+        where = "" if self.namespace is None else f" in namespace '{self.namespace}'"
+        flag = "" if self.namespace is None else f" --namespace {self.namespace}"
+        return (
+            f"the database has no Stateous tables at version {head()}{where}; "
+            f"run: stateous migrate --db URL{flag}"
+        )
 
     @property
     def is_postgres(self) -> bool:
@@ -240,7 +294,8 @@ class Store:
             self._serving.invalidate()  # its session ends, and the advisory lock with it
             self._serving.close()
             self._serving = None
-        self._engine.dispose()
+        if not self._given:
+            self._engine.dispose()
 
     def hold_serving(self) -> bool:
         """Take this database for this control plane, until `close()`. False if
@@ -327,6 +382,10 @@ class Store:
         """All that is done inside commits together, or not at all. `now` is the time
         of the transaction. Transactions do not nest."""
         with self._turns, self._sessions.begin() as session:
+            if self._given:
+                # A developer's engine has its own connection settings: the time
+                # limits hold for each transaction of Stateous only.
+                session.execute(text(_GIVEN_LIMITS))
             yield Transaction(session, utc(now), namespace=self.namespace)
 
 
