@@ -99,6 +99,8 @@ async def run(transport: Transport, stop: asyncio.Event) -> int:
 
 `idle` is how long a claim may wait for a task, at most 30 seconds. A transport that cannot wait answers at once; the supervisor then rests for the rest of `idle`.
 
+A stop does not cut a claim in flight, because the control plane can grant a task in it. So a stop can take up to `idle` seconds. Behind a gateway, keep `idle` below the gateway's time limit, for example 25 seconds for a limit of 29.
+
 ## See also
 
 - [Transports](../concepts/transports.md): the layers, and the rules that a transport keeps.

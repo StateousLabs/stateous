@@ -57,7 +57,7 @@ def queue_transport(send: Callable[[Call], Awaitable[Reply]]) -> CallingTranspor
 
 - A transport never decides who holds a task. The control plane's database decides, with leases and attempts.
 - A claim sent again with the same request id gets the same task. A lost reply loses no task.
-- `stateous.testing.check_transport` proves that a transport keeps these rules.
+- `stateous.testing.check_transport` checks that a transport keeps these rules. It cannot see every fault, for example a reply that a broker loses only under load.
 
 ## See also
 

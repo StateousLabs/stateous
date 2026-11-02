@@ -257,7 +257,7 @@ def serve_with_supervisor(serving: Serving, folder: Folder) -> tuple[int, bool]:
 
 async def serve_and_supervise(serving: Serving, folder: Folder) -> int:
     """The control plane and the supervisor of `folder` in one loop. The supervisor
-    speaks HTTP to the server's own address. Returns the supervisor's exit code:
+    calls the control plane in this process. Returns the supervisor's exit code:
     1 also when the server stopped before the supervisor ran (a lost hold, or a
     signal at the start). The supervisor calls the control plane in this process; the
     HTTP API serves the clients."""

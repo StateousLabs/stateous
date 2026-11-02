@@ -1,9 +1,10 @@
 """`HttpTransport`: the control plane's HTTP API (see the docs, Reference > The HTTP API)
 as a `Transport`, over httpx2. Each call makes one attempt; `Retrying` tries again.
 
-An answer 502, 503 or 504, an answer with a code of `RETRY_CODES`, or no answer at
-all is `NotReached`: a proxy, a control plane that restarts, or one that is
-`not_serving` (another one can take over at the same URL). Any other answer of 400
+An answer 408, 429, 502, 503 or 504, an answer with a code of `RETRY_CODES`,
+headers that cannot be made, or no answer at all is `NotReached`: a gateway that says
+"later", a control plane that restarts, or one that is `not_serving` (another one can
+take over at the same URL). Any other answer of 400
 or more is `Refused`, with the code that the answer gives. An answer with no code
 (for example from a gateway) is refused as `unexpected`, and its message ends with
 the HTTP status."""
@@ -18,8 +19,9 @@ import httpx2
 from stateous.model.wire import Outcome, TaskGrant
 from stateous.transport import RETRY_CODES, NotReached, Refused
 
-UNAVAILABLE = frozenset({502, 503, 504})
-"""Answers that count as "the control plane is not reached"."""
+UNAVAILABLE = frozenset({408, 429, 502, 503, 504})
+"""Answers that count as "the control plane is not reached": a gateway's timeout or
+rate limit, a bad gateway, a control plane that restarts."""
 
 
 class HttpTransport:
@@ -100,7 +102,12 @@ class HttpTransport:
         self, method: str, path: str, body: Any = None, *, timeout: float | None = None
     ) -> httpx2.Response:
         """One request. `path` has no leading `/`, so the URL's own path stays."""
-        headers = dict(self._headers()) if self._headers is not None else None
+        try:
+            headers = dict(self._headers()) if self._headers is not None else None
+        except Exception as error:  # e.g. a token that cannot be renewed now
+            raise NotReached(
+                f"cannot make the headers for {self.url}: {type(error).__name__}: {error}"
+            ) from None
         try:
             if timeout is None:
                 response = await self._client.request(method, path, json=body, headers=headers)

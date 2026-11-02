@@ -12,7 +12,9 @@ from stateous.transport.messages import RETRY_CODES, Call, Reply
 
 
 class CallingTransport:
-    """A `Transport` over `send`. `send` raises `NotReached` when no reply came."""
+    """A `Transport` over `send`. `send` raises `NotReached` when no reply came. A
+    `TimeoutError`, an `OSError` or a `WireError` from `send` (a reply that cannot be
+    read) also counts as not reached."""
 
     def __init__(self, send: Callable[[Call], Awaitable[Reply]], *, where: str) -> None:
         self._send = send
@@ -68,7 +70,12 @@ class CallingTransport:
         """Nothing to close: `send` owns its wire."""
 
     async def _call(self, call: Call) -> Any:
-        reply = await self._send(call)
+        try:
+            reply = await self._send(call)
+        except (TimeoutError, OSError, WireError) as error:
+            # No reply that the supervisor can read: the call may or may not have
+            # arrived, so it is sent again, never dropped.
+            raise NotReached(f"{self.where}: {type(error).__name__}: {error}") from None
         if reply.ok:
             return reply.body
         code = reply.code or "unexpected"

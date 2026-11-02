@@ -128,3 +128,23 @@ def test_the_app_works_under_a_prefix(tmp_path: Path) -> None:
         asyncio.run(run())
 
         assert plane.get("T-1").status == "completed"
+
+
+@pytest.mark.parametrize("status", [408, 429])
+def test_a_gateway_that_says_later_is_not_reached(status: int) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(status, text="slow down")
+
+    with pytest.raises(NotReached):
+        asyncio.run(http(handler).note(1, "x", attempt=1))
+
+
+def test_headers_that_cannot_be_made_are_not_reached() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(204)
+
+    def expired() -> dict[str, str]:
+        raise OSError("the token service is down")
+
+    with pytest.raises(NotReached, match="the token service is down"):
+        asyncio.run(http(handler, headers=expired).note(1, "x", attempt=1))

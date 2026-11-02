@@ -17,7 +17,9 @@ class WaitingClaims:
     """The claims that wait now, by the states they claim."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        # Reentrant: a signal handler can call `close` on the thread that is inside
+        # `waiting` now.
+        self._lock = threading.RLock()
         self._waiting: list[tuple[frozenset[str], asyncio.AbstractEventLoop, asyncio.Event]] = []
         self.closed = False
         """True after `close()`: a new wait ends at once."""

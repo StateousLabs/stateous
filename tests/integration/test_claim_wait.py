@@ -89,7 +89,7 @@ def test_an_in_process_claim_waits_for_work(tmp_path: Path) -> None:
     assert took < 2
 
 
-def test_a_stop_ends_a_waiting_claim_at_once(tmp_path: Path) -> None:
+def test_a_stop_with_the_default_idle_ends_within_two_seconds(tmp_path: Path) -> None:
     graph = compile_flow(tmp_path, FLOW)
     folder = folder_for(tmp_path, graph)
 
@@ -131,3 +131,22 @@ def test_serve_stops_at_once_while_a_claim_waits(tmp_path: Path) -> None:
         serving.close()
 
     assert took < 3
+
+
+def test_a_stop_waits_at_most_idle_for_the_claim_in_flight(tmp_path: Path) -> None:
+    """A stop does not cut a claim in flight (the control plane can grant a task in it),
+    so with `idle=3` the stop takes about 3 seconds, and never much more."""
+    graph = compile_flow(tmp_path, FLOW)
+    folder = folder_for(tmp_path, graph)
+
+    async def main() -> float:
+        with ControlPlane(graph, database=database(tmp_path), migrate=True) as plane:
+            stop = asyncio.Event()
+            running = asyncio.create_task(supervise(folder, InProcess(plane), stop=stop, idle=3))
+            await asyncio.sleep(0.5)  # the supervisor now waits in a claim
+            stopped = time.monotonic()
+            stop.set()
+            await asyncio.wait_for(running, timeout=20)
+            return time.monotonic() - stopped
+
+    assert asyncio.run(main()) < 3 + 1.5

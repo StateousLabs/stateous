@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from stateous.model.wire import Outcome
+from stateous.model.wire import Outcome, WireError
 from stateous.transport import (
     CONFLICT_CODES,
     RETRY_CODES,
@@ -147,3 +147,15 @@ def test_a_reply_of_the_wrong_shape_is_refused_as_unexpected(reply: Reply, call:
 
 def test_aclose_does_nothing() -> None:
     asyncio.run(CallingTransport(Recorder(), where="q").aclose())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [TimeoutError("no reply in 30 s"), OSError("the broker closed"), WireError("bad reply")],
+)
+def test_a_send_that_fails_on_the_way_is_not_reached(failure: Exception) -> None:
+    async def failing(call: Call) -> Reply:
+        raise failure
+
+    with pytest.raises(NotReached):
+        asyncio.run(CallingTransport(failing, where="q").note(1, "x", attempt=1))
