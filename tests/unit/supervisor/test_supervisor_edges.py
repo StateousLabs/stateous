@@ -15,7 +15,7 @@ from stateous.model.context import Context
 from stateous.model.contract import on_state
 from stateous.model.wire import Outcome
 from stateous.supervisor import supervisor as supervisor_module
-from stateous.supervisor.remote import Refused
+from stateous.transport import Refused
 
 from .fakes import CODING, FakeApi, done, grant, make, nothing_runs, run_until, runs, until
 
@@ -101,12 +101,8 @@ def test_a_task_granted_again_while_its_old_routine_cleans_up_runs_and_is_report
 @pytest.mark.parametrize(
     "refusal",
     [
-        Refused(
-            422,
-            "the context changes break the schema: count: not an integer",
-            code="invalid_context",
-        ),
-        Refused(409, "'coding' may not emit 'done'; it may emit: stuck", code="event_not_allowed"),
+        Refused("invalid_context", "the context changes break the schema: count: not an integer"),
+        Refused("event_not_allowed", "'coding' may not emit 'done'; it may emit: stuck"),
     ],
 )
 def test_a_refused_report_fails_the_task_at_once_with_the_refusal(refusal: Refused) -> None:
@@ -132,11 +128,7 @@ def test_the_failure_report_after_a_refusal_carries_the_grants_attempt() -> None
 
     api = FakeApi(grant(1, "coding", attempt=3))
     api.refusals = [
-        Refused(
-            422,
-            "the context changes break the schema: count: not an integer",
-            code="invalid_context",
-        )
+        Refused("invalid_context", "the context changes break the schema: count: not an integer")
     ]
 
     asyncio.run(run_until(make(api, coding), api.reported, 1))
@@ -152,7 +144,7 @@ def test_a_report_refused_because_the_task_is_gone_is_dropped(
         return done()
 
     api = FakeApi(grant(1, "coding"))
-    api.refusals = [Refused(404, "there is no task 1", code="task_not_found")]
+    api.refusals = [Refused("task_not_found", "there is no task 1")]
     supervisor = make(api, coding)
 
     async def scenario() -> int:
@@ -176,7 +168,7 @@ class NotHeldApi(FakeApi):
         if not self.lost:
             self.lost = {task}
             self.calls.append(("report", task, outcome.kind))
-            raise Refused(409, f"task {task} is not held by 'box-1'", code="task_not_held")
+            raise Refused("task_not_held", f"task {task} is not held by 'box-1'")
         await super().report(task, outcome, supervisor=supervisor, stop=stop)
 
 
@@ -210,7 +202,7 @@ class WrongAttemptApi(FakeApi):
         self, task: int, outcome: Outcome, *, supervisor: str, stop: asyncio.Event | None = None
     ) -> None:
         self.calls.append(("report", task, outcome.kind))
-        raise Refused(409, "a sentence that can change", code="attempt_over")
+        raise Refused("attempt_over", "a sentence that can change")
 
 
 def test_a_report_refused_because_the_task_moved_to_a_new_attempt_is_dropped() -> None:
@@ -248,7 +240,7 @@ class SentenceApi(FakeApi):
         if not self.lost:
             self.lost = {task}
             self.calls.append(("report", task, outcome.kind))
-            raise Refused(409, f"task {task} is at attempt 2, not attempt 3", code="task_not_held")
+            raise Refused("task_not_held", f"task {task} is at attempt 2, not attempt 3")
         await super().report(task, outcome, supervisor=supervisor, stop=stop)
 
 
@@ -280,7 +272,7 @@ def test_a_failure_report_that_is_refused_too_is_logged_and_dropped(
         return done()
 
     api = FakeApi(grant(1, "coding"))
-    api.refusals = [Refused(422, "first"), Refused(422, "second")]
+    api.refusals = [Refused("unexpected", "first"), Refused("unexpected", "second")]
     supervisor = make(api, coding)
 
     async def scenario() -> int:
@@ -391,9 +383,10 @@ def test_a_refused_claim_is_an_answer_and_the_next_claim_gets_a_new_request_id()
             *,
             stop: asyncio.Event | None = None,
             request: str | None = None,
+            wait: float = 0,
         ) -> None:
-            await super().claim(supervisor, states, stop=stop, request=request)
-            raise Refused(422, "'states' is a list of state names")
+            await super().claim(supervisor, states, stop=stop, request=request, wait=wait)
+            raise Refused("unexpected", "'states' is a list of state names")
 
     api = RefusingApi()
     supervisor = make(api)

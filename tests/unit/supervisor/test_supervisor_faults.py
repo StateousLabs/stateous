@@ -22,13 +22,14 @@ from stateous.model.wire import Outcome
 from stateous.supervisor import supervisor as supervisor_module
 from stateous.supervisor.folder import Folder, FolderConfig
 from stateous.supervisor.outbox import Kind, Message, Outbox
-from stateous.supervisor.remote import GaveUp, Refused
+from stateous.supervisor.retrying import GaveUp
 from stateous.supervisor.supervisor import (
     Supervisor,
     SupervisorError,
     _Sends,  # pyright: ignore[reportPrivateUsage]
     open_supervisor,
 )
+from stateous.transport import Refused
 
 from .fakes import CODING, FakeApi, done, grant, make, run_until, until
 
@@ -72,7 +73,10 @@ class BrokenHeartbeatApi(FakeApi):
 @pytest.mark.parametrize(
     ("error", "line"),
     [
-        (Refused(403, "the token is not valid"), "the control plane refused a heartbeat: "),
+        (
+            Refused("unexpected", "the token is not valid"),
+            "the control plane refused a heartbeat: ",
+        ),
         (RuntimeError("boom"), "a heartbeat failed"),
     ],
     ids=["refused", "failed"],
@@ -294,7 +298,7 @@ def test_a_refused_report_whose_check_fails_in_an_unknown_way_is_dropped(
     with Outbox.in_memory() as outbox:
         message = outbox.append(1, 1, "T-1", "report", {"kind": "event", "event": "done"})
         api = BrokenCheckApi()
-        api.refusals = [Refused(409, "task 1 is not this supervisor's", code="task_not_held")]
+        api.refusals = [Refused("task_not_held", "task 1 is not this supervisor's")]
         supervisor = make(api, coding, outbox=outbox)
         caplog.set_level(logging.WARNING, logger=LOGGER)
 
@@ -529,7 +533,7 @@ def test_a_control_plane_that_refuses_the_health_check_is_refused_in_one_sentenc
 ) -> None:
     class NotOursApi(FakeApi):
         async def health(self) -> dict[str, Any]:
-            raise Refused(200, "the control plane's answer is not JSON")
+            raise Refused("unexpected", "the control plane's answer is not JSON")
 
     folder = folder_at(tmp_path / "w2")
 

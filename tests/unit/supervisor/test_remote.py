@@ -9,7 +9,9 @@ import httpx2
 import pytest
 
 from stateous.model.wire import Outcome, Schedule, TaskGrant
-from stateous.supervisor.remote import ControlPlaneApi, GaveUp, Refused
+from stateous.supervisor.remote import HttpTransport
+from stateous.supervisor.retrying import GaveUp, Retrying
+from stateous.transport import Refused
 
 from .fakes import GRANT, api_with
 
@@ -214,15 +216,13 @@ def test_the_backoff_grows_to_30_seconds_and_stays_there() -> None:
             "text is empty",
             "invalid_payload",
         ),
-        (422, {"error": "text is empty"}, "text is empty", None),
-        (409, {"error": "no", "code": ["attempt_over"]}, "no", None),
-        (404, None, "Not Found", None),
-        (500, None, "the control plane answered 500", None),
+        (422, {"error": "text is empty"}, "text is empty (HTTP 422)", "unexpected"),
+        (409, {"error": "no", "code": ["attempt_over"]}, "no (HTTP 409)", "unexpected"),
+        (404, None, "Not Found (HTTP 404)", "unexpected"),
+        (500, None, "the control plane answered 500 (HTTP 500)", "unexpected"),
     ],
 )
-def test_a_refusal_is_not_tried_again(
-    status: int, answer: Any, message: str, code: str | None
-) -> None:
+def test_a_refusal_is_not_tried_again(status: int, answer: Any, message: str, code: str) -> None:
     delays: list[float] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -240,7 +240,7 @@ def test_a_refusal_is_not_tried_again(
     with pytest.raises(Refused) as refused:
         asyncio.run(scenario())
 
-    assert (refused.value.status, refused.value.message, delays) == (status, message, [])
+    assert (refused.value.message, delays) == (message, [])
     assert refused.value.code == code
 
 
@@ -258,7 +258,7 @@ def test_a_claim_that_waits_to_try_again_gives_up_when_stop_is_set() -> None:
         client = httpx2.AsyncClient(
             base_url="http://cp.test", transport=httpx2.MockTransport(handler)
         )
-        api = ControlPlaneApi("http://cp.test", client=client, sleep=never)
+        api = Retrying(HttpTransport("http://cp.test", client=client), sleep=never)
         stop = asyncio.Event()
         try:
             claiming = asyncio.create_task(api.claim("box-1", ["coding"], stop=stop))

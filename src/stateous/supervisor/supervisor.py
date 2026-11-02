@@ -73,7 +73,8 @@ from stateous.supervisor.outbox import (
     outbox_path,
 )
 from stateous.supervisor.registry import Registry, Routine
-from stateous.supervisor.remote import GaveUp, Refused
+from stateous.supervisor.retrying import GaveUp
+from stateous.transport import CONFLICT_CODES, Refused
 
 log = logging.getLogger("stateous.supervisor")
 
@@ -95,10 +96,11 @@ class SupervisorError(Exception):
 
 
 class Api(Protocol):
-    """What the supervisor needs from the control plane. `ControlPlaneApi` is the
-    real one; tests use a fake."""
+    """What the supervisor needs from the control plane: each call tried until it is
+    answered, or given up at a stop. `Retrying` over a `Transport` is the real one;
+    tests use a fake."""
 
-    url: str
+    where: str
 
     async def health(self) -> dict[str, Any]: ...
 
@@ -109,6 +111,7 @@ class Api(Protocol):
         *,
         stop: asyncio.Event | None = None,
         request: str | None = None,
+        wait: float = 0,
     ) -> TaskGrant | None: ...
 
     async def report(
@@ -602,16 +605,16 @@ class Supervisor:
         """After a refused report: is the task still this supervisor's, on this
         attempt? The refusal's code tells (see the docs, Reference > The HTTP API), never
         its sentence.
-        `task_not_found` (or another 404): the task is gone. `attempt_over`: the
-        task moved to a new attempt, so this one is over, even if the task id is
-        still this supervisor's. Another 409: the task is not ours, or the event is
-        not allowed; a heartbeat tells which.
+        `task_not_found` (or another code of `GONE`): the task is gone.
+        `attempt_over`: the task moved to a new attempt, so this one is over, even if
+        the task id is still this supervisor's. Another code of `CONFLICT_CODES`: the
+        task is not ours, or the event is not allowed; a heartbeat tells which.
 
         When the heartbeat does not reach the control plane before the stop, it
         raises `GaveUp`: nothing is decided, and the report stays in the outbox."""
-        if refusal.code in ("task_not_found", "attempt_over") or refusal.status == 404:
+        if refusal.code in GONE:
             return False
-        if refusal.status != 409:
+        if refusal.code not in CONFLICT_CODES:
             return True
         try:
             return task not in await self.api.heartbeat(self.name, [task], stop=self._stopping)
@@ -632,6 +635,9 @@ class Supervisor:
         self.outbox.remove(refused.id)
         return await self.send(message)
 
+
+GONE = frozenset({"task_not_found", "token_not_found", "not_found", "attempt_over"})
+"""Refusal codes after which the task is surely not this supervisor's any more."""
 
 REFUSAL = "the control plane refused the report: "
 """The start of the error of a failure report that a refused report causes."""
@@ -744,14 +750,14 @@ async def _checked(
         health = await api.health()
     except Refused as error:
         raise SupervisorError(
-            f"{api.url} did not answer as a Stateous control plane: {error.message}"
+            f"{api.where} did not answer as a Stateous control plane: {error.message}"
         ) from None
     served = health.get("checksum")
     if served != folder.checksum:
         raise SupervisorError(
             f"{folder.path / CONTRACT} is for another version of the workflow "
             f"({folder.checksum}; the control plane serves {served}): "
-            f"run `stateous init supervisor {api.url} {folder.path}` again"
+            f"run `stateous init supervisor {api.where} {folder.path}` again"
         )
     try:
         registry = Registry.discover(folder.path)
@@ -764,7 +770,7 @@ async def _checked(
             f"{folder.path} has no routine: mark a function with @on_state(states.<state>)"
         )
     name = folder.config.supervisor_name()
-    log.info("%s serves %s; the control plane is %s", name, ", ".join(registry.served), api.url)
+    log.info("%s serves %s; the control plane is %s", name, ", ".join(registry.served), api.where)
     return Supervisor(
         api,
         registry,

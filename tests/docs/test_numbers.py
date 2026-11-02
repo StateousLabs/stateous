@@ -30,7 +30,7 @@ from stateous.control.store.store import (
 from stateous.model.durations import MAX_DURATION_DAYS
 from stateous.model.workflow import MAX_TOKEN_ID
 from stateous.supervisor.folder import DEFAULT_TASKS, MAX_TASKS, FolderConfig
-from stateous.supervisor.remote import BACKOFF
+from stateous.supervisor.retrying import BACKOFF
 from stateous.supervisor.supervisor import HEARTBEAT_EVERY
 
 from .pages import page

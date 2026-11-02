@@ -9,7 +9,7 @@ from typing import Any
 import httpx2
 import pytest
 
-from stateous.supervisor.remote import Refused
+from stateous.transport import Refused
 
 from .fakes import GRANT, Handler, api_with
 
@@ -32,7 +32,7 @@ def test_a_claimed_task_that_is_not_valid_is_refused_with_the_reason() -> None:
     with pytest.raises(Refused) as refused:
         run_claim(handler)
 
-    assert refused.value.status == 200
+    assert refused.value.code == "unexpected"
     assert refused.value.message.startswith("the claimed task is not valid: ")
 
 

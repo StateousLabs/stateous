@@ -214,7 +214,8 @@ def run_serve_and_supervise(
             made.append(self)
 
     monkeypatch.setattr(running, "SupervisedServer", Server)
-    monkeypatch.setattr(running, "ControlPlaneApi", FakeApi)
+
+    monkeypatch.setattr(running, "http_api", FakeApi)
     monkeypatch.setattr(running, "supervise_beside", beside)
     serving: Any = FakeServingSockets()
     folder: Any = object()

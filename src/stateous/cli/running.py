@@ -30,7 +30,8 @@ from stateous.cli.serving import (
     prepare_serve,
 )
 from stateous.supervisor.folder import Folder, FolderError, load_folder
-from stateous.supervisor.remote import ControlPlaneApi
+from stateous.supervisor.remote import HttpTransport
+from stateous.supervisor.retrying import Retrying
 from stateous.supervisor.supervisor import (
     Supervisor,
     SupervisorError,
@@ -191,9 +192,14 @@ def _quiet_about(abandoned: set[asyncio.Task[Any]]) -> Callable[..., None]:
     return handle
 
 
+def http_api(url: str) -> Retrying:
+    """The control plane at `url`, over HTTP, each call tried until it is answered."""
+    return Retrying(HttpTransport(url))
+
+
 async def supervise_folder(folder: Folder) -> int:
     """Open and run the supervisor of `folder`. Returns its exit code."""
-    api = ControlPlaneApi(folder.config.url)
+    api = http_api(folder.config.url)
     try:
         supervisor = await open_supervisor(folder, api)
         try:
@@ -249,7 +255,7 @@ async def serve_and_supervise(serving: Serving, folder: Folder) -> int:
     server = SupervisedServer(serving.config)
     serving.on_lost(server.stop_all)
     serving_task = asyncio.create_task(server.serve(sockets=[serving.listener]))
-    api = ControlPlaneApi(serving.url)
+    api = http_api(serving.url)
     supervising = asyncio.create_task(supervise_beside(server, folder, api))
     try:
         await asyncio.wait({serving_task, supervising}, return_when=asyncio.FIRST_COMPLETED)
@@ -269,7 +275,7 @@ async def serve_and_supervise(serving: Serving, folder: Folder) -> int:
         await serving_task
 
 
-async def supervise_beside(server: SupervisedServer, folder: Folder, api: ControlPlaneApi) -> int:
+async def supervise_beside(server: SupervisedServer, folder: Folder, api: Retrying) -> int:
     """Wait until the server serves, then open and run the supervisor of `folder`."""
     while not server.started:
         await asyncio.sleep(0.05)

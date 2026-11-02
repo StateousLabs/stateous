@@ -19,7 +19,8 @@ from stateous import Client
 from stateous.cli.main import app
 from stateous.cli.serving import prepare_serve
 from stateous.supervisor.folder import load_folder
-from stateous.supervisor.remote import ControlPlaneApi
+from stateous.supervisor.remote import HttpTransport
+from stateous.supervisor.retrying import Retrying
 from stateous.supervisor.supervisor import Supervisor, open_supervisor
 
 
@@ -101,7 +102,7 @@ def supervising(folder: Path) -> Generator[Supervisor]:
     ready = threading.Event()
 
     async def main() -> None:
-        api = ControlPlaneApi(loaded.config.url, backoff=(0.05,))
+        api = Retrying(HttpTransport(loaded.config.url), backoff=(0.05,))
         try:
             supervisor = await open_supervisor(loaded, api, heartbeat_every=0.2, idle=0.05)
             found.append(supervisor)

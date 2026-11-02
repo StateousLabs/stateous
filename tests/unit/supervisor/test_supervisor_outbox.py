@@ -15,7 +15,7 @@ from stateous.model.context import Context
 from stateous.model.contract import on_state
 from stateous.model.wire import Outcome
 from stateous.supervisor.outbox import Kind, Message, Outbox
-from stateous.supervisor.remote import Refused
+from stateous.transport import Refused
 
 from .fakes import CODING, FakeApi, done, grant, make, nothing_runs, run_until, until
 
@@ -81,7 +81,7 @@ def test_each_message_is_in_the_outbox_when_it_is_sent_and_leaves_after_it() -> 
 def test_the_failure_report_after_a_refusal_goes_through_the_outbox_too() -> None:
     with Outbox.in_memory() as outbox:
         api = WatchingApi(outbox, grant(1, "coding"))
-        api.refusals = [Refused(422, "the context changes break the schema")]
+        api.refusals = [Refused("unexpected", "the context changes break the schema")]
 
         asyncio.run(run_until(make(api, coding, outbox=outbox), api.reported, 1))
 
@@ -150,7 +150,7 @@ def test_a_message_left_for_a_task_that_moved_on_is_dropped_with_one_line(
     with Outbox.in_memory() as outbox:
         outbox.append(1, 1, "T-1", "report", Outcome(kind="event", event="done").to_json())
         api = FakeApi()
-        api.refusals = [Refused(409, "task 1 is at attempt 2, not attempt 1", code="attempt_over")]
+        api.refusals = [Refused("attempt_over", "task 1 is at attempt 2, not attempt 1")]
 
         def claimed() -> bool:
             return api.claims() >= 1
@@ -225,7 +225,7 @@ def test_a_stop_while_a_left_report_is_checked_does_not_wait_and_keeps_the_repor
     with Outbox.in_memory() as outbox:
         left_report(outbox)
         api = FakeApi(grant(2, "coding"))
-        api.refusals = [Refused(409, "task 1 is not this supervisor's", code="task_not_held")]
+        api.refusals = [Refused("task_not_held", "task 1 is not this supervisor's")]
         api.heartbeat_down = True
 
         def tried() -> bool:
@@ -242,7 +242,7 @@ def test_a_stop_while_a_refused_report_is_checked_does_not_wait_and_keeps_the_re
 ) -> None:
     with Outbox.in_memory() as outbox:
         api = FakeApi(grant(1, "coding"))
-        api.refusals = [Refused(409, "task 1 is not this supervisor's", code="task_not_held")]
+        api.refusals = [Refused("task_not_held", "task 1 is not this supervisor's")]
         api.heartbeat_down = True
 
         def tried() -> bool:
@@ -260,9 +260,7 @@ def test_a_duplicate_report_left_after_a_crash_is_dropped_when_the_task_is_not_h
     with Outbox.in_memory() as outbox:
         left_report(outbox)
         api = FakeApi()
-        api.refusals = [
-            Refused(409, "task 1 is done; no one works on it now", code="task_not_held")
-        ]
+        api.refusals = [Refused("task_not_held", "task 1 is done; no one works on it now")]
         api.lost = {1}
 
         def claimed() -> bool:

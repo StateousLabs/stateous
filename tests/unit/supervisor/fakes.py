@@ -16,8 +16,10 @@ from stateous.model.events import Occurrence
 from stateous.model.wire import Outcome, TaskGrant
 from stateous.supervisor.outbox import Outbox
 from stateous.supervisor.registry import Registry, Routine
-from stateous.supervisor.remote import ControlPlaneApi, GaveUp, Refused
+from stateous.supervisor.remote import HttpTransport
+from stateous.supervisor.retrying import GaveUp, Retrying
 from stateous.supervisor.supervisor import Supervisor
+from stateous.transport import Refused
 
 
 class Verdict(BaseModel):
@@ -39,7 +41,7 @@ CODING = StateRef("coding", emits=(done,))
 class FakeApi:
     """Answers as the control plane would, and records every call."""
 
-    url = "http://fake.test"
+    where = "http://fake.test"
 
     def __init__(self, *grants: TaskGrant, checksum: str = "sha256:x") -> None:
         self.grants = list(grants)
@@ -82,6 +84,7 @@ class FakeApi:
         *,
         stop: asyncio.Event | None = None,
         request: str | None = None,
+        wait: float = 0,
     ) -> TaskGrant | None:
         self.calls.append(("claim", supervisor, tuple(states)))
         self.claim_requests.append(request)
@@ -105,7 +108,7 @@ class FakeApi:
         if self.refusals:
             raise self.refusals.pop(0)
         if self.refuse_reports:
-            raise Refused(409, f"task {task} is not this supervisor's", code="task_not_held")
+            raise Refused("task_not_held", f"task {task} is not this supervisor's")
         self.reports[task] = outcome
 
     async def heartbeat(
@@ -126,7 +129,7 @@ class FakeApi:
         self.attempts.append(("note", task, attempt))
         await asyncio.sleep(self.note_delay)
         if self.refuse_notes:
-            raise Refused(409, f"task {task} is not this supervisor's", code="task_not_held")
+            raise Refused("task_not_held", f"task {task} is not this supervisor's")
         self.calls.append(("note", task, text))
 
     async def set_memory(
@@ -143,7 +146,7 @@ class FakeApi:
         self.calls.append(("memory", task, key, value))
 
     async def _reach(self, stop: asyncio.Event | None) -> None:
-        """As `ControlPlaneApi`: a send that does not reach the control plane tries
+        """As `Retrying`: a send that does not reach the control plane tries
         again, and gives up when `stop` is set."""
         while self.down:
             self.tries += 1
@@ -251,10 +254,10 @@ GRANT = TaskGrant(
 Handler = Callable[[httpx2.Request], httpx2.Response]
 
 
-def api_with(handler: Handler, delays: list[float] | None = None) -> ControlPlaneApi:
+def api_with(handler: Handler, delays: list[float] | None = None) -> Retrying:
     async def sleep(seconds: float) -> None:
         if delays is not None:
             delays.append(seconds)
 
     client = httpx2.AsyncClient(base_url="http://cp.test", transport=httpx2.MockTransport(handler))
-    return ControlPlaneApi("http://cp.test/", client=client, sleep=sleep)
+    return Retrying(HttpTransport("http://cp.test/", client=client), sleep=sleep)
