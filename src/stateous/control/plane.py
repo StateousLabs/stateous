@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from collections.abc import Callable, Collection
 from datetime import datetime, timedelta
@@ -35,6 +36,8 @@ from stateous.control.notices import Notice, deliver
 from stateous.control.store import Store
 from stateous.model.graph_file import load_graph
 from stateous.model.wire import Outcome, TaskGrant
+
+log = logging.getLogger("stateous.notices")
 
 NOTICES_EVERY = 1.0
 """Seconds between two rounds of `run_notices` when no notice waits."""
@@ -186,6 +189,14 @@ class ControlPlane:
         if self.clock.lost:
             raise HoldLost(LOST)
 
+    # ── the tables ──────────────────────────────────────────────────────
+
+    def migrate(self, *, notices: bool | None = None) -> None:
+        """Bring the tables to this version's schema. `notices` turns the notices of the
+        database on or off; None keeps the setting. Other control planes on the same
+        database read the setting when they open."""
+        self._store.migrate(notices=notices)
+
     # ── notices ─────────────────────────────────────────────────────────
 
     def deliver_notices(self, handler: Callable[[Notice], None], *, limit: int = 100) -> int:
@@ -205,9 +216,20 @@ class ControlPlane:
     ) -> None:
         """Deliver the notices in this event loop, until `close()`. Each round runs on
         a worker thread; when no notice waits, the next round is `every` seconds
-        later."""
+        later. A round that fails (the database does not answer) is logged, and the
+        loop goes on."""
         while not self._closed.is_set():
-            delivered = await asyncio.to_thread(self.deliver_notices, handler)
+            try:
+                delivered = await asyncio.to_thread(self.deliver_notices, handler)
+            except NoticesOff:
+                raise
+            except Exception as error:  # e.g. the database stopped answering: one line
+                log.error(
+                    "the notices could not be delivered (%s); trying again in %s seconds",
+                    " ".join(str(error).split()) or type(error).__name__,
+                    every,
+                )
+                delivered = 0
             if delivered == 0 and not self._closed.is_set():
                 await asyncio.sleep(every)
 

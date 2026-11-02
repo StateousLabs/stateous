@@ -18,7 +18,7 @@ stateous migrate --db postgresql://app:secret@db.internal:5432/app --namespace p
 
 The namespace is a Postgres schema. It holds the tables of one workflow, apart from the tables of your service. The default namespace is `stateous`.
 
-A control plane that finds no tables, or tables of another version, does not start. Its error names the command to run.
+A control plane that finds no tables, or tables of another version, does not start. Its error names the command to run. From Python, `ControlPlane(..., migrate=True)` makes the tables, and `plane.migrate(notices=True)` turns the notices on.
 
 ## 2. Make the control plane
 

@@ -17,8 +17,6 @@ stateous serve sdlc/build/sdlc.json --db postgresql://stateous:secret@db.interna
 
 At the first start, `serve` makes its tables in the database. They go in a Postgres schema, the namespace. The default namespace is `stateous`; `--namespace` gives another. It keeps its schema version in its own table, `stateous_version`, in the namespace. So a different application can use Alembic in the same database.
 
-When an older Stateous made the database, `serve` upgrades the tables in place at start, and keeps the data.
-
 `serve` does not start in these cases:
 
 - A newer Stateous made the database. Use that version of Stateous.

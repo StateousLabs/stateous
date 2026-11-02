@@ -51,8 +51,9 @@ def migrate(
         no_statement_limit(connection)
         _lock(connection, namespace)
         if namespace is not None:
-            # `namespace` passed `check_namespace`: a name that needs no quotes.
-            connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {namespace}"))
+            # Quoted, so that a reserved word such as `order` is a namespace too.
+            schema = connection.dialect.identifier_preparer.quote_schema(namespace)
+            connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         context = MigrationContext.configure(connection, opts=_version_options(namespace))
         current = context.get_current_revision()
         newest = _head(location)

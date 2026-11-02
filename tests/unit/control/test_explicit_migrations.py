@@ -71,3 +71,14 @@ def test_a_sqlite_engine_is_refused(tmp_path: Path) -> None:
             Store(engine)
     finally:
         engine.dispose()
+
+
+def test_a_closed_store_does_not_take_its_hold_again(tmp_path: Path) -> None:
+    url = sqlite_url(tmp_path / "s.db")
+    store = Store(url, hold=True)
+    store.close()
+
+    assert store.keep_serving() is True  # a clock step that ran late: it does nothing
+
+    again = Store(url, hold=True)  # the database is free
+    again.close()

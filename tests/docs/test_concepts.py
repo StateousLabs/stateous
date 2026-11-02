@@ -189,6 +189,7 @@ FACTS: dict[str, list[str]] = {
 }
 NOT_SAID: dict[str, list[str]] = {
     "concepts/agents.md": ["not released", "start()"],
+    "how-to/use-postgres.md": ["upgrades the tables in place"],
     "concepts/model.md": ["no nested or parallel states", "The engine has no nested states"],
     "concepts/parallel.md": [
         "no nested or parallel states",

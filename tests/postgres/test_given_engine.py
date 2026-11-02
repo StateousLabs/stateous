@@ -55,3 +55,19 @@ def test_an_unmigrated_namespace_names_the_namespace_in_the_command() -> None:
             Store(given, namespace="plan_tasks", migrate=False)
     finally:
         given.dispose()
+
+
+@pytest.mark.parametrize("isolation", ["AUTOCOMMIT", "REPEATABLE READ", "SERIALIZABLE"])
+def test_a_given_engine_of_another_isolation_level_still_reads_committed(isolation: str) -> None:
+    given = create_engine(database_url(fresh_postgres_database()), isolation_level=isolation)
+    store = Store(given)
+    try:
+        with store.transaction(datetime.now(UTC)) as tx:
+            session = tx._session  # pyright: ignore[reportPrivateUsage]
+            level = session.scalar(text("SHOW transaction_isolation"))
+            lock = session.scalar(text("SHOW lock_timeout"))
+        assert level == "read committed"
+        assert lock == f"{POSTGRES_LOCK_WAIT}s"
+    finally:
+        store.close()
+        given.dispose()

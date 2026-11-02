@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from stateous import ControlPlane, NoticesOff
 from stateous.control.notices import Notice
@@ -161,3 +162,58 @@ def test_run_notices_delivers_until_close(tmp_path: Path) -> None:
     asyncio.run(main())
 
     assert [n.kind for n in got] == ["event", "completed"]
+
+
+def test_notice_ids_do_not_repeat_after_a_delivery(plane: ControlPlane) -> None:
+    end_at_once(plane, "T-1")
+    first: list[str] = []
+    plane.deliver_notices(lambda notice: first.append(notice.id))
+    end_at_once(plane, "T-2")
+    second: list[str] = []
+
+    plane.deliver_notices(lambda notice: second.append(notice.id))
+
+    assert len(second) == 2
+    assert set(first).isdisjoint(second)
+
+
+def test_run_notices_goes_on_after_a_database_error(
+    plane: ControlPlane, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    real = plane.deliver_notices
+    calls = 0
+
+    def once_broken(handler: Callable[[Notice], None], *, limit: int = 100) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OperationalError("SELECT 1", {}, Exception("the server closed the connection"))
+        return real(handler, limit=limit)
+
+    monkeypatch.setattr(plane, "deliver_notices", once_broken)
+    got: list[Notice] = []
+    end_at_once(plane, "T-1")
+
+    async def main() -> None:
+        running = asyncio.create_task(plane.run_notices(got.append, every=0.01))
+        try:
+            for _ in range(500):  # at most 5 seconds
+                if len(got) >= 2 or running.done():
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            plane.close()
+        await asyncio.wait_for(running, timeout=5)
+
+    asyncio.run(main())
+
+    assert [n.kind for n in got] == ["event", "completed"]
+    assert "the notices could not be delivered" in caplog.text
+
+
+def test_the_control_plane_turns_notices_on(tmp_path: Path) -> None:
+    with ControlPlane(sdlc(), database=sqlite_url(tmp_path / "m.db"), migrate=True) as plane:
+        plane.migrate(notices=True)
+        end_at_once(plane, "T-1")
+
+        assert plane.deliver_notices(lambda notice: None) == 2

@@ -96,7 +96,8 @@ _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,62}")
 
 
 def check_namespace(name: str) -> str:
-    """`name` if it can be a namespace: a Postgres schema name that needs no quotes."""
+    """`name` if it can be a namespace: lower-case letters, digits and `_`, so the
+    schema's name is the same with or without quotes."""
     if not _NAMESPACE.fullmatch(name):
         raise ValueError(
             "a namespace is a lower-case letter, then up to 62 lower-case letters, digits or '_'"
@@ -226,9 +227,13 @@ class Store:
         self.engine: Engine = (
             self._engine
             if self.namespace is None
-            else self._engine.execution_options(schema_translate_map={None: self.namespace})
+            else self._engine.execution_options(
+                schema_translate_map={None: self.namespace}, isolation_level="READ COMMITTED"
+            )
         )
-        """The engine that Stateous uses: on Postgres, each table is in the namespace."""
+        """The engine that Stateous uses. On Postgres, each table is in the namespace, and
+        each transaction reads committed: the locks of Stateous need it, also on a
+        developer's engine with another isolation level."""
         self.holder = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         """How this store names itself in the `control_plane` row when it serves."""
         self._serving: Connection | None = None
@@ -239,6 +244,7 @@ class Store:
         self._turns: AbstractContextManager[Any] = (
             threading.RLock() if url.startswith("sqlite") else nullcontext()
         )
+        self._closed = False
         self.notices_on = False
         """Whether each change also writes its notice. Read when the store opens, and
         set by `migrate(notices=...)`."""
@@ -285,6 +291,7 @@ class Store:
 
     def close(self) -> None:
         """Give up the hold, if this store has it, and let go of the connections."""
+        self._closed = True
         if self._holding:
             self._holding = False
             try:
@@ -322,7 +329,10 @@ class Store:
         On Postgres the lock's connection can die (the database restarted, the
         network dropped it): then the lock is tried again on a new connection. A
         hold that lapsed is taken back if no one else took it. False: another control
-        plane serves the database now, and this one must stop."""
+        plane serves the database now, and this one must stop. After `close()` it
+        does nothing: a clock step that ran late never takes the hold again."""
+        if self._closed:
+            return True
         if self.is_postgres and not self._keep_lock():
             self._holding = False
             return False

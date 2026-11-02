@@ -70,7 +70,7 @@ class Clock:
         """One tick: renew the hold, then tick the engine. A renewal that raises
         skips the engine's tick for this step; it is not a lost hold."""
         kept = await self._kept()
-        if kept is None:
+        if kept is None or self._stopping.is_set():
             return
         if not kept:
             self.lost = True

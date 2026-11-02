@@ -158,7 +158,11 @@ class Notice(Base):
     change; deleted when the handler has it."""
 
     __tablename__ = "notices"
-    __table_args__ = (Index("notices_family", "family", "id"),)
+    __table_args__ = (
+        Index("notices_family", "family", "id"),
+        # SQLite would give a deleted row's id again; a notice id must never repeat.
+        {"sqlite_autoincrement": True},
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     family: Mapped[str] = mapped_column(String(256))

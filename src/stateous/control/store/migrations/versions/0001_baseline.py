@@ -65,6 +65,7 @@ def upgrade() -> None:
         sa.Column("state", sa.String(length=256), nullable=False),
         sa.Column("at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
+        sqlite_autoincrement=True,
     )
     op.create_index("notices_family", "notices", ["family", "id"], unique=False)
     op.create_table(

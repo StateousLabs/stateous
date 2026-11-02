@@ -91,3 +91,11 @@ def test_two_namespaces_migrate_at_once() -> None:
     assert errors == []
     assert "tokens" in tables_in(url, "a")
     assert "tokens" in tables_in(url, "b")
+
+
+def test_a_reserved_word_is_a_namespace_too() -> None:
+    url = fresh_postgres_database()
+
+    for name in ("order", "user", "table"):
+        Store(url, namespace=name).close()
+        assert "tokens" in tables_in(url, name)

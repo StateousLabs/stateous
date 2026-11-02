@@ -12,7 +12,7 @@ So your code must hear what each workflow does. Polling `stateous token show` is
 
 ## How it works
 
-Notices are a setting of the database. Turn them on with `stateous migrate --notices`. Each control plane reads the setting when it opens.
+Notices are a setting of the database. Turn them on with `stateous migrate --notices`, or with `ControlPlane.migrate(notices=True)`. Each control plane reads the setting when it opens.
 
 When notices are on, each of these changes writes a notice in the same transaction as the change:
 
