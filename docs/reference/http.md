@@ -131,6 +131,9 @@ Take the oldest queued task of the states that the supervisor serves.
 | `supervisor` | The supervisor's name: 1 to 256 characters. Required. |
 | `states` | The states that the supervisor serves: at most 1000 names. A state of a child workflow is `<workflow>/<state>`. Required. |
 | `request` | A request id: 1 to 64 letters, digits, `.`, `_` or `-`. Optional. |
+| `wait` | Seconds to wait for a task when none is queued: 0 to 30. Optional; the default is 0. |
+
+With `wait`, the control plane holds the request until a task of the states is ready, or until the time ends. A client that goes away ends the wait, and takes no task.
 
 If no task is queued, the answer is `204`. Else the answer is the grant:
 

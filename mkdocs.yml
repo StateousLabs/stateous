@@ -97,6 +97,7 @@ nav:
       - Reliability: concepts/reliability.md
       - Agents, with PHD: concepts/agents.md
       - Notices: concepts/notices.md
+      - Transports: concepts/transports.md
   - How-to guides:
       - Write a workflow: how-to/write-a-workflow.md
       - Write a routine: how-to/write-a-routine.md
@@ -105,6 +106,7 @@ nav:
       - Steer tokens: how-to/steer-tokens.md
       - Change a workflow: how-to/change-a-workflow.md
       - Embed a control plane: how-to/embed-a-control-plane.md
+      - Write a transport: how-to/write-a-transport.md
   - How Stateous works inside:
       - The words inside: inside/words.md
       - The event graph: inside/event-graph.md

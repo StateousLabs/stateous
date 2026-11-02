@@ -27,7 +27,7 @@ Each side is a folder of its own.
 The graph file stays on the control plane's side. Two things cross to the supervisor's side:
 
 - **The contract.** `stateous init supervisor` writes `contract.py`. It gets the graph from the control plane with `GET /workflow`, or it reads a local graph file or `flow.py`. The contract keeps only the states, the events that each state can emit, and the models.
-- **HTTP.** The supervisor claims tasks, sends heartbeats, and reports outcomes. It also sends notes and memory writes. It does this over HTTP, to the control plane's URL in `stateous.yaml`.
+- **The calls.** The supervisor claims tasks, sends heartbeats, and reports outcomes. It also sends notes and memory writes. `stateous supervise` sends them over HTTP, to the control plane's URL in `stateous.yaml`. A program can send them over another wire: see [Transports](transports.md).
 
 ```mermaid
 flowchart LR

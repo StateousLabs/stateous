@@ -180,11 +180,11 @@ All steps are one transaction. A refusal is recorded, and then the answer is the
 
 **Trigger**
 
-Event-initiated and scheduled. The claim loop of a supervisor starts after [Supervisor start](#supervisor-start) sent its outbox. It claims again at once after a task, and 1 second after an empty answer. It waits while `tasks` routines run.
+Event-initiated and scheduled. The claim loop of a supervisor starts after [Supervisor start](#supervisor-start) sent its outbox. It claims again at once after a task. A claim waits up to 1 second at the control plane for a task. It waits while `tasks` routines run.
 
 **Steps**
 
-1. The supervisor makes a request id, and sends `POST /tasks/claim` with its name, its states and the id.
+1. The supervisor makes a request id, and sends `POST /tasks/claim` with its name, its states, the id and `wait`.
 2. If the id repeats the supervisor's last claim, and the supervisor still holds that attempt, the control plane gives the same task again. It renews the lease.
 3. Else it looks at the 20 oldest queued tasks of these states whose tokens are active. On Postgres, it skips a task whose token is locked by a different request.
 4. It marks the task `claimed`, adds 1 to its attempt, and sets a lease of 2 minutes.
@@ -203,7 +203,7 @@ Event-initiated and scheduled. The claim loop of a supervisor starts after [Supe
 | On | Emitted |
 |---|---|
 | a task | Ledger: `task_claimed` (`task`, `supervisor`, `attempt`). HTTP 200 with the grant. Log: `task 2: testing of TICKET-1, attempt 1`. |
-| no task | HTTP 204. The supervisor waits 1 second. |
+| no task | The control plane waits up to `wait` seconds for a ready task, then claims again. HTTP 204 if there is still none. The supervisor claims again. |
 | the same request again | HTTP 200 with the same grant. No new ledger entry. |
 | a bad body | HTTP 422, `invalid_argument` or `invalid_body`, for example for a supervisor name of more than 256 characters. Log: `the control plane refused a claim: ...`. |
 | no answer | Log: `... trying again in 1s`, then 2, 4, 8, 16 and 30 seconds. The same request id. |

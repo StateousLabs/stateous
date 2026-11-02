@@ -41,6 +41,34 @@ To run a supervisor from your own program, over a transport that you choose, cal
 
 ::: stateous.supervise
 
+## Bring your own transport
+
+Import these names from `stateous.transport`. See [Write a transport](../how-to/write-a-transport.md).
+
+::: stateous.transport.Transport
+
+::: stateous.transport.CallingTransport
+
+::: stateous.transport.Call
+
+::: stateous.transport.Reply
+
+::: stateous.transport.Refused
+
+::: stateous.transport.NotReached
+
+The control plane's side answers each call with `answer`. Stateous's own transports are `InProcess` and `HttpTransport`.
+
+::: stateous.control.answer.answer
+
+::: stateous.control.inprocess.InProcess
+
+::: stateous.supervisor.remote.HttpTransport
+
+To prove a transport, run the test kit in a test.
+
+::: stateous.testing.check_transport
+
 ## Talk to the control plane
 
 A program outside uses `Client` to start, fire, read and steer tokens. Each method sends one request of [the HTTP API](http.md). See [Steer tokens](../how-to/steer-tokens.md).

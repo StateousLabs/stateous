@@ -91,7 +91,33 @@ For development, `serve` can also run the supervisor of a folder, in the same pr
 stateous serve sdlc/build/sdlc.json --supervise sdlc-supervisor
 ```
 
-The supervisor then speaks to the address of this `serve`. The `url` in `stateous.yaml` is not used. Do not use `--supervise` in production: a stop of the control plane also stops the supervisor.
+The supervisor then calls this control plane in the same process, with no HTTP. The `url` in `stateous.yaml` is not used. Do not use `--supervise` in production: a stop of the control plane also stops the supervisor.
+
+## Reach the control plane through a gateway
+
+`url` in `stateous.yaml` can have a path, for example `https://gateway.example/stateous/plan`. Each route goes below that path.
+
+To send headers, for example a bearer token that renews itself, run the supervisor from Python with `HttpTransport`:
+
+```python
+import asyncio
+
+from stateous import supervise
+from stateous.supervisor.remote import HttpTransport
+
+
+def bearer() -> dict[str, str]:
+    """The headers of each request; read the newest token each time."""
+    return {"Authorization": "Bearer <your token>"}
+
+
+async def run(stop: asyncio.Event) -> int:
+    """The supervisor of `plan-supervisor`, through the gateway."""
+    transport = HttpTransport("https://gateway.example/stateous/plan", headers=bearer)
+    return await supervise("plan-supervisor", transport, stop=stop)
+```
+
+An answer from the gateway with no Stateous code, for example 401, is a refusal. The log line gives its HTTP status. For other wires, see [Write a transport](write-a-transport.md).
 
 ## Stop a supervisor
 
@@ -151,4 +177,5 @@ The test `tests/e2e/test_example.py` of the repository runs the same steps, and 
 - [Write a routine](write-a-routine.md): the routines in the folder.
 - [Use Postgres](use-postgres.md): the database of the control plane.
 - [The files](../reference/files.md): every key of `stateous.yaml`.
+- [Write a transport](write-a-transport.md): a supervisor over your own wire.
 - [The commands](../reference/cli.md): `stateous init supervisor` and `stateous supervise`.
