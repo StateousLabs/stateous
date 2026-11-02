@@ -570,6 +570,14 @@ class Engine:
         tx.append(
             row.token, "event_accepted", key=key, event=event, payload=payload, state=row.state
         )
+        tx.notify(
+            row,
+            "event",
+            workflow=self._graph(row).name,
+            event=event,
+            payload=payload,
+            state=chosen.target,
+        )
         self._leave(tx, row, via=event, why=f"the parent left {row.state!r} on {event!r}")
         if chosen.target == END:
             self._end(tx, row, "completed")
@@ -826,6 +834,7 @@ class Engine:
                     timer.status = "cancelled"
             return
         task.status = "failed"
+        tx.notify(row, "task_failed", workflow=graph.name, state=task.state)
         if row.status == "paused":
             # A paused token never moves or ends on its own. Hold `error`, as `_route`
             # would; resume applies it, and fails the token if it still does not fit.
@@ -1079,6 +1088,7 @@ class Engine:
         is cancelled only when its parent leaves the state, so that tells no one."""
         row.status = status
         tx.append(row.token, status, **data)
+        tx.notify(row, status, workflow=self._graph(row).name)
         tx.delete_memory(row.token)
         if status != "cancelled":
             self._branch_finished(tx, row)

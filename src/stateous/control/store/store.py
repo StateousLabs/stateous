@@ -386,7 +386,7 @@ class Store:
                 # A developer's engine has its own connection settings: the time
                 # limits hold for each transaction of Stateous only.
                 session.execute(text(_GIVEN_LIMITS))
-            yield Transaction(session, utc(now), namespace=self.namespace)
+            yield Transaction(session, utc(now), namespace=self.namespace, notices=self.notices_on)
 
 
 class Transaction:
@@ -414,10 +414,19 @@ class Transaction:
     stopped call once more.
     """
 
-    def __init__(self, session: Session, now: datetime, *, namespace: str | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        now: datetime,
+        *,
+        namespace: str | None = None,
+        notices: bool = False,
+    ) -> None:
         self._session = session
         self.now = now
         self._namespace = namespace
+        self._notices = notices
+        """Whether `notify` writes: the store's `notices_on`."""
         self._locks = session.get_bind().dialect.name == "postgresql"
         self._locked: set[str] = set()
         self._families: dict[str, str] = {}
@@ -481,6 +490,35 @@ class Transaction:
         )
         self._session.flush()
         return seq
+
+    def notify(
+        self,
+        row: tables.Token,
+        kind: str,
+        *,
+        workflow: str,
+        event: str | None = None,
+        payload: dict[str, Any] | None = None,
+        state: str | None = None,
+    ) -> None:
+        """Write the notice of a change, in this transaction, when notices are on.
+        `state` defaults to the token's state."""
+        if not self._notices:
+            return
+        self._session.add(
+            tables.Notice(
+                family=self.family(row.token),
+                token=row.token,
+                parent=row.parent,
+                workflow=workflow,
+                kind=kind,
+                event=event,
+                payload=payload,
+                state=row.state if state is None else state,
+                at=self.now,
+            )
+        )
+        self._session.flush()
 
     def entries(self, token: str) -> list[tables.LedgerEntry]:
         return list(
