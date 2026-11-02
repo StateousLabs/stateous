@@ -181,6 +181,9 @@ class Engine:
         for name in graph.workflows:
             self.graphs[name] = graph.child(name)
 
+    lost = False
+    """The engine alone never loses its database: `ControlPlane.lost` tracks the hold."""
+
     @property
     def document(self) -> dict[str, Any]:
         """The graph document of the main workflow."""

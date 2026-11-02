@@ -27,6 +27,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from stateous.control import checks
 from stateous.control.checks import MAX_TASK, Problem
+from stateous.control.clock import LOST
 from stateous.control.engine import Fired, HistoryEntry, Token
 from stateous.control.errors import (
     ChildToken,
@@ -74,6 +75,9 @@ class Served(Protocol):
     def document(self) -> dict[str, Any]: ...
 
     def health(self) -> dict[str, Any]: ...
+
+    @property
+    def lost(self) -> bool: ...
 
     def on_task_ready(self, callback: Callable[[str], None]) -> Callable[[], None]: ...
 
@@ -260,7 +264,10 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
     ]
     return Starlette(
         routes=routes,
-        middleware=[Middleware(BodyLimit, limit=MAX_BODY)],
+        middleware=[
+            Middleware(NotServing, served=engine),
+            Middleware(BodyLimit, limit=MAX_BODY),
+        ],
         exception_handlers=dict(_HANDLERS),
     )
 
@@ -424,6 +431,22 @@ def _depth_over(value: Any, limit: int) -> bool:
             return True
         stack.extend((child, depth + 1) for child in children)
     return False
+
+
+class NotServing:
+    """ASGI middleware. After another control plane took the database, each request
+    gets 503 with the code `not_serving`: a supervisor tries again, and can reach the
+    control plane that serves now at the same URL."""
+
+    def __init__(self, app: ASGIApp, served: Served) -> None:
+        self.app = app
+        self.served = served
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and self.served.lost:
+            await refusal(503, LOST, "not_serving")(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 class BodyLimit:
