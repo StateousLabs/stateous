@@ -1,15 +1,18 @@
 """The public `ControlPlane`: one workflow over one database, as a library object."""
 
+import asyncio
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import create_engine, text
 
 import stateous
-from stateous import ControlPlane, ControlPlaneError, GraphConflict
+from stateous import ControlPlane, ControlPlaneError, GraphConflict, HoldLost
 from stateous.control.graph import Graph
 from stateous.model.wire import Outcome, Schedule
 
@@ -135,3 +138,32 @@ def test_the_errors_keep_their_codes() -> None:
     assert codes["GraphConflict"] == "graph_conflict"
     assert codes["HoldLost"] == "not_serving"
     assert codes["ControlPlaneError"] == "unexpected"
+
+
+def another_takes_the_hold(url: str) -> None:
+    """Another control plane's name in the hold row, renewed just now."""
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE control_plane SET serving = 'elsewhere:1:x', since = :now"),
+            {"now": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")},
+        )
+    engine.dispose()
+
+
+def test_tick_raises_hold_lost_when_another_took_the_database(tmp_path: Path) -> None:
+    url = sqlite_url(tmp_path / "s.db")
+    with ControlPlane(sdlc(), database=url, migrate=True) as plane:
+        another_takes_the_hold(url)
+
+        with pytest.raises(HoldLost, match="another control plane took this database"):
+            plane.tick()
+
+
+def test_run_clock_raises_hold_lost_when_another_took_the_database(tmp_path: Path) -> None:
+    url = sqlite_url(tmp_path / "s.db")
+    with ControlPlane(sdlc(), database=url, migrate=True) as plane:
+        another_takes_the_hold(url)
+
+        with pytest.raises(HoldLost):
+            asyncio.run(asyncio.wait_for(plane.run_clock(every=0.01), timeout=10))
