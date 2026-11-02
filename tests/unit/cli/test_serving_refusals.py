@@ -67,4 +67,4 @@ def test_a_failure_while_reading_the_stored_graph_is_one_sentence(
 
 
 def test_a_database_text_that_is_not_a_url_shows_as_it_is() -> None:
-    assert serving._shown("not a url") == "not a url"
+    assert serving.shown_db("not a url") == "not a url"

@@ -65,10 +65,10 @@ def real_codes() -> set[str]:
     return codes
 
 
-def test_there_are_five_commands() -> None:
+def test_there_are_six_commands() -> None:
     group = cli()
 
-    assert set(group.commands) == {"compile", "serve", "init", "supervise", "token"}
+    assert set(group.commands) == {"compile", "serve", "migrate", "init", "supervise", "token"}
     token = child(group, "token")
     assert isinstance(token, TyperGroup)
     assert set(token.commands) == {"start", "fire", "show", "pause", "resume", "cancel"}

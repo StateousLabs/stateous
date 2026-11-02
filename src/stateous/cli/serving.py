@@ -173,7 +173,7 @@ class Serving:
         self.plane.close()
 
 
-def prepare_serve(graph: Path, db: str, listen: str) -> Serving:
+def prepare_serve(graph: Path, db: str, listen: str, *, namespace: str | None = None) -> Serving:
     """Do each check before the server starts, in this order: `--listen`, the graph
     file, the port, the database and its hold, the structure on record. Each refusal
     is a `ServeRefused` with one sentence, and leaves no port and no database open.
@@ -182,7 +182,7 @@ def prepare_serve(graph: Path, db: str, listen: str) -> Serving:
     document = _load(graph)
     listener = _listen(host, port)
     try:
-        plane = _open(document, db)
+        plane = _open(document, db, namespace)
     except BaseException:
         listener.close()
         raise
@@ -228,11 +228,11 @@ def _load(path: Path) -> dict[str, Any]:
             f"cannot read the graph file {path}: {error.strerror or error}"
         ) from None
     except (GraphFileError, UnicodeDecodeError) as error:
-        raise ServeRefused(f"{path} is not a graph file: {_one_line(error)}") from None
+        raise ServeRefused(f"{path} is not a graph file: {one_line(error)}") from None
     try:
         Graph(document)
     except Exception as error:
-        raise ServeRefused(f"{path} is not a graph file: {_one_line(error)}") from None
+        raise ServeRefused(f"{path} is not a graph file: {one_line(error)}") from None
     return document
 
 
@@ -248,19 +248,19 @@ def _listen(host: str, port: int) -> socket.socket:
         raise ServeRefused(f"cannot listen on {host}:{port}: {error.strerror or error}") from None
 
 
-def _open(document: dict[str, Any], db: str) -> ControlPlane:
+def _open(document: dict[str, Any], db: str, namespace: str | None = None) -> ControlPlane:
     """The control plane, with its hold on the database, its tables migrated and its
     graph on record."""
     try:
-        return ControlPlane(document, database=db, migrate=True)
+        return ControlPlane(document, database=db, namespace=namespace, migrate=True)
     except DatabaseHeld as error:
-        raise ServeRefused(_one_line(error)) from None
+        raise ServeRefused(one_line(error)) from None
     except ForeignDatabase as error:
-        raise ServeRefused(f"cannot use the database {_shown(db)}: {_one_line(error)}") from None
-    except GraphConflict as error:
-        raise ServeRefused(_one_line(error)) from None
+        raise ServeRefused(f"cannot use the database {shown_db(db)}: {one_line(error)}") from None
+    except (GraphConflict, ValueError) as error:  # ValueError: a namespace it refuses
+        raise ServeRefused(one_line(error)) from None
     except Exception as error:  # a driver, a connection or a migration: one sentence
-        raise ServeRefused(f"cannot open the database {_shown(db)}: {_one_line(error)}") from None
+        raise ServeRefused(f"cannot open the database {shown_db(db)}: {one_line(error)}") from None
 
 
 def _url(host: str, listener: socket.socket) -> str:
@@ -271,7 +271,7 @@ def _url(host: str, listener: socket.socket) -> str:
     return f"http://{shown}:{port}"
 
 
-def _shown(db: str) -> str:
+def shown_db(db: str) -> str:
     """The database URL as a message shows it: without its password."""
     try:
         return make_url(db).render_as_string(hide_password=True)
@@ -279,5 +279,5 @@ def _shown(db: str) -> str:
         return db
 
 
-def _one_line(error: BaseException) -> str:
+def one_line(error: BaseException) -> str:
     return " ".join(str(error).split()) or type(error).__name__

@@ -95,11 +95,37 @@ def serve(
             help="Also run the supervisor of this folder, in this process (for development).",
         ),
     ] = None,
+    namespace: Annotated[
+        str | None,
+        typer.Option("--namespace", help="Postgres: the schema of the tables. Default: stateous."),
+    ] = None,
 ) -> None:
     """Run the control plane: the HTTP API and the clock, over one database."""
     from stateous.cli import running
 
-    running.serve(graph, db, listen, supervise_folder)
+    running.serve(graph, db, listen, supervise_folder, namespace)
+
+
+@app.command()
+def migrate(
+    db: Annotated[str, typer.Option("--db", help="The database URL.")] = DEFAULT_DB,
+    namespace: Annotated[
+        str | None,
+        typer.Option("--namespace", help="Postgres: the schema of the tables. Default: stateous."),
+    ] = None,
+    notices: Annotated[
+        bool | None,
+        typer.Option(
+            "--notices/--no-notices",
+            help="Turn the notices of the database on or off. Default: keep the setting.",
+            show_default=False,
+        ),
+    ] = None,
+) -> None:
+    """Make or update the tables of a workflow's database, for example in a deploy."""
+    from stateous.cli import migrating
+
+    migrating.migrate(db, namespace, notices)
 
 
 init_app = typer.Typer(

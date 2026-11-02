@@ -46,7 +46,13 @@ LEFTOVER_WAIT = 2.0
 the loop (`asyncio.to_thread`). Then the command exits."""
 
 
-def serve(graph: Path, db: str, listen: str, supervise_folder: Path | None) -> None:
+def serve(
+    graph: Path,
+    db: str,
+    listen: str,
+    supervise_folder: Path | None,
+    namespace: str | None = None,
+) -> None:
     """The body of `stateous serve`."""
     configure_logging()
     folder: Folder | None = None
@@ -56,7 +62,7 @@ def serve(graph: Path, db: str, listen: str, supervise_folder: Path | None) -> N
         except FolderError as error:
             exit_with(str(error))
     try:
-        serving = prepare_serve(graph, db, listen)
+        serving = prepare_serve(graph, db, listen, namespace=namespace)
     except ServeRefused as error:
         exit_with(str(error))
     typer.echo(f"serving on {serving.url} (Ctrl-C stops)", err=True)

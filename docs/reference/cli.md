@@ -2,7 +2,7 @@
 
 This page lists every `stateous` command, its arguments and its options.
 
-Stateous has five commands: `compile`, `serve`, `init`, `supervise` and `token`. `init` and `token` each have commands of their own.
+Stateous has six commands: `compile`, `serve`, `migrate`, `init`, `supervise` and `token`. `init` and `token` each have commands of their own.
 
 ## For every command
 
@@ -14,6 +14,7 @@ Stateous has five commands: `compile`, `serve`, `init`, `supervise` and `token`.
 |---|---|
 | `stateous compile FLOW` | Check a workflow, and write its graph file. |
 | `stateous serve GRAPH` | Run the control plane. |
+| `stateous migrate` | Make or update the tables of a database. |
 | `stateous init workflow NAME` | Write a starter workflow's folder, and compile it. |
 | `stateous init supervisor SOURCE FOLDER` | Write a supervisor's folder. |
 | `stateous supervise FOLDER` | Run the supervisor of a folder. |
@@ -70,10 +71,10 @@ stateous init workflow orders
 ### stateous serve
 
 ```text
-stateous serve GRAPH [--db URL] [--listen HOST:PORT] [--supervise FOLDER]
+stateous serve GRAPH [--db URL] [--listen HOST:PORT] [--supervise FOLDER] [--namespace NAME]
 ```
 
-It opens the database, then starts the HTTP API and the clock. It prints `serving on http://127.0.0.1:8080 (Ctrl-C stops)` to stderr.
+It opens the database, makes or updates its tables, then starts the HTTP API and the clock. It prints `serving on http://127.0.0.1:8080 (Ctrl-C stops)` to stderr.
 
 | Argument or option | Meaning |
 |---|---|
@@ -81,12 +82,13 @@ It opens the database, then starts the HTTP API and the clock. It prints `servin
 | `--db URL` | The database. The default is `sqlite:///stateous.db`, in the current folder. For Postgres, give a `postgresql://` URL. |
 | `--listen HOST:PORT` | The address to listen on. The default is `127.0.0.1:8080`. |
 | `--supervise FOLDER` | Also run the supervisor of this folder, in the same process. Use it for development. |
+| `--namespace NAME` | Postgres only: the schema that holds the tables. The default is `stateous`. Each workflow in one database has its own namespace. |
 
 An address that other computers can reach gives a warning, because the API has no authentication.
 
 `serve` does not start in these cases. It prints one sentence that tells why.
 
-- Another control plane serves the same database.
+- Another control plane serves the same database, in the same namespace.
 - The graph has a different structure, and the database has active or paused tokens of the old structure.
 - The graph file, the database URL or the address is not correct, or the port is in use.
 
@@ -99,6 +101,26 @@ stateous serve orders/build/orders.json --supervise orders-supervisor
 ```
 
 See [Use Postgres](../how-to/use-postgres.md) for `--db`, and [Change a workflow](../how-to/change-a-workflow.md) for a new structure.
+
+### stateous migrate
+
+```text
+stateous migrate [--db URL] [--namespace NAME] [--notices | --no-notices]
+```
+
+It makes or updates the tables of a workflow's database, and then stops. Run it in a deploy, before your service starts a `ControlPlane`. It prints one line, for example `migrated sqlite:///stateous.db to 0001; notices off`.
+
+| Argument or option | Meaning |
+|---|---|
+| `--db URL` | The database. The default is `sqlite:///stateous.db`, in the current folder. |
+| `--namespace NAME` | Postgres only: the schema that holds the tables. The default is `stateous`. |
+| `--notices`, `--no-notices` | Turn the notices of the database on or off. Without the option, the setting does not change. |
+
+`stateous serve` makes or updates the tables by itself. A `ControlPlane` in your own service does not: it refuses tables that are missing or out of date, and names this command.
+
+```bash
+stateous migrate --db postgresql://stateous:secret@db.internal:5432/app --namespace plan_tasks --notices
+```
 
 ## Supervisors
 

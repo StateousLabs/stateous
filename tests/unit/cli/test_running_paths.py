@@ -112,7 +112,7 @@ def test_serve_with_a_supervisor_exits_at_once_when_the_supervisor_failed(
     def load(folder: Path) -> object:
         return object()
 
-    def prepare(graph: Path, db: str, listen: str) -> FakeServing:
+    def prepare(graph: Path, db: str, listen: str, **options: Any) -> FakeServing:
         return serving
 
     def failed(serving: object, folder: object) -> tuple[int, bool]:

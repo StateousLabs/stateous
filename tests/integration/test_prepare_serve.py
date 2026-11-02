@@ -230,7 +230,7 @@ def test_a_keyboard_interrupt_while_opening_the_store_closes_the_listener(
     graph = write(tmp_path / "sdlc.json", sdlc)
     listen = free()
 
-    def interrupted(document: dict[str, Any], db: str) -> Store:
+    def interrupted(document: dict[str, Any], db: str, namespace: str | None) -> Store:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(serving_module, "_open", interrupted)
