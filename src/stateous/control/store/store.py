@@ -220,6 +220,8 @@ class Store:
         namespace: str | None = None,
         hold: bool = False,
         migrate: bool = True,
+        replica: bool = False,
+        direct: str | Engine | None = None,
     ) -> None:
         """`database` is a URL, or a Postgres engine that the developer gives: Stateous
         uses it and never disposes it. With `migrate=False`, the store never changes
@@ -239,7 +241,22 @@ class Store:
             check_namespace(namespace or DEFAULT_NAMESPACE) if postgres else None
         )
         """The Postgres schema of the tables; None on SQLite."""
+        if replica and not postgres:
+            raise ValueError(
+                "replicas need Postgres; on SQLite a control plane is always exclusive"
+            )
         self._engine = database if isinstance(database, Engine) else open_engine(url)
+        self._direct_own = isinstance(direct, str)
+        self._direct: Engine = (
+            self._engine
+            if direct is None
+            else open_engine(database_url(direct))
+            if isinstance(direct, str)
+            else direct
+        )
+        """The engine for session-level work: the hold's lock, and LISTEN."""
+        self._replica = replica
+        self._joined: tuple[str, str] | None = None
         self.engine: Engine = (
             self._engine
             if self.namespace is None
@@ -277,6 +294,15 @@ class Store:
             self.notices_on = self._read_notices()
             if hold and not self.hold_serving():
                 raise DatabaseHeld(self._held_message())
+            if hold and self.is_postgres and self.live_replicas():
+                raise DatabaseHeld(
+                    "replicas serve this namespace; stop them first, or open this control "
+                    "plane with exclusive=False"
+                )
+            if replica and self._serving_is_held():
+                raise DatabaseHeld(
+                    "an exclusive control plane serves this namespace; stop it first"
+                )
         except BaseException:
             self.close()  # gives up the hold, if taken, and the connections
             raise
@@ -318,10 +344,19 @@ class Store:
                         row.serving, row.since = None, None
             except Exception:  # the database can be gone; then the hold lapses by itself
                 log.warning("could not clear this control plane's hold; it lapses by itself")
+        if self._joined is not None:
+            self._joined = None
+            try:
+                with self.transaction(wall_clock()) as tx:
+                    tx.leave_replicas(self.holder)
+            except Exception:  # the database can be gone; then the row lapses by itself
+                log.warning("could not remove this replica's row; it lapses by itself")
         if self._serving is not None:
             self._serving.invalidate()  # its session ends, and the advisory lock with it
             self._serving.close()
             self._serving = None
+        if self._direct_own:
+            self._direct.dispose()
         if not self._given:
             self._engine.dispose()
 
@@ -349,6 +384,11 @@ class Store:
         plane serves the database now, and this one must stop. After `close()` it
         does nothing: a clock step that ran late never takes the hold again."""
         if self._closed:
+            return True
+        if self._replica:
+            if self._joined is not None:
+                with self.transaction(wall_clock()) as tx:
+                    tx.renew_replica(self.holder, *self._joined)
             return True
         if self.is_postgres and not self._keep_lock():
             self._holding = False
@@ -382,7 +422,7 @@ class Store:
     def _try_take(self) -> bool:
         """`pg_try_advisory_lock(SERVING_LOCK)` on a new connection set aside for it:
         `self._serving` when held; closed when not."""
-        connection = self.engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+        connection = self._direct.connect().execution_options(isolation_level="AUTOCOMMIT")
         held = bool(
             connection.scalar(
                 text("SELECT pg_try_advisory_lock(hashtextextended(:key, 0))"),
@@ -394,6 +434,29 @@ class Store:
         else:
             connection.close()
         return held
+
+    def _serving_is_held(self) -> bool:
+        """Postgres: whether an exclusive control plane holds the namespace now. The
+        lock is tried, and let go at once."""
+        with self._direct.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+            key = {"key": lock_key(self.namespace, SERVING_LOCK)}
+            taken = bool(
+                c.scalar(text("SELECT pg_try_advisory_lock(hashtextextended(:key, 0))"), key)
+            )
+            if taken:
+                c.execute(text("SELECT pg_advisory_unlock(hashtextextended(:key, 0))"), key)
+            return not taken
+
+    def live_replicas(self) -> list[tuple[str, str, str]]:
+        """The other replicas that serve the namespace now: holder, structure, checksum."""
+        with self.transaction(wall_clock()) as tx:
+            return tx.live_replicas(self.holder)
+
+    def join_replicas(self, structure: str, checksum: str) -> None:
+        """Write this replica's row. The clock renews it; `close()` removes it."""
+        self._joined = (structure, checksum)
+        with self.transaction(wall_clock()) as tx:
+            tx.renew_replica(self.holder, structure, checksum)
 
     def _keep_lock(self) -> bool:
         """Postgres: whether this process still holds the advisory lock. A dead
@@ -690,6 +753,29 @@ class Transaction:
             .where(tables.Task.status == "claimed", *with_labels(labels))
         )
         return self._session.scalar(query) or 0
+
+    def live_replicas(self, holder: str) -> list[tuple[str, str, str]]:
+        """The replicas other than `holder` whose row is not older than SERVING_LEASE."""
+        rows = self._session.execute(
+            select(tables.Replica.holder, tables.Replica.structure, tables.Replica.checksum)
+            .where(tables.Replica.holder != holder)
+            .where(tables.Replica.seen >= self.now - SERVING_LEASE)
+        )
+        return [(found, structure, checksum) for found, structure, checksum in rows]
+
+    def renew_replica(self, holder: str, structure: str, checksum: str) -> None:
+        """Write or renew the row of the replica `holder`."""
+        row = self._session.get(tables.Replica, holder)
+        if row is None:
+            self._session.add(
+                tables.Replica(holder=holder, structure=structure, checksum=checksum, seen=self.now)
+            )
+        else:
+            row.seen = self.now
+        self._session.flush()
+
+    def leave_replicas(self, holder: str) -> None:
+        self._session.execute(delete(tables.Replica).where(tables.Replica.holder == holder))
 
     def task_labels(self, tasks: Collection[int]) -> dict[int, dict[str, str]]:
         """The labels of each task's token; a task that is not there is left out."""

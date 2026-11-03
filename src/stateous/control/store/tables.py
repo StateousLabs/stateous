@@ -191,3 +191,16 @@ class Notice(Base):
     at: Mapped[datetime]
     labels: Mapped[dict[str, Any]] = mapped_column(default=dict)
     """The token's labels."""
+
+
+class Replica(Base):
+    """A control plane that serves the namespace beside others (`exclusive=False`). Its
+    row is renewed on each tick of its clock; a row not renewed for `SERVING_LEASE`
+    has lapsed."""
+
+    __tablename__ = "replicas"
+
+    holder: Mapped[str] = mapped_column(String(256), primary_key=True)
+    structure: Mapped[str] = mapped_column(String(80))
+    checksum: Mapped[str] = mapped_column(String(80))
+    seen: Mapped[datetime]

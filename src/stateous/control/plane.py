@@ -61,7 +61,12 @@ class ControlPlane:
 
     `authorize(caller, action, labels)` decides each call; a refusal raises
     `Forbidden`. Each call takes the keyword `caller`, which the transport gives.
-    With no authorizer, every call is allowed."""
+    With no authorizer, every call is allowed.
+
+    `exclusive=False` (Postgres only) makes this control plane one of several
+    replicas of the namespace: it takes no hold, and its clock runs beside theirs.
+    `direct` is a direct connection for session-level work (the hold, LISTEN), for a
+    `database` that goes through a pooler in transaction mode."""
 
     def __init__(
         self,
@@ -73,12 +78,22 @@ class ControlPlane:
         lease: timedelta = DEFAULT_LEASE,
         now: Callable[[], datetime] = utcnow,
         authorize: Authorize | None = None,
+        exclusive: bool = True,
+        direct: str | Database | None = None,
     ) -> None:
         self._authorize = authorize
+        self._exclusive = exclusive
         self._graph = Graph(_document(graph))
         self.name: str = self._graph.name
         """The workflow's name."""
-        self._store = Store(database, namespace=namespace, hold=True, migrate=migrate)
+        self._store = Store(
+            database,
+            namespace=namespace,
+            hold=exclusive,
+            migrate=migrate,
+            replica=not exclusive,
+            direct=direct,
+        )
         try:
             self._engine = Engine(self._store, self._graph, clock=now, lease=lease)
             self._check_graph()
@@ -376,10 +391,13 @@ class ControlPlane:
     # ── the graph on record ─────────────────────────────────────────────
 
     def _check_graph(self) -> None:
-        """A different structure on record, while tokens are active or paused: refuse.
-        Else put this graph on record, if it is not there yet."""
+        """Refuse a different structure while tokens of the one on record are active or
+        paused, or while a replica serves another structure. The same structure with
+        another checksum (only timeouts and retries differ) opens, with a warning. Then
+        put this graph on record, if it is not there yet; a replica writes its row."""
         graph = self._graph
         recorded = self._engine.recorded_graph()
+        others = self._store.live_replicas() if self._store.is_postgres else []
         if recorded is not None and recorded.structure != graph.structure:
             live = self._engine.live_tokens()
             if live > 0:
@@ -388,8 +406,24 @@ class ControlPlane:
                     f"structure of the workflow {graph.name!r}; serve the graph file they "
                     "started on until they end, or cancel them"
                 )
+        if conflicting := [
+            holder for holder, structure, _ in others if structure != graph.structure
+        ]:
+            raise GraphConflict(
+                f"refusing to serve: {len(conflicting)} replica(s) serve another structure of "
+                f"the workflow {graph.name!r}; stop them first, or use another namespace"
+            )
+        same_structure = recorded is not None and recorded.structure == graph.structure
+        if same_structure and recorded is not None and recorded.checksum != graph.checksum:
+            log.warning(
+                "the graph of %r has another checksum than the one on record (only "
+                "timeouts or retries differ); the newest one is put on record",
+                graph.name,
+            )
         if recorded != RecordedGraph(graph.structure, graph.checksum):
             self._engine.record_graph()
+        if not self._exclusive:
+            self._store.join_replicas(graph.structure, graph.checksum)
 
 
 def _document(graph: str | Path | dict[str, Any]) -> dict[str, Any]:

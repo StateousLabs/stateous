@@ -34,6 +34,14 @@ def upgrade() -> None:
     )
     op.bulk_insert(control_plane, [{"id": 1, "notices": False}])
     op.create_table(
+        "replicas",
+        sa.Column("holder", sa.String(length=256), nullable=False),
+        sa.Column("structure", sa.String(length=80), nullable=False),
+        sa.Column("checksum", sa.String(length=80), nullable=False),
+        sa.Column("seen", sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint("holder"),
+    )
+    op.create_table(
         "claims",
         sa.Column("supervisor", sa.String(length=256), nullable=False),
         sa.Column("request", sa.String(length=64), nullable=False),
@@ -148,4 +156,5 @@ def downgrade() -> None:
     op.drop_index("ledger_key", table_name="ledger")
     op.drop_table("ledger")
     op.drop_table("claims")
+    op.drop_table("replicas")
     op.drop_table("control_plane")
