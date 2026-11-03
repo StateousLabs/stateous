@@ -73,3 +73,11 @@ def test_a_repeated_claim_with_other_labels_does_not_get_the_grant(plane: Contro
     assert again is None
     same = plane.claim("worker", [], request="r1", labels={"tenant": "a"})
     assert same == first
+
+
+def test_a_grant_carries_the_tokens_labels(plane: ControlPlane) -> None:
+    plane.start("T-1", TICKET, labels=U1)
+
+    grant = plane.claim("box-1", ["coding"])
+
+    assert grant is not None and grant.labels == U1

@@ -115,6 +115,9 @@ class Context(Generic[C]):
         """The token's id."""
         self.task: int = grant.task
         """The task's id."""
+        self.labels: dict[str, str] = dict(grant.labels)
+        """The token's labels, for example `{"user": "u42"}`: they tell which tenant the
+        token is of."""
         self.visit: int = grant.visit
         """1 the first time the token is in this state, 2 the next time, and so on."""
         self.attempt: int = grant.attempt

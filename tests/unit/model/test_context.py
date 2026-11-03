@@ -291,3 +291,30 @@ def test_memory_shows_its_values_in_its_repr() -> None:
     memory = Memory({"dev": "s-1"}, lambda key, value: None)
 
     assert repr(memory) == "Memory({'dev': 's-1'})"
+
+
+def test_a_routine_reads_ctx_labels() -> None:
+    from dataclasses import replace
+
+    labeled = replace(GRANT, labels={"user": "u42"})
+    ctx = Context[Any](labeled, save_memory=Calls().save, note=Calls().note)
+
+    assert ctx.labels == {"user": "u42"}
+    assert context(Calls()).labels == {}
+
+
+def test_a_grant_keeps_its_labels_over_json() -> None:
+    from dataclasses import replace
+
+    labeled = replace(GRANT, labels={"user": "u42"})
+
+    assert TaskGrant.from_json(labeled.to_json()) == labeled
+    assert "labels" not in GRANT.to_json()
+
+
+@pytest.mark.parametrize("labels", [["user"], {"user": 7}])
+def test_a_grant_with_bad_labels_is_a_wire_error(labels: Any) -> None:
+    from stateous.model.wire import WireError
+
+    with pytest.raises(WireError, match="labels"):
+        TaskGrant.from_json({**GRANT.to_json(), "labels": labels})

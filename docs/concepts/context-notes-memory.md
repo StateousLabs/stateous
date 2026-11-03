@@ -25,6 +25,7 @@ These are the fields of `ctx`:
 | `ctx.note(text)` | One line of progress in the token's history. It is sent at once. |
 | `ctx.token` | The token's id. |
 | `ctx.task` | The task's id. |
+| `ctx.labels` | The token's labels, for example `{"user": "u42"}`: they tell which tenant the token is of. |
 | `ctx.visit` | 1 the first time the token is in this state, 2 the next time, and so on. |
 | `ctx.attempt` | 1, then 2 after a retry, and so on. |
 | `ctx.entered_by` | The name of the event that brought the token here, as `ctx.entered_by.name`. In the first state, it is `__started__`. A routine does not get the payload: an event whose payload the token keeps declares `into=`. See [Where data goes](data.md). |

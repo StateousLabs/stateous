@@ -52,6 +52,8 @@ class TaskGrant:
     context: dict[str, Any]
     memory: dict[str, Any]
     entered_by: EventRecord | None
+    labels: dict[str, str] = field(default_factory=dict[str, str])
+    """The token's labels."""
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -65,6 +67,8 @@ class TaskGrant:
         }
         if self.entered_by is not None:
             out["entered_by"] = self.entered_by.to_json()
+        if self.labels:
+            out["labels"] = dict(self.labels)
         return out
 
     @classmethod
@@ -81,6 +85,7 @@ class TaskGrant:
             context=_required_object(body, "context", what),
             memory=_required_object(body, "memory", what),
             entered_by=None if entered is None else EventRecord.from_json(entered),
+            labels=_labels(body.get("labels")),
         )
 
 
@@ -171,6 +176,18 @@ class Outcome:
             schedules=tuple(Schedule.from_json(item) for item in cast("list[Any]", schedules)),
             attempt=attempt,
         )
+
+
+def _labels(data: Any) -> dict[str, str]:
+    """A grant's labels: an object of strings, or nothing."""
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise WireError("a task grant's 'labels' must be an object of strings")
+    pairs = cast("dict[Any, Any]", data)
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in pairs.items()):
+        raise WireError("a task grant's 'labels' must be an object of strings")
+    return {str(k): str(v) for k, v in pairs.items()}
 
 
 def _object(data: Any, what: str) -> dict[str, Any]:

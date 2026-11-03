@@ -950,6 +950,7 @@ class Engine:
             context=dict(row.context),
             memory=tx.memory(task.token, task.state),
             entered_by=entered_by,
+            labels=dict(row.labels),
         )
 
     # ── time ────────────────────────────────────────────────────────────
