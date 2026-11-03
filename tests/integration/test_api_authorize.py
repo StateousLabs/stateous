@@ -60,3 +60,49 @@ def test_in_process_passes_its_caller(tmp_path: Path) -> None:
             return "allowed"
 
     assert asyncio.run(main()) == "forbidden"
+
+
+def test_every_route_passes_its_caller(tmp_path: Path) -> None:
+    async def main() -> list[int]:
+        url = sqlite_url(tmp_path / "all.db")
+        with ControlPlane(sdlc(), database=url, migrate=True, authorize=only_own) as plane:
+            app = create_app(plane, caller=user_of)
+            async with httpx2.AsyncClient(
+                base_url="http://testserver",
+                transport=httpx2.ASGITransport(app=app),
+                headers={"X-User": "u1"},
+            ) as client:
+                statuses: list[int] = []
+                for token in ("T-1", "T-2", "T-3"):
+                    body = {"token": token, "context": TICKET, "labels": U1}
+                    statuses.append((await client.post("/tokens", json=body)).status_code)
+                claim = {"supervisor": "box", "states": ["coding"], "labels": U1}
+                grant = (await client.post("/tasks/claim", json=claim)).json()
+                task, attempt = grant["task"], grant["attempt"]
+                calls = [
+                    client.get("/health"),
+                    client.get("/workflow"),
+                    client.get("/tokens/T-1"),
+                    client.get("/tokens", params={"label": "user=u1"}),
+                    client.get("/tokens/T-1/history"),
+                    client.post(f"/tasks/{task}/note", json={"text": "x", "attempt": attempt}),
+                    client.put(
+                        f"/tasks/{task}/memory", json={"key": "k", "value": 1, "attempt": attempt}
+                    ),
+                    client.post("/tasks/heartbeat", json={"supervisor": "box", "tasks": [task]}),
+                    client.post(
+                        f"/tasks/{task}/report",
+                        json={"kind": "event", "event": "stuck", "supervisor": "box"},
+                    ),
+                    client.post("/tokens/T-2/pause"),
+                    client.post("/tokens/T-2/resume"),
+                    client.post("/tokens/T-2/cancel"),
+                    client.post("/tokens/T-3/events/stuck", json={}),
+                ]
+                for call in calls:
+                    statuses.append((await call).status_code)
+                return statuses
+
+    statuses = asyncio.run(main())
+
+    assert all(status < 300 for status in statuses), statuses
