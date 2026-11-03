@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException
 from starlette.testclient import TestClient
 
 from stateous.control.api import MAX_BODY
-from stateous.control.engine import Engine
+from stateous.control.plane import ControlPlane
 
 BIG_TASK = 2**70
 
@@ -163,7 +163,7 @@ def test_a_body_larger_than_the_limit_is_bad_request_413(http: TestClient) -> No
 )
 def test_a_failure_that_no_route_names_has_a_code(
     http: TestClient,
-    engine: Engine,
+    engine: ControlPlane,
     monkeypatch: pytest.MonkeyPatch,
     raised: Exception,
     status: int,
@@ -189,7 +189,7 @@ def test_a_failure_that_no_route_names_has_a_code(
     ],
 )
 def test_a_postgres_timeout_is_database_busy_503(
-    http: TestClient, engine: Engine, monkeypatch: pytest.MonkeyPatch, driver_error: Exception
+    http: TestClient, engine: ControlPlane, monkeypatch: pytest.MonkeyPatch, driver_error: Exception
 ) -> None:
     """The error as SQLAlchemy wraps the driver's error: `DBAPIError.instance` picks
     the class (OperationalError for SQLSTATE 57014 and 55P03)."""

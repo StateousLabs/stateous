@@ -13,9 +13,7 @@ import uvicorn
 from starlette.testclient import TestClient
 
 from stateous.control.api import create_app
-from stateous.control.engine import Engine
-from stateous.control.graph import Graph
-from stateous.control.store import Store
+from stateous.control.plane import ControlPlane
 
 SDLC: dict[str, Any] = {
     "stateous": 1,
@@ -61,20 +59,20 @@ def sdlc() -> dict[str, Any]:
 
 
 @pytest.fixture
-def engine(sdlc: dict[str, Any]) -> Iterator[Engine]:
-    store = Store("sqlite://")
-    yield Engine(store, Graph(sdlc))
-    store.close()
+def engine(sdlc: dict[str, Any]) -> Iterator[ControlPlane]:
+    """The control plane that the API serves, over an in-memory database."""
+    with ControlPlane(sdlc, database="sqlite://", migrate=True) as plane:
+        yield plane
 
 
 @pytest.fixture
-def http(engine: Engine) -> Iterator[TestClient]:
+def http(engine: ControlPlane) -> Iterator[TestClient]:
     with TestClient(create_app(engine)) as client:
         yield client
 
 
 @pytest.fixture
-def served(engine: Engine) -> Iterator[str]:
+def served(engine: ControlPlane) -> Iterator[str]:
     """The API on a real port, in a thread: its URL."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))

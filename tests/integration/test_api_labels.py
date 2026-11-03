@@ -60,3 +60,21 @@ def test_the_client_sends_its_headers_on_each_call() -> None:
     client.get("T-1")
 
     assert seen == ["a", "b"]
+
+
+def test_post_tokens_without_a_token_makes_one(http: TestClient) -> None:
+    first = http.post("/tokens", json={"context": {"repo": "a"}}, headers={"Idempotency-Key": "k1"})
+    again = http.post("/tokens", json={"context": {"repo": "a"}}, headers={"Idempotency-Key": "k1"})
+    other = http.post("/tokens", json={"context": {"repo": "a"}})
+
+    assert (first.status_code, again.status_code, other.status_code) == (201, 200, 201)
+    assert first.json()["token"] == again.json()["token"] != other.json()["token"]
+    assert len(first.json()["token"]) == 26
+
+
+def test_the_client_starts_with_a_made_id(served: str) -> None:
+    with Client(served) as client:
+        first = client.start(None, {"repo": "a"}, key="k2")
+        again = client.start(None, {"repo": "a"}, key="k2")
+
+    assert first["token"] == again["token"]

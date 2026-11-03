@@ -143,8 +143,8 @@ def test_a_new_database_is_made_at_the_newest_revision(tmp_path: Path) -> None:
 
     assert version_of(url) == head()
     assert table_names(url) == [
-        "claims", "control_plane", "ledger", "memory", "notices", "replicas", "stateous_version",
-        "tasks", "timers", "token_labels", "tokens",
+        "claims", "control_plane", "ledger", "memory", "notices", "replicas", "start_keys",
+        "stateous_version", "tasks", "timers", "token_labels", "tokens",
     ]  # fmt: skip
 
 

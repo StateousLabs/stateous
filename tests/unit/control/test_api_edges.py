@@ -11,20 +11,19 @@ from starlette.types import Message, Receive, Scope, Send
 
 from stateous.control import api
 from stateous.control.api import BodyLimit, create_app
-from stateous.control.engine import Engine
+from stateous.control.plane import ControlPlane
 
-from .support import TICKET, new_engine
-
-
-@pytest.fixture
-def engine() -> Iterator[Engine]:
-    engine = new_engine()
-    yield engine
-    engine.store.close()
+from .support import TICKET, Clock, sdlc
 
 
 @pytest.fixture
-def http(engine: Engine) -> Iterator[TestClient]:
+def engine() -> Iterator[ControlPlane]:
+    with ControlPlane(sdlc(), database="sqlite://", migrate=True, now=Clock()) as plane:
+        yield plane
+
+
+@pytest.fixture
+def http(engine: ControlPlane) -> Iterator[TestClient]:
     with TestClient(create_app(engine)) as client:
         yield client
 

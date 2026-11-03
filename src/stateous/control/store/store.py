@@ -977,6 +977,15 @@ class Transaction:
         )
         return {task: token for task, token in rows}
 
+    def start_key_token(self, digest: str, key: str) -> str | None:
+        """The token key that a start with this idempotency key made, if any."""
+        row = self._session.get(tables.StartKey, (digest, key))
+        return None if row is None else row.token
+
+    def add_start_key(self, digest: str, key: str, token: str) -> None:
+        self._session.add(tables.StartKey(digest=digest, key=key, token=token))
+        self._session.flush()
+
     def leave_replicas(self, holder: str) -> None:
         self._session.execute(delete(tables.Replica).where(tables.Replica.holder == holder))
 

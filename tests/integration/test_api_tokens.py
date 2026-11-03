@@ -7,7 +7,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from stateous.control.api import MAX_BODY
-from stateous.control.engine import Engine
+from stateous.control.plane import ControlPlane
 from stateous.model.graph_file import checksum
 
 
@@ -60,7 +60,7 @@ def test_a_token_id_that_differs_only_in_case_is_422(http: TestClient) -> None:
     assert isinstance(answer.json()["error"], str)
 
 
-@pytest.mark.parametrize("token", [7, None])
+@pytest.mark.parametrize("token", [7, ["T-1"]])
 def test_a_token_id_that_is_not_a_string_is_422(http: TestClient, token: object) -> None:
     answer = http.post("/tokens", json={"token": token})
 
@@ -178,13 +178,13 @@ def test_pause_resume_and_cancel_steer_a_token(http: TestClient) -> None:
 
 
 def test_the_workflow_and_the_health_come_from_the_graph(
-    http: TestClient, engine: Engine, sdlc: dict[str, Any]
+    http: TestClient, engine: ControlPlane, sdlc: dict[str, Any]
 ) -> None:
     served = http.get("/workflow").json()
     health = http.get("/health").json()
 
     assert served == sdlc
-    assert health == {"workflow": "sdlc", "checksum": engine.graph.checksum}
+    assert health == {"workflow": "sdlc", "checksum": engine.health()["checksum"]}
     assert health["checksum"] == checksum(served)
 
 

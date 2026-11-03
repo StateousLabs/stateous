@@ -80,8 +80,15 @@ class Served(Protocol):
     ) -> Callable[[], None]: ...
 
     def start(
-        self, token: str, context: dict[str, Any], *, labels: Mapping[str, str] | None = None
+        self,
+        token: str | None,
+        context: dict[str, Any],
+        *,
+        labels: Mapping[str, str] | None = None,
+        key: str | None = None,
     ) -> Token: ...
+
+    def known_start_key(self, key: str, *, labels: Mapping[str, str] | None = None) -> bool: ...
 
     def get(self, token: str) -> Token: ...
 
@@ -160,11 +167,23 @@ def create_app(
 
     async def start(request: Request) -> Response:
         body = await body_of(request)
-        token = token_id(body.get("token"))
+        named = body.get("token")
+        token = None if named is None else token_id(named)
         context = _object(body.get("context"), "context", "invalid_context") or {}
         labels = body.get("labels")
-        existed = await run_in_threadpool(lambda: _exists(on(request), token))
-        started = await run_in_threadpool(lambda: on(request).start(token, context, labels=labels))
+        key = request.headers.get("idempotency-key")
+        if key is not None:
+            _check_key(key)
+        served = on(request)
+        if token is not None:
+            existed = await run_in_threadpool(lambda: _exists(served, token))
+        elif key is not None:
+            existed = await run_in_threadpool(lambda: served.known_start_key(key, labels=labels))
+        else:
+            existed = False
+        started = await run_in_threadpool(
+            lambda: served.start(token, context, labels=labels, key=key)
+        )
         return JSONResponse(token_json(started), status_code=200 if existed else 201)
 
     async def list_tokens(request: Request) -> Response:

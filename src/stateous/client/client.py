@@ -105,25 +105,32 @@ class Client:
 
     def start(
         self,
-        token: str,
+        token: str | None,
         context: dict[str, Any] | None = None,
         *,
         labels: Mapping[str, str] | None = None,
+        key: str | None = None,
     ) -> dict[str, Any]:
         """Start a token. If the token exists, it is returned unchanged.
 
         Args:
-            token: The token's id, for example `TICKET-1`.
+            token: The token's id, for example `TICKET-1`. None: the control plane
+                makes one (a ULID).
             context: The token's context. None: `{}`.
             labels: The token's labels, for example `{"user": "u42"}`. They never change.
+            key: With `token` None: an idempotency key. A retry with the same key gets
+                the same token.
 
         Returns:
             The token.
         """
-        body: dict[str, Any] = {"token": token, "context": context or {}}
+        body: dict[str, Any] = {"context": context or {}}
+        if token is not None:
+            body["token"] = token
         if labels:
             body["labels"] = dict(labels)
-        return self._object("POST", "/tokens", body)
+        headers = None if key is None else {"Idempotency-Key": key}
+        return self._object("POST", "/tokens", body, headers=headers)
 
     def get(self, token: str) -> dict[str, Any]:
         """Read one token.

@@ -44,6 +44,13 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("holder"),
     )
     op.create_table(
+        "start_keys",
+        sa.Column("digest", sa.String(length=16), nullable=False),
+        sa.Column("key", sa.String(length=256), nullable=False),
+        sa.Column("token", sa.String(length=256), nullable=False),
+        sa.PrimaryKeyConstraint("digest", "key"),
+    )
+    op.create_table(
         "claims",
         sa.Column("supervisor", sa.String(length=256), nullable=False),
         sa.Column("request", sa.String(length=64), nullable=False),
@@ -158,5 +165,6 @@ def downgrade() -> None:
     op.drop_index("ledger_key", table_name="ledger")
     op.drop_table("ledger")
     op.drop_table("claims")
+    op.drop_table("start_keys")
     op.drop_table("replicas")
     op.drop_table("control_plane")

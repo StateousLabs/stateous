@@ -32,6 +32,7 @@ from stateous.control.engine import (
     RecordedGraph,
     Token,
     check_limit,
+    check_start_key,
     utcnow,
 )
 from stateous.control.errors import (
@@ -45,6 +46,7 @@ from stateous.control.errors import (
     TokenNotFound,
 )
 from stateous.control.graph import Graph
+from stateous.control.ids import new_id
 from stateous.control.notices import Notice, deliver
 from stateous.control.scope import (
     MAX_SCOPE_KEYS,
@@ -173,10 +175,11 @@ class ControlPlane:
 
     def start(
         self,
-        token: str,
+        token: str | None,
         context: dict[str, Any],
         *,
         labels: Mapping[str, str] | None = None,
+        key: str | None = None,
         scope: Scope = None,
         caller: object = None,
     ) -> Token:
@@ -184,13 +187,37 @@ class ControlPlane:
         (at most 16) never change after the start; a child token gets them too. In a
         scoped namespace the labels give the token's scope; a call scope that differs
         is `Forbidden`. The authorizer checks `start` with `labels`, and `read` for a
-        token that exists with other labels."""
-        key = self._start_key(token, labels or {}, scope, caller)
+        token that exists with other labels.
+
+        With `token` None, Stateous makes an id: a ULID, so ids made later sort later.
+        With `key` too, a retry with the same key in the same scope gets the same
+        token. A start that names its id gives no `key`."""
+        if token is not None and key is not None:
+            raise InvalidArgument("give a token id or an idempotency key, not both")
+        if key is not None:
+            check_start_key(key)
+        made = token if token is not None else new_id()
+        found = self._start_key(made, labels or {}, scope, caller)
         self._allow(caller, "start", labels or {})
-        started = self._engine.start(key, context, labels=labels)
+        start_key = None if key is None else (digest_of(found) or "", key)
+        started = self._engine.start(found, context, labels=labels, start_key=start_key)
         if started.labels != dict(labels or {}):
             self._allow(caller, "read", started.labels)
         return started
+
+    def known_start_key(
+        self,
+        key: str,
+        *,
+        labels: Mapping[str, str] | None = None,
+        scope: Scope = None,
+        caller: object = None,
+    ) -> bool:
+        """Whether a start with this idempotency key made a token in the scope that
+        `labels` give (or the call's scope)."""
+        check_start_key(key)
+        found = self._start_key("x", labels or {}, scope, caller) if self._scope_keys else "x"
+        return self._engine.known_start_key(digest_of(found) or "", key)
 
     def get(self, token: str, *, scope: Scope = None, caller: object = None) -> Token:
         """The token. Raises `TokenNotFound`, also for a token of another scope."""
@@ -650,9 +677,17 @@ class AsCaller:
         return self.plane.on_task_ready(callback)
 
     def start(
-        self, token: str, context: dict[str, Any], *, labels: Mapping[str, str] | None = None
+        self,
+        token: str | None,
+        context: dict[str, Any],
+        *,
+        labels: Mapping[str, str] | None = None,
+        key: str | None = None,
     ) -> Token:
-        return self.plane.start(token, context, labels=labels, caller=self.caller)
+        return self.plane.start(token, context, labels=labels, key=key, caller=self.caller)
+
+    def known_start_key(self, key: str, *, labels: Mapping[str, str] | None = None) -> bool:
+        return self.plane.known_start_key(key, labels=labels, caller=self.caller)
 
     def get(self, token: str) -> Token:
         return self.plane.get(token, caller=self.caller)

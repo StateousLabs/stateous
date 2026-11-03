@@ -208,3 +208,16 @@ class Replica(Base):
     scope: Mapped[str] = mapped_column(String(512), default="[]")
     """The label keys of the replica's scope, as JSON."""
     seen: Mapped[datetime]
+
+
+class StartKey(Base):
+    """The idempotency key of a start with no id, and the token that it made: a retry
+    with the same key, in the same scope, gets that token."""
+
+    __tablename__ = "start_keys"
+
+    digest: Mapped[str] = mapped_column(String(16), primary_key=True)
+    """The scope's digest; empty with no scope."""
+    key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    token: Mapped[str] = mapped_column(String(256))
+    """The token's key."""

@@ -207,7 +207,12 @@ class Engine:
 
     @_retried
     def start(
-        self, token: str, context: dict[str, Any], *, labels: Mapping[str, str] | None = None
+        self,
+        token: str,
+        context: dict[str, Any],
+        *,
+        labels: Mapping[str, str] | None = None,
+        start_key: tuple[str, str] | None = None,
     ) -> Token:
         """Start a token: it leaves START for the state its context leads to. To
         start a token that exists returns it, unchanged (its first labels too)."""
@@ -217,7 +222,11 @@ class Engine:
                 "a token id is a letter or digit, then up to 127 letters, digits, '.', '_' or '-'"
             )
         with self._transaction() as tx:
+            if start_key is not None and (made := tx.start_key_token(*start_key)) is not None:
+                return _token(self._existing(tx, made))
             row = tx.token(token)
+            if start_key is not None:
+                tx.add_start_key(*start_key, token)
             if row is None:
                 if (taken := tx.token_folded(token)) is not None:
                     raise InvalidTokenId(
@@ -683,6 +692,12 @@ class Engine:
             raise _OtherLabels
         task.lease_until = tx.now + self.lease
         return self._grant(tx, task)
+
+    @_retried
+    def known_start_key(self, digest: str, key: str) -> bool:
+        """Whether a start with this idempotency key, in this scope, made a token."""
+        with self._transaction() as tx:
+            return tx.start_key_token(digest, key) is not None
 
     @_retried
     def keys_for_public(self, token: str) -> list[str]:
@@ -1283,6 +1298,15 @@ def _token(row: tables.Token) -> Token:
 
 class _OtherLabels(Exception):
     """A repeated claim names a grant whose token lacks the labels that it asks for."""
+
+
+def check_start_key(key: str) -> None:
+    """An idempotency key of a start: 1 to `KEY_LENGTH` characters, none of them a
+    control character."""
+    if not 0 < len(key) <= KEY_LENGTH:
+        raise InvalidPayload(f"an idempotency key is 1 to {KEY_LENGTH} characters")
+    if any(ord(c) < 32 or ord(c) == 127 for c in key):
+        raise InvalidPayload("an idempotency key has no control characters")
 
 
 def check_limit(limit: int) -> None:

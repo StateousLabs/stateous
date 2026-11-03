@@ -11,9 +11,8 @@ from sqlalchemy.exc import OperationalError
 from starlette.testclient import TestClient
 
 from stateous.control.api import create_app
-from stateous.control.engine import DEFAULT_LEASE, Engine
-from stateous.control.graph import Graph
-from stateous.control.store import Store
+from stateous.control.engine import DEFAULT_LEASE
+from stateous.control.plane import ControlPlane
 
 
 def claimed(http: TestClient, supervisor: str = "box-1") -> dict[str, Any]:
@@ -259,7 +258,7 @@ def test_a_note_or_memory_on_an_unknown_task_is_404(http: TestClient) -> None:
 
 
 def test_an_unnamed_engine_error_is_500_with_one_sentence(
-    http: TestClient, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    http: TestClient, engine: ControlPlane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("secret")
@@ -274,7 +273,7 @@ def test_an_unnamed_engine_error_is_500_with_one_sentence(
 
 
 def test_a_database_outage_is_503_with_one_sentence(
-    http: TestClient, engine: Engine, monkeypatch: pytest.MonkeyPatch
+    http: TestClient, engine: ControlPlane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def boom(*args: object, **kwargs: object) -> None:
         raise OperationalError("select 1", {}, Exception("the database is gone"))
@@ -350,19 +349,15 @@ def clock() -> MovedClock:
 
 
 @pytest.fixture
-def clocked(sdlc: dict[str, Any], clock: MovedClock) -> Iterator[tuple[TestClient, Engine]]:
+def clocked(sdlc: dict[str, Any], clock: MovedClock) -> Iterator[tuple[TestClient, ControlPlane]]:
     """The API over an engine whose clock the test moves."""
-    store = Store("sqlite://")
-    engine = Engine(store, Graph(sdlc), clock=clock)
-    try:
-        with TestClient(create_app(engine)) as client:
-            yield client, engine
-    finally:
-        store.close()
+    engine = ControlPlane(sdlc, database="sqlite://", migrate=True, now=clock)
+    with engine, TestClient(create_app(engine)) as client:
+        yield client, engine
 
 
 def test_a_note_or_memory_after_the_lease_ended_is_409(
-    clocked: tuple[TestClient, Engine], clock: MovedClock
+    clocked: tuple[TestClient, ControlPlane], clock: MovedClock
 ) -> None:
     http, engine = clocked
     grant = claimed(http)

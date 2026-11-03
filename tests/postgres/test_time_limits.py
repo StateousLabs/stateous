@@ -11,8 +11,7 @@ from sqlalchemy import create_engine, text
 from starlette.testclient import TestClient
 
 from stateous.control.api import create_app
-from stateous.control.engine import Engine
-from stateous.control.graph import Graph
+from stateous.control.plane import ControlPlane
 from stateous.control.store import Store
 from stateous.control.store.migrations import no_statement_limit
 from stateous.control.store.store import (
@@ -52,7 +51,7 @@ def test_each_session_has_the_statement_and_lock_limits(store: Store) -> None:
 
 
 def test_a_request_that_waits_for_a_held_lock_answers_database_busy(url: str, store: Store) -> None:
-    engine = Engine(store, Graph(sdlc()))
+    engine = ControlPlane(sdlc(), database=url)
     engine.start("T-1", TICKET)
     http = TestClient(create_app(engine), raise_server_exceptions=False)
     # Another connection, with no time limits, holds the lock of T-1's family.

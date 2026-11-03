@@ -10,7 +10,7 @@ import pytest
 
 from stateous import Client
 from stateous.client import ClientError, NotFound, Refused, Unreachable
-from stateous.control.engine import Engine
+from stateous.control.plane import ControlPlane
 from stateous.model.wire import Outcome
 
 
@@ -90,7 +90,9 @@ def test_pause_resume_and_cancel(client: Client) -> None:
     assert client.cancel("T-1")["status"] == "cancelled"
 
 
-def test_report_moves_a_task_that_waits_for_the_outside(client: Client, engine: Engine) -> None:
+def test_report_moves_a_task_that_waits_for_the_outside(
+    client: Client, engine: ControlPlane
+) -> None:
     client.start("T-1", {"repo": "acme/api"})
     grant = engine.claim("box-1", ["coding"])
     assert grant is not None
@@ -100,7 +102,7 @@ def test_report_moves_a_task_that_waits_for_the_outside(client: Client, engine: 
 
 
 def test_report_with_an_attempt_is_refused_for_an_attempt_that_is_over(
-    client: Client, engine: Engine
+    client: Client, engine: ControlPlane
 ) -> None:
     client.start("T-1", {"repo": "acme/api"})
     first = engine.claim("box-1", ["coding"])
