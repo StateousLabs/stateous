@@ -15,7 +15,7 @@ from sqlalchemy.exc import OperationalError
 from stateous.control import checks
 from stateous.control.checks import MAX_BODY, MAX_DEPTH, MAX_TASK, Problem
 from stateous.control.errors import ControlPlaneError, HoldLost
-from stateous.control.plane import ControlPlane
+from stateous.control.plane import AsCaller, ControlPlane
 from stateous.model.wire import Outcome, WireError
 from stateous.transport import Call, Reply
 
@@ -24,13 +24,15 @@ log = logging.getLogger("stateous.answer")
 UNEXPECTED = "the call failed unexpectedly"
 
 
-def answer(plane: ControlPlane, call: Call) -> Reply:
-    """The reply of `plane` to `call`. Synchronous: run it on a worker thread."""
+def answer(plane: ControlPlane, call: Call, *, caller: object = None) -> Reply:
+    """The reply of `plane` to `call`. Synchronous: run it on a worker thread.
+    `caller` goes to the plane's authorizer: for a queue, the sender that the
+    consumer verified."""
     try:
         if plane.lost:
             raise HoldLost("another control plane took this database")
         _check_limits(call)
-        return Reply(ok=True, body=_run(plane, call.name, call.args))
+        return Reply(ok=True, body=_run(plane.as_caller(caller), call.name, call.args))
     except ControlPlaneError as error:
         return _refused(error.code, error)
     except Problem as error:
@@ -48,7 +50,7 @@ def answer(plane: ControlPlane, call: Call) -> Reply:
         return Reply(ok=False, code="unexpected", message=UNEXPECTED)
 
 
-def _run(plane: ControlPlane, name: str, args: dict[str, Any]) -> Any:
+def _run(plane: AsCaller, name: str, args: dict[str, Any]) -> Any:
     if name == "health":
         return plane.health()
     if name == "claim":

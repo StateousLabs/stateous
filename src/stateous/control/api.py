@@ -33,6 +33,7 @@ from stateous.control.errors import (
     ChildToken,
     ControlPlaneError,
     EventNotAllowed,
+    Forbidden,
     InvalidArgument,
     InvalidContext,
     InvalidPayload,
@@ -42,6 +43,7 @@ from stateous.control.errors import (
     TokenNotActive,
     TokenNotFound,
 )
+from stateous.control.plane import ControlPlane
 from stateous.control.waiting import WaitingClaims
 from stateous.model.wire import Outcome, TaskGrant, WireError
 
@@ -136,10 +138,19 @@ class Served(Protocol):
     ) -> None: ...
 
 
-def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starlette:
+def create_app(
+    served: Served,
+    *,
+    waiting: WaitingClaims | None = None,
+    caller: Callable[[Request], object] | None = None,
+) -> Starlette:
     """The API over one control plane. It has no clock: `stateous serve` runs the clock.
     `waiting` holds the claims that wait for a task; `serve` closes it when it stops,
-    so they answer at once."""
+    so they answer at once. `caller(request)` gives the caller of each request to the
+    control plane's authorizer, for example a user id from a header that a gateway
+    checked; it needs a `ControlPlane`."""
+    engine = served
+    on = _Callers(served, caller).of
     document = engine.document
     health = engine.health()
     if waiting is None:
@@ -152,8 +163,8 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         token = token_id(body.get("token"))
         context = _object(body.get("context"), "context", "invalid_context") or {}
         labels = body.get("labels")
-        existed = await run_in_threadpool(lambda: _exists(engine, token))
-        started = await run_in_threadpool(lambda: engine.start(token, context, labels=labels))
+        existed = await run_in_threadpool(lambda: _exists(on(request), token))
+        started = await run_in_threadpool(lambda: on(request).start(token, context, labels=labels))
         return JSONResponse(token_json(started), status_code=200 if existed else 201)
 
     async def list_tokens(request: Request) -> Response:
@@ -164,17 +175,17 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         parent = _parent(request.query_params.get("parent"))
         labels = _label_filter(request.query_params.getlist("label"))
         found = await run_in_threadpool(
-            lambda: engine.tokens(status=status, limit=limit, parent=parent, labels=labels)
+            lambda: on(request).tokens(status=status, limit=limit, parent=parent, labels=labels)
         )
         return JSONResponse([token_json(token) for token in found])
 
     async def get_token(request: Request) -> Response:
         token: str = request.path_params["token"]
-        return JSONResponse(token_json(await run_in_threadpool(lambda: engine.get(token))))
+        return JSONResponse(token_json(await run_in_threadpool(lambda: on(request).get(token))))
 
     async def history(request: Request) -> Response:
         token: str = request.path_params["token"]
-        entries = await run_in_threadpool(lambda: engine.history(token))
+        entries = await run_in_threadpool(lambda: on(request).history(token))
         return JSONResponse([entry_json(entry) for entry in entries])
 
     async def fire(request: Request) -> Response:
@@ -185,14 +196,15 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         key = request.headers.get("idempotency-key")
         if key is not None:
             _check_key(key)
-        fired = await run_in_threadpool(lambda: engine.fire(token, event, payload, key=key))
+        fired = await run_in_threadpool(lambda: on(request).fire(token, event, payload, key=key))
         answer = token_json(fired.token)
         return JSONResponse({"duplicate": True, "token": answer} if fired.duplicate else answer)
 
-    def steer(action: Callable[[str], Token]) -> Callable[[Request], Awaitable[Response]]:
+    def steer(action: str) -> Callable[[Request], Awaitable[Response]]:
         async def endpoint(request: Request) -> Response:
             token: str = request.path_params["token"]
-            return JSONResponse(token_json(await run_in_threadpool(lambda: action(token))))
+            act: Callable[[str], Token] = getattr(on(request), action)
+            return JSONResponse(token_json(await run_in_threadpool(lambda: act(token))))
 
         return endpoint
 
@@ -211,7 +223,7 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         labels = check_labels(body.get("labels"))
 
         def claimed() -> TaskGrant | None:
-            return engine.claim(supervisor, states, request=request_id, labels=labels)
+            return on(request).claim(supervisor, states, request=request_id, labels=labels)
 
         if wait == 0:
             grant = await run_in_threadpool(claimed)
@@ -230,21 +242,23 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         named = body.pop("supervisor", None)
         supervisor = None if named is None else checks.supervisor_name(named)
         outcome = Outcome.from_json(body)
-        fired = await run_in_threadpool(lambda: engine.report(task, outcome, supervisor=supervisor))
+        fired = await run_in_threadpool(
+            lambda: on(request).report(task, outcome, supervisor=supervisor)
+        )
         return JSONResponse(token_json(fired.token))
 
     async def heartbeat(request: Request) -> Response:
         body = await body_of(request)
         supervisor = checks.supervisor_name(body.get("supervisor"))
         tasks = checks.task_ids(body.get("tasks"))
-        lost = await run_in_threadpool(lambda: engine.heartbeat(supervisor, tasks))
+        lost = await run_in_threadpool(lambda: on(request).heartbeat(supervisor, tasks))
         return JSONResponse({"lost": lost})
 
     async def note(request: Request) -> Response:
         task = _task(request)
         body = await body_of(request)
         text, attempt = checks.note_text(body.get("text")), checks.attempt(body.get("attempt"))
-        await run_in_threadpool(lambda: engine.note(task, text, attempt=attempt))
+        await run_in_threadpool(lambda: on(request).note(task, text, attempt=attempt))
         return Response(status_code=204)
 
     async def memory(request: Request) -> Response:
@@ -254,7 +268,7 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         if "value" not in body:
             raise Problem(422, "memory needs a 'value'; null deletes the key", "invalid_body")
         value, attempt = body["value"], checks.attempt(body.get("attempt"))
-        await run_in_threadpool(lambda: engine.set_memory(task, key, value, attempt=attempt))
+        await run_in_threadpool(lambda: on(request).set_memory(task, key, value, attempt=attempt))
         return Response(status_code=204)
 
     routes = [
@@ -263,9 +277,9 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         Route("/tokens/{token}", get_token, methods=["GET"]),
         Route("/tokens/{token}/history", history, methods=["GET"]),
         Route("/tokens/{token}/events/{event}", fire, methods=["POST"]),
-        Route("/tokens/{token}/pause", steer(engine.pause), methods=["POST"]),
-        Route("/tokens/{token}/resume", steer(engine.resume), methods=["POST"]),
-        Route("/tokens/{token}/cancel", steer(engine.cancel), methods=["POST"]),
+        Route("/tokens/{token}/pause", steer("pause"), methods=["POST"]),
+        Route("/tokens/{token}/resume", steer("resume"), methods=["POST"]),
+        Route("/tokens/{token}/cancel", steer("cancel"), methods=["POST"]),
         Route("/workflow", workflow, methods=["GET"]),
         Route("/health", health_check, methods=["GET"]),
         Route("/tasks/claim", claim, methods=["POST"]),
@@ -441,6 +455,22 @@ def read_json(raw: bytes) -> Any:
     return value
 
 
+class _Callers:
+    """The served control plane for each request: with its caller, when the app has a
+    `caller` function."""
+
+    def __init__(self, served: Served, caller: Callable[[Request], object] | None) -> None:
+        if caller is not None and not isinstance(served, ControlPlane):
+            raise TypeError("create_app(caller=...) needs a ControlPlane")
+        self._served = served
+        self._caller = caller
+
+    def of(self, request: Request) -> Served:
+        if self._caller is None or not isinstance(self._served, ControlPlane):
+            return self._served
+        return self._served.as_caller(self._caller(request))
+
+
 class NotServing:
     """ASGI middleware. After another control plane took the database, each request
     gets 503 with the code `not_serving`: a supervisor tries again, and can reach the
@@ -583,6 +613,7 @@ _HANDLERS: dict[Any, Handler] = {
     Problem: _problem,
     HTTPException: _http_error,
     TokenNotFound: _answer(404),
+    Forbidden: _answer(403),
     InvalidArgument: _answer(422),
     InvalidContext: _answer(422),
     InvalidPayload: _answer(422),

@@ -691,6 +691,17 @@ class Transaction:
         )
         return self._session.scalar(query) or 0
 
+    def task_labels(self, tasks: Collection[int]) -> dict[int, dict[str, str]]:
+        """The labels of each task's token; a task that is not there is left out."""
+        if not tasks:
+            return {}
+        rows = self._session.execute(
+            select(tables.Task.id, tables.Token.labels)
+            .join(tables.Token, tables.Token.token == tables.Task.token)
+            .where(tables.Task.id.in_(list(tasks)))
+        )
+        return {task: dict(labels) for task, labels in rows}
+
     def set_labels(self, token: str, labels: dict[str, str]) -> None:
         """The rows of a new token's labels."""
         for key, value in labels.items():

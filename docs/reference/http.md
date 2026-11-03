@@ -238,6 +238,7 @@ The sentence is for people, and it can change. The code does not change: a progr
 | `invalid_body` | 422 | The body does not have the shape of the request. |
 | `event_not_allowed` | 409 | The event cannot move the token in its state. |
 | `token_not_active` | 409 | The token's status does not allow the request. |
+| `forbidden` | 403 | The control plane's authorizer refused the caller this action. |
 | `child_token` | 409 | The token is a child of a parallel state; steer its top token. |
 | `task_not_held` | 409 | The task is not this supervisor's, or no one works on it now. |
 | `attempt_over` | 409 | The request is for an attempt of the task that is over: the task moved to a new attempt. |

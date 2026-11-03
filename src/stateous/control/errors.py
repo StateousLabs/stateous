@@ -105,3 +105,9 @@ class NoticesOff(ControlPlaneError, RuntimeError):
     """The database has notices off. Turn them on with `stateous migrate --notices`."""
 
     code: ClassVar[str] = "notices_off"
+
+
+class Forbidden(ControlPlaneError, PermissionError):
+    """The authorizer of the control plane refused the caller this action."""
+
+    code: ClassVar[str] = "forbidden"

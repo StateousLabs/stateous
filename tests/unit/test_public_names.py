@@ -18,6 +18,7 @@ def test_the_public_names_are_the_contracts() -> None:
         "DatabaseHeld",
         "EventNotAllowed",
         "Fired",
+        "Forbidden",
         "ForeignDatabase",
         "GraphConflict",
         "HistoryEntry",

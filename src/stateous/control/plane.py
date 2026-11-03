@@ -20,9 +20,11 @@ from typing import Any
 
 from sqlalchemy.engine import Engine as Database
 
+from stateous.control.access import Action, Authorize
 from stateous.control.clock import LOST, TICK_EVERY, Clock
 from stateous.control.engine import (
     DEFAULT_LEASE,
+    MOST_TOKENS,
     Engine,
     Fired,
     HistoryEntry,
@@ -30,7 +32,7 @@ from stateous.control.engine import (
     Token,
     utcnow,
 )
-from stateous.control.errors import GraphConflict, HoldLost, NoticesOff
+from stateous.control.errors import Forbidden, GraphConflict, HoldLost, NoticesOff
 from stateous.control.graph import Graph
 from stateous.control.notices import Notice, deliver
 from stateous.control.store import Store
@@ -55,7 +57,11 @@ class ControlPlane:
 
     It holds its namespace until `close()`: a second control plane on the same
     namespace raises `DatabaseHeld`. A different structure of the workflow on record,
-    with tokens still active or paused, raises `GraphConflict`."""
+    with tokens still active or paused, raises `GraphConflict`.
+
+    `authorize(caller, action, labels)` decides each call; a refusal raises
+    `Forbidden`. Each call takes the keyword `caller`, which the transport gives.
+    With no authorizer, every call is allowed."""
 
     def __init__(
         self,
@@ -66,7 +72,9 @@ class ControlPlane:
         migrate: bool = False,
         lease: timedelta = DEFAULT_LEASE,
         now: Callable[[], datetime] = utcnow,
+        authorize: Authorize | None = None,
     ) -> None:
+        self._authorize = authorize
         self._graph = Graph(_document(graph))
         self.name: str = self._graph.name
         """The workflow's name."""
@@ -123,12 +131,20 @@ class ControlPlane:
         caller: object = None,
     ) -> Token:
         """Start a token. To start a token that exists returns it, unchanged. `labels`
-        (at most 16) never change after the start; a child token gets them too."""
-        return self._engine.start(token, context, labels=labels)
+        (at most 16) never change after the start; a child token gets them too. The
+        authorizer checks `start` with `labels`, and `read` for a token that exists
+        with other labels."""
+        self._allow(caller, "start", labels or {})
+        started = self._engine.start(token, context, labels=labels)
+        if started.labels != dict(labels or {}):
+            self._allow(caller, "read", started.labels)
+        return started
 
-    def get(self, token: str) -> Token:
+    def get(self, token: str, *, caller: object = None) -> Token:
         """The token. Raises `TokenNotFound`."""
-        return self._engine.get(token)
+        found = self._engine.get(token)
+        self._allow(caller, "read", found.labels)
+        return found
 
     def tokens(
         self,
@@ -140,11 +156,17 @@ class ControlPlane:
         caller: object = None,
     ) -> list[Token]:
         """Tokens, the most recently moved first. With `parent`: only its children.
-        With `labels`: only the tokens that have each of them."""
-        return self._engine.tokens(status=status, limit=limit, parent=parent, labels=labels)
+        With `labels`: only the tokens that have each of them. With an authorizer:
+        only the tokens that the caller may read, up to `limit` of them."""
+        if self._authorize is None:
+            return self._engine.tokens(status=status, limit=limit, parent=parent, labels=labels)
+        found = self._engine.tokens(status=status, limit=MOST_TOKENS, parent=parent, labels=labels)
+        allowed = [t for t in found if self._authorize(caller, "read", t.labels)]
+        return allowed[:limit]
 
-    def history(self, token: str) -> list[HistoryEntry]:
+    def history(self, token: str, *, caller: object = None) -> list[HistoryEntry]:
         """The ledger of the token, oldest first."""
+        self.get(token, caller=caller)
         return self._engine.history(token)
 
     def fire(
@@ -154,21 +176,26 @@ class ControlPlane:
         payload: dict[str, Any] | None = None,
         *,
         key: str | None = None,
+        caller: object = None,
     ) -> Fired:
         """Fire `event` on `token` from outside. With `key`: a second call with the
         same key changes nothing and answers `duplicate`."""
+        self._allow_token(caller, "fire", token)
         return self._engine.fire(token, event, payload, key=key)
 
-    def pause(self, token: str) -> Token:
+    def pause(self, token: str, *, caller: object = None) -> Token:
         """Stop the token: its events are held, its tasks wait, its timers stand still."""
+        self._allow_token(caller, "pause", token)
         return self._engine.pause(token)
 
-    def resume(self, token: str) -> Token:
+    def resume(self, token: str, *, caller: object = None) -> Token:
         """Start a paused token again. Its held events apply in order."""
+        self._allow_token(caller, "resume", token)
         return self._engine.resume(token)
 
-    def cancel(self, token: str) -> Token:
+    def cancel(self, token: str, *, caller: object = None) -> Token:
         """End the token as cancelled, with its children."""
+        self._allow_token(caller, "cancel", token)
         return self._engine.cancel(token)
 
     # ── supervisors ─────────────────────────────────────────────────────
@@ -184,7 +211,9 @@ class ControlPlane:
     ) -> TaskGrant | None:
         """The oldest queued task of `states`, now claimed by `supervisor` with a
         lease; None if there is none. With `labels`: only a task whose token has each
-        of them. A repeat with the same `request` gets the same grant again."""
+        of them; the authorizer checks `claim` with these labels. A repeat with the
+        same `request` gets the same grant again."""
+        self._allow(caller, "claim", labels or {})
         return self._engine.claim(supervisor, states, request=request, labels=labels)
 
     def count_claimed(self, labels: Mapping[str, str]) -> int:
@@ -199,22 +228,68 @@ class ControlPlane:
         *,
         supervisor: str | None = None,
         attempt: int | None = None,
+        caller: object = None,
     ) -> Fired:
         """The outcome of a task: from its supervisor, or (without `supervisor`) from
         outside."""
+        self._allow_task(caller, "report", task)
         return self._engine.report(task, outcome, supervisor=supervisor, attempt=attempt)
 
-    def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
-        """Renew the leases of `tasks`. Returns the tasks that the supervisor lost."""
-        return self._engine.heartbeat(supervisor, tasks)
+    def heartbeat(
+        self, supervisor: str, tasks: Collection[int], *, caller: object = None
+    ) -> list[int]:
+        """Renew the leases of `tasks`. Returns the tasks that the supervisor lost. A
+        task that the authorizer refuses is lost too, and its lease is not renewed."""
+        if self._authorize is None:
+            return self._engine.heartbeat(supervisor, tasks)
+        labels = self._engine.task_labels(tasks)
+        check = self._authorize
+        refused = {t for t, found in labels.items() if not check(caller, "heartbeat", found)}
+        allowed = [t for t in tasks if t not in refused]
+        lost = set(self._engine.heartbeat(supervisor, allowed)) if allowed else set[int]()
+        return sorted(lost | refused)
 
-    def note(self, task: int, text: str, *, attempt: int | None = None) -> None:
+    def note(
+        self, task: int, text: str, *, attempt: int | None = None, caller: object = None
+    ) -> None:
         """One line of progress in the token's history."""
+        self._allow_task(caller, "note", task)
         self._engine.note(task, text, attempt=attempt)
 
-    def set_memory(self, task: int, key: str, value: Any, *, attempt: int | None = None) -> None:
+    def set_memory(
+        self,
+        task: int,
+        key: str,
+        value: Any,
+        *,
+        attempt: int | None = None,
+        caller: object = None,
+    ) -> None:
         """Save one key of the routine's memory for the task's token and state."""
+        self._allow_task(caller, "memory", task)
         self._engine.set_memory(task, key, value, attempt=attempt)
+
+    def as_caller(self, caller: object) -> AsCaller:
+        """This control plane, with `caller` given to each call: for a transport that
+        knows its caller once, for example the HTTP API for one request."""
+        return AsCaller(self, caller)
+
+    # ── who may do what ─────────────────────────────────────────────────
+
+    def _allow(self, caller: object, action: Action, labels: Mapping[str, str]) -> None:
+        if self._authorize is not None and not self._authorize(caller, action, labels):
+            raise Forbidden(f"the caller may not {action} with the labels {dict(labels)}")
+
+    def _allow_token(self, caller: object, action: Action, token: str) -> None:
+        if self._authorize is not None:
+            self._allow(caller, action, self._engine.get(token).labels)
+
+    def _allow_task(self, caller: object, action: Action, task: int) -> None:
+        """An unknown task is left to the engine: it raises `TaskNotFound`."""
+        if self._authorize is not None:
+            found = self._engine.task_labels([task])
+            if task in found:
+                self._allow(caller, action, found[task])
 
     # ── the clock ───────────────────────────────────────────────────────
 
@@ -322,3 +397,97 @@ def _document(graph: str | Path | dict[str, Any]) -> dict[str, Any]:
     if isinstance(graph, dict):
         return load_graph(json.dumps(graph))
     return load_graph(Path(graph).read_text(encoding="utf-8"))
+
+
+class AsCaller:
+    """A control plane with one caller given to each call (`ControlPlane.as_caller`)."""
+
+    def __init__(self, plane: ControlPlane, caller: object) -> None:
+        self.plane = plane
+        self.caller = caller
+
+    @property
+    def document(self) -> dict[str, Any]:
+        return self.plane.document
+
+    @property
+    def lost(self) -> bool:
+        return self.plane.lost
+
+    def health(self) -> dict[str, Any]:
+        return self.plane.health()
+
+    def on_task_ready(
+        self, callback: Callable[[str, Mapping[str, str]], None]
+    ) -> Callable[[], None]:
+        return self.plane.on_task_ready(callback)
+
+    def start(
+        self, token: str, context: dict[str, Any], *, labels: Mapping[str, str] | None = None
+    ) -> Token:
+        return self.plane.start(token, context, labels=labels, caller=self.caller)
+
+    def get(self, token: str) -> Token:
+        return self.plane.get(token, caller=self.caller)
+
+    def tokens(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        parent: str | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> list[Token]:
+        return self.plane.tokens(
+            status=status, limit=limit, parent=parent, labels=labels, caller=self.caller
+        )
+
+    def history(self, token: str) -> list[HistoryEntry]:
+        return self.plane.history(token, caller=self.caller)
+
+    def fire(
+        self, token: str, event: str, payload: dict[str, Any] | None, *, key: str | None = None
+    ) -> Fired:
+        return self.plane.fire(token, event, payload, key=key, caller=self.caller)
+
+    def pause(self, token: str) -> Token:
+        return self.plane.pause(token, caller=self.caller)
+
+    def resume(self, token: str) -> Token:
+        return self.plane.resume(token, caller=self.caller)
+
+    def cancel(self, token: str) -> Token:
+        return self.plane.cancel(token, caller=self.caller)
+
+    def claim(
+        self,
+        supervisor: str,
+        states: Collection[str],
+        *,
+        request: str | None = None,
+        labels: Mapping[str, str] | None = None,
+    ) -> TaskGrant | None:
+        return self.plane.claim(
+            supervisor, states, request=request, labels=labels, caller=self.caller
+        )
+
+    def report(
+        self,
+        task: int,
+        outcome: Outcome,
+        *,
+        supervisor: str | None = None,
+        attempt: int | None = None,
+    ) -> Fired:
+        return self.plane.report(
+            task, outcome, supervisor=supervisor, attempt=attempt, caller=self.caller
+        )
+
+    def heartbeat(self, supervisor: str, tasks: Collection[int]) -> list[int]:
+        return self.plane.heartbeat(supervisor, tasks, caller=self.caller)
+
+    def note(self, task: int, text: str, *, attempt: int | None = None) -> None:
+        self.plane.note(task, text, attempt=attempt, caller=self.caller)
+
+    def set_memory(self, task: int, key: str, value: Any, *, attempt: int | None = None) -> None:
+        self.plane.set_memory(task, key, value, attempt=attempt, caller=self.caller)

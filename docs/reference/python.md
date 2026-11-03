@@ -131,6 +131,14 @@ Each error of a control plane has `code`, the stable code of its refusal. The HT
 
 ::: stateous.HoldLost
 
+::: stateous.Forbidden
+
+The authorizer is your function. `Action` names what a caller does.
+
+::: stateous.control.access.Action
+
+::: stateous.control.access.Authorize
+
 ::: stateous.NoticesOff
 
 These errors come from the database, when a control plane opens.

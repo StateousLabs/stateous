@@ -668,6 +668,12 @@ class Engine:
         return self._grant(tx, task)
 
     @_retried
+    def task_labels(self, tasks: Collection[int]) -> dict[int, dict[str, str]]:
+        """The labels of each task's token; a task that is not there is left out."""
+        with self._transaction() as tx:
+            return tx.task_labels(tasks)
+
+    @_retried
     def count_claimed(self, labels: Mapping[str, str]) -> int:
         """How many tasks are claimed now whose token has each of `labels`."""
         wanted = check_labels(labels)

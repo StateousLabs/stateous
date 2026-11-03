@@ -18,12 +18,13 @@ class InProcess(CallingTransport):
     """The transport to `plane`, in this process. A claim with `wait` waits for "task
     ready" of its states, up to `wait` seconds."""
 
-    def __init__(self, plane: ControlPlane) -> None:
+    def __init__(self, plane: ControlPlane, *, caller: object = None) -> None:
+        """`caller` goes to the plane's authorizer with each call."""
         self.plane = plane
         self._waiting = WaitingClaims(plane.on_task_ready)
 
         async def send(call: Call) -> Reply:
-            return await asyncio.to_thread(answer, plane, call)
+            return await asyncio.to_thread(lambda: answer(plane, call, caller=caller))
 
         super().__init__(send, where="in process")
 

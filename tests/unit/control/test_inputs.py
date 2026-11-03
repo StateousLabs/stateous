@@ -60,6 +60,7 @@ def test_the_test_above_names_every_error_of_the_engine() -> None:
             errors_module.GraphConflict,
             errors_module.HoldLost,
             errors_module.NoticesOff,
+            errors_module.Forbidden,
         )
     }
     assert errors == {
