@@ -90,6 +90,8 @@ class Served(Protocol):
 
     def known_start_key(self, key: str, *, labels: Mapping[str, str] | None = None) -> bool: ...
 
+    def exists_for_start(self, token: str, *, labels: Mapping[str, str] | None = None) -> bool: ...
+
     def get(self, token: str) -> Token: ...
 
     def tokens(
@@ -176,7 +178,7 @@ def create_app(
             _check_key(key)
         served = on(request)
         if token is not None:
-            existed = await run_in_threadpool(lambda: _exists(served, token))
+            existed = await run_in_threadpool(lambda: served.exists_for_start(token, labels=labels))
         elif key is not None:
             existed = await run_in_threadpool(lambda: served.known_start_key(key, labels=labels))
         else:
@@ -389,14 +391,6 @@ def token_id(value: Any) -> str:
     if not isinstance(value, str):
         raise Problem(422, "'token' is the token's id: a string", "invalid_token_id")
     return value
-
-
-def _exists(engine: Served, token: str) -> bool:
-    try:
-        engine.get(token)
-    except TokenNotFound:
-        return False
-    return True
 
 
 def _object(value: Any, what: str, code: str) -> dict[str, Any] | None:

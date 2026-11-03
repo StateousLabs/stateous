@@ -956,8 +956,9 @@ class Transaction:
         return self._session.scalar(select(func.count()).select_from(tables.Token)) or 0
 
     def keys_for_public(self, token: str) -> list[str]:
-        """The keys whose public id is `token`: in no scope, or in any scope."""
-        return list(
+        """The keys whose public id is exactly `token`: in no scope, or in any scope.
+        (SQLite's LIKE ignores case, so the found keys are checked once more.)"""
+        found = list(
             self._session.scalars(
                 select(tables.Token.token).where(
                     or_(
@@ -967,6 +968,7 @@ class Transaction:
                 )
             )
         )
+        return [key for key in found if public_id(key) == token]
 
     def task_keys(self, tasks: Collection[int]) -> dict[int, str]:
         """The token key of each task; a task that is not there is left out."""

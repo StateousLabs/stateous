@@ -221,6 +221,21 @@ class Engine:
             raise InvalidTokenId(
                 "a token id is a letter or digit, then up to 127 letters, digits, '.', '_' or '-'"
             )
+        try:
+            return self._start(token, context, given, start_key)
+        except IntegrityError as error:
+            if start_key is None or "start_keys" not in str(error.orig):
+                raise
+            # Another start with the same key committed first: now its token is found.
+            return self._start(token, context, given, start_key)
+
+    def _start(
+        self,
+        token: str,
+        context: dict[str, Any],
+        labels: dict[str, str],
+        start_key: tuple[str, str] | None,
+    ) -> Token:
         with self._transaction() as tx:
             if start_key is not None and (made := tx.start_key_token(*start_key)) is not None:
                 return _token(self._existing(tx, made))
@@ -233,7 +248,7 @@ class Engine:
                         f"a token {public_id(taken)!r} already exists; token ids are compared "
                         "without regard to case"
                     )
-                row = self._create(tx, token, context, self.graph, labels=given)
+                row = self._create(tx, token, context, self.graph, labels=labels)
             return _token(row)
 
     @_retried

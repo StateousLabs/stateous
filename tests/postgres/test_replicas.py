@@ -194,3 +194,30 @@ def test_replicas_with_different_scopes_refuse_each_other() -> None:
             replica(url, scope=["tenant"])
     finally:
         first.close()
+
+
+def test_concurrent_starts_with_one_key_give_one_token_and_no_error() -> None:
+    url = fresh_postgres_database()
+    plane = ControlPlane(sdlc(), database=url, namespace="flow", migrate=True)
+    barrier = threading.Barrier(4)
+    made: list[str] = []
+    errors: list[BaseException] = []
+
+    def start() -> None:
+        barrier.wait()
+        try:
+            made.append(plane.start(None, TICKET, key="order-1").token)
+        except BaseException as error:  # collected and checked below
+            errors.append(error)
+
+    threads = [threading.Thread(target=start) for _ in range(4)]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+    finally:
+        plane.close()
+
+    assert errors == []
+    assert len(set(made)) == 1 and len(made) == 4

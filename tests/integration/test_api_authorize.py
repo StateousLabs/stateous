@@ -128,3 +128,34 @@ def test_scope_of_the_caller_hides_other_scopes(tmp_path: Path) -> None:
                 return made.status_code, mine.status_code, theirs.status_code
 
     assert asyncio.run(main()) == (201, 200, 404)
+
+
+def test_an_admin_start_checks_only_the_scope_of_its_labels(tmp_path: Path) -> None:
+    from stateous import ALL_SCOPES
+
+    def scope_of(caller: object) -> object:
+        return ALL_SCOPES if caller == "admin" else {"user": str(caller)}
+
+    async def main() -> list[int]:
+        url = sqlite_url(tmp_path / "adm.db")
+        with ControlPlane(
+            sdlc(),
+            database=url,
+            migrate=True,
+            scope=["user"],
+            scope_of=scope_of,  # type: ignore[arg-type]
+        ) as plane:
+            for user in ("u1", "u2"):
+                plane.start("T-1", TICKET, labels={"user": user}, caller=user)
+            app = create_app(plane, caller=user_of)
+            async with httpx2.AsyncClient(
+                base_url="http://testserver",
+                transport=httpx2.ASGITransport(app=app),
+                headers={"X-User": "admin"},
+            ) as client:
+                body = {"token": "T-1", "context": TICKET, "labels": {"user": "u3"}}
+                made = await client.post("/tokens", json=body)
+                again = await client.post("/tokens", json=body)
+                return [made.status_code, again.status_code]
+
+    assert asyncio.run(main()) == [201, 200]

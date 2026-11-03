@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from stateous import ControlPlane, InvalidArgument, InvalidPayload
+from stateous import ALL_SCOPES, ControlPlane, InvalidArgument, InvalidPayload
 from stateous.control.ids import new_id
 
 from .support import TICKET, sdlc, sqlite_url
@@ -52,9 +52,9 @@ def test_a_retried_start_with_a_key_gives_one_token(plane: ControlPlane) -> None
 def test_a_key_in_two_scopes_gives_two_tokens(tmp_path: Path) -> None:
     url = sqlite_url(tmp_path / "s.db")
     with ControlPlane(sdlc(), database=url, migrate=True, scope=["user"]) as plane:
-        a = plane.start(None, TICKET, labels={"user": "a"}, key="k")
-        b = plane.start(None, TICKET, labels={"user": "b"}, key="k")
-        again = plane.start(None, TICKET, labels={"user": "a"}, key="k")
+        a = plane.start(None, TICKET, labels={"user": "a"}, key="k", scope=ALL_SCOPES)
+        b = plane.start(None, TICKET, labels={"user": "b"}, key="k", scope=ALL_SCOPES)
+        again = plane.start(None, TICKET, labels={"user": "a"}, key="k", scope=ALL_SCOPES)
 
         assert a.token != b.token
         assert again.token == a.token

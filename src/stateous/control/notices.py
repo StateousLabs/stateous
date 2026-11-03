@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from stateous.control.scope import public_id
+
 if TYPE_CHECKING:
     from stateous.control.store import Store, tables
 
@@ -83,7 +85,7 @@ def deliver(
         except _HandlerFailed as failed:
             log.error(
                 "the notice handler failed for the family %s (%s); its notices come again",
-                failed.args[0],
+                public_id(str(failed.args[0])),
                 " ".join(str(failed.__cause__).split()) or type(failed.__cause__).__name__,
             )
     return delivered

@@ -219,6 +219,22 @@ class ControlPlane:
         found = self._start_key("x", labels or {}, scope, caller) if self._scope_keys else "x"
         return self._engine.known_start_key(digest_of(found) or "", key)
 
+    def exists_for_start(
+        self,
+        token: str,
+        *,
+        labels: Mapping[str, str] | None = None,
+        scope: Scope = None,
+        caller: object = None,
+    ) -> bool:
+        """Whether a start of `token` with `labels` finds a token that exists: in the
+        scope that the labels give."""
+        try:
+            self._engine.get(self._start_key(token, labels or {}, scope, caller))
+        except TokenNotFound:
+            return False
+        return True
+
     def get(self, token: str, *, scope: Scope = None, caller: object = None) -> Token:
         """The token. Raises `TokenNotFound`, also for a token of another scope."""
         found = self._engine.get(self._key(token, scope, caller))
@@ -322,7 +338,7 @@ class ControlPlane:
         wanted = self._with_scope(labels, self._scope(scope, caller))
         if wanted is None:
             return None
-        self._allow(caller, "claim", labels or {})
+        self._allow(caller, "claim", wanted)
         return self._engine.claim(supervisor, states, request=request, labels=wanted or None)
 
     def count_claimed(self, labels: Mapping[str, str]) -> int:
@@ -449,15 +465,9 @@ class ControlPlane:
                 f"a token of this namespace needs the labels {', '.join(missing)}: its scope"
             )
         own = {k: str(labels[k]) for k in self._scope_keys}
-        given = (
-            scope
-            if scope is not None
-            else (self._scope_of(caller) if self._scope_of is not None else None)
-        )
-        if given is not None and not isinstance(given, AllScopes):
-            asked = {k: str(given.get(k)) for k in self._scope_keys}
-            if asked != own:
-                raise Forbidden("the token's labels name another scope than the caller's")
+        asked = self._scope(scope, caller)  # no scope at all is InvalidArgument here too
+        if not isinstance(asked, AllScopes) and asked != own:
+            raise Forbidden("the token's labels name another scope than the caller's")
         return key_of(scope_digest(own), token)
 
     def _with_scope(
@@ -688,6 +698,9 @@ class AsCaller:
 
     def known_start_key(self, key: str, *, labels: Mapping[str, str] | None = None) -> bool:
         return self.plane.known_start_key(key, labels=labels, caller=self.caller)
+
+    def exists_for_start(self, token: str, *, labels: Mapping[str, str] | None = None) -> bool:
+        return self.plane.exists_for_start(token, labels=labels, caller=self.caller)
 
     def get(self, token: str) -> Token:
         return self.plane.get(token, caller=self.caller)

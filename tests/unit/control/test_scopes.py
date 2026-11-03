@@ -159,3 +159,47 @@ def test_no_scope_works_as_before(tmp_path: Path) -> None:
     with ControlPlane(sdlc(), database=url, migrate=True) as plane:
         plane.start("T-1", TICKET, labels=U1)
         assert plane.get("T-1").labels == U1
+
+
+def test_a_start_with_no_scope_in_a_scoped_namespace_is_refused(plane: ControlPlane) -> None:
+    plane.start("T-1", {"repo": "secret"}, labels=U2, caller="u2")
+
+    with pytest.raises(InvalidArgument, match="give scope="):
+        plane.start("T-1", TICKET, labels=U2)  # scope_of(None) is None
+    with pytest.raises(InvalidArgument, match="give scope="):
+        plane.known_start_key("k", labels=U2)
+
+
+def test_a_scope_of_without_a_scope_key_is_invalid_on_start(tmp_path: Path) -> None:
+    url = sqlite_url(tmp_path / "k.db")
+    with (
+        ControlPlane(
+            sdlc(), database=url, migrate=True, scope=["user"], scope_of=lambda caller: {"x": "y"}
+        ) as plane,
+        pytest.raises(InvalidArgument, match="no value for user"),
+    ):
+        plane.start("T-1", TICKET, labels=U1, caller="c")
+
+
+def test_all_scopes_finds_an_id_only_in_its_exact_case(plane: ControlPlane) -> None:
+    plane.start("Z-1", TICKET, labels=U1, caller="u1")
+
+    with pytest.raises(TokenNotFound):
+        plane.get("z-1", scope=ALL_SCOPES)
+
+
+def test_the_authorizer_sees_the_scope_in_a_claims_labels(tmp_path: Path) -> None:
+    seen: list[dict[str, str]] = []
+
+    def record(caller: object, action: object, labels: Mapping[str, str]) -> bool:
+        if action == "claim":
+            seen.append(dict(labels))
+        return True
+
+    url = sqlite_url(tmp_path / "a.db")
+    with ControlPlane(
+        sdlc(), database=url, migrate=True, scope=["user"], scope_of=scope_of, authorize=record
+    ) as plane:
+        plane.claim("box", ["coding"], caller="u1")
+
+    assert seen == [U1]
