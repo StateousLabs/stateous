@@ -12,7 +12,7 @@ import re
 import socket
 import threading
 import uuid
-from collections.abc import Callable, Collection, Generator
+from collections.abc import Callable, Collection, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -88,6 +88,9 @@ may take it."""
 
 RENEW_EVERY = timedelta(seconds=10)
 """`keep_serving` writes `since` again when it is older than this."""
+
+ReadyCallback = Callable[[str, Mapping[str, str]], None]
+"""Called with a state, as a claim names it, and the labels of the task's token."""
 
 DEFAULT_NAMESPACE = "stateous"
 """Postgres: the schema that holds the tables when no namespace is given. It is not
@@ -258,7 +261,7 @@ class Store:
             threading.RLock() if url.startswith("sqlite") else nullcontext()
         )
         self._closed = False
-        self._on_ready: list[Callable[[str], None]] = []
+        self._on_ready: list[ReadyCallback] = []
         self.notices_on = False
         """Whether each change also writes its notice. Read when the store opens, and
         set by `migrate(notices=...)`."""
@@ -417,19 +420,19 @@ class Store:
             tx = Transaction(session, utc(now), namespace=self.namespace, notices=self.notices_on)
             yield tx
         # Committed: say which states have a task that can be claimed now.
-        for state in tx.readied:
+        for state, labels in tx.readied:
             for callback in list(self._on_ready):
                 try:
-                    callback(state)
+                    callback(state, labels)
                 except Exception as error:  # a hook must not fail the change
                     log.error(
                         "a task-ready callback failed (%s)",
                         " ".join(str(error).split()) or type(error).__name__,
                     )
 
-    def on_ready(self, callback: Callable[[str], None]) -> Callable[[], None]:
-        """Call `callback(state)` after each commit that makes a task of `state`
-        claimable. Returns the function that removes the callback."""
+    def on_ready(self, callback: ReadyCallback) -> Callable[[], None]:
+        """Call `callback(state, labels)` after each commit that makes a task of
+        `state` claimable. Returns the function that removes the callback."""
         self._on_ready.append(callback)
 
         def remove() -> None:
@@ -477,8 +480,9 @@ class Transaction:
         self._namespace = namespace
         self._notices = notices
         """Whether `notify` writes: the store's `notices_on`."""
-        self.readied: list[str] = []
-        """The states, as a claim names them, whose task became claimable here."""
+        self.readied: list[tuple[str, dict[str, str]]] = []
+        """The states, as a claim names them, whose task became claimable here, with
+        the labels of the task's token."""
         self._locks = session.get_bind().dialect.name == "postgresql"
         self._locked: set[str] = set()
         self._families: dict[str, str] = {}
@@ -568,15 +572,17 @@ class Transaction:
                 payload=payload,
                 state=row.state if state is None else state,
                 at=self.now,
+                labels=dict(row.labels),
             )
         )
         self._session.flush()
 
-    def ready(self, state: str) -> None:
-        """A task of `state` (`<workflow>/<state>` for a child) can be claimed once this
-        transaction commits."""
-        if state not in self.readied:
-            self.readied.append(state)
+    def ready(self, state: str, labels: Mapping[str, str]) -> None:
+        """A task of `state` (`<workflow>/<state>` for a child), of a token with
+        `labels`, can be claimed once this transaction commits."""
+        entry = (state, dict(labels))
+        if entry not in self.readied:
+            self.readied.append(entry)
 
     def next_notice_family(self, tried: Collection[str]) -> str | None:
         """The family of the oldest notice, of the families not in `tried`; None when

@@ -64,6 +64,7 @@ def upgrade() -> None:
         sa.Column("payload", sa.JSON(), nullable=True),
         sa.Column("state", sa.String(length=256), nullable=False),
         sa.Column("at", sa.DateTime(), nullable=False),
+        sa.Column("labels", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sqlite_autoincrement=True,
     )

@@ -189,3 +189,5 @@ class Notice(Base):
     payload: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     state: Mapped[str] = mapped_column(String(256))
     at: Mapped[datetime]
+    labels: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    """The token's labels."""

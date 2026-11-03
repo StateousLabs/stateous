@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Callable, Collection, Generator
+from collections.abc import Callable, Collection, Generator, Mapping
 from contextlib import contextmanager
 
 
@@ -18,7 +18,8 @@ class WaitingClaims:
 
     def __init__(
         self,
-        subscribe: Callable[[Callable[[str], None]], Callable[[], None]] | None = None,
+        subscribe: Callable[[Callable[[str, Mapping[str, str]], None]], Callable[[], None]]
+        | None = None,
     ) -> None:
         """`subscribe` is a control plane's `on_task_ready`. The set hears "ready"
         only while a claim waits, so an app that is made and dropped leaves nothing
@@ -28,14 +29,21 @@ class WaitingClaims:
         # Reentrant: a signal handler can call `close` on the thread that is inside
         # `waiting` now.
         self._lock = threading.RLock()
-        self._waiting: list[tuple[frozenset[str], asyncio.AbstractEventLoop, asyncio.Event]] = []
+        self._waiting: list[
+            tuple[frozenset[str], dict[str, str], asyncio.AbstractEventLoop, asyncio.Event]
+        ] = []
         self.closed = False
         """True after `close()`: a new wait ends at once."""
 
-    def ready(self, state: str) -> None:
-        """A task of `state` can be claimed: wake each claim that waits for it."""
+    def ready(self, state: str, labels: Mapping[str, str]) -> None:
+        """A task of `state`, of a token with `labels`, can be claimed: wake each claim
+        that waits for that state with labels that the token has."""
         with self._lock:
-            woken = [(loop, event) for states, loop, event in self._waiting if state in states]
+            woken = [
+                (loop, event)
+                for states, wanted, loop, event in self._waiting
+                if state in states and all(labels.get(k) == v for k, v in wanted.items())
+            ]
         for loop, event in woken:
             _wake(loop, event)
 
@@ -43,17 +51,19 @@ class WaitingClaims:
         """Wake every claim that waits, and end each later wait at once."""
         with self._lock:
             self.closed = True
-            woken = [(loop, event) for _, loop, event in self._waiting]
+            woken = [(loop, event) for _, _, loop, event in self._waiting]
         for loop, event in woken:
             _wake(loop, event)
 
     @contextmanager
-    def waiting(self, states: Collection[str]) -> Generator[asyncio.Event]:
-        """An event that a "ready" of one of `states` sets, while the block runs. Enter
-        it before the claim, so a task that comes between the claim and the wait is
-        not missed."""
+    def waiting(
+        self, states: Collection[str], labels: Mapping[str, str] | None = None
+    ) -> Generator[asyncio.Event]:
+        """An event that a "ready" of one of `states`, with each of `labels`, sets,
+        while the block runs. Enter it before the claim, so a task that comes between
+        the claim and the wait is not missed."""
         event = asyncio.Event()
-        entry = (frozenset(states), asyncio.get_running_loop(), event)
+        entry = (frozenset(states), dict(labels or {}), asyncio.get_running_loop(), event)
         with self._lock:
             self._waiting.append(entry)
             if self.subscribe is not None and self._unsubscribe is None:

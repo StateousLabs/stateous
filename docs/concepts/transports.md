@@ -34,7 +34,7 @@ Stateous ships two transports:
 
 For any other wire, `CallingTransport` needs one function: send a `Call`, give back its `Reply`. Both are plain JSON. On the control plane's side, `answer(plane, call)` gives the reply.
 
-**Claims that wait.** A claim can wait up to 30 seconds at the control plane for a task. The control plane wakes it when a task is ready. So a supervisor does not have to poll. `ControlPlane.on_task_ready` tells your own code when a task is ready, for example to publish to a queue.
+**Claims that wait.** A claim can wait up to 30 seconds at the control plane for a task. The control plane wakes it when a task is ready. So a supervisor does not have to poll. `ControlPlane.on_task_ready` tells your own code when a task is ready, with its state and its token's labels. Use it, for example, to publish to a queue for that tenant.
 
 ## Example
 

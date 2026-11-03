@@ -28,6 +28,7 @@ Some facts:
 
 - **At least once.** If the process stops before the delete is saved, the handler gets the notice again.
 - **In order for each token family.** A family is a top token and its child tokens. Between families there is no order.
+- **Labels.** `notice.labels` are the token's labels, so a handler can route a notice to its tenant.
 - **The id is stable.** `notice.id` is the same at each delivery. Use it as an idempotency key.
 - **A failing handler.** If the handler raises, its family's notices come again on the next call. The other families go on.
 - **Keep the handler short.** It runs inside a database transaction. Hand slow work to your own queue.

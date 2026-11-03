@@ -97,6 +97,7 @@ erDiagram
         json payload
         string state
         datetime at
+        json labels
     }
     stateous_version {
         string version_num PK

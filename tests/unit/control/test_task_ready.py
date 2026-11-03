@@ -23,7 +23,7 @@ def plane(tmp_path: Path) -> Iterator[ControlPlane]:
 
 def heard(plane: ControlPlane) -> list[str]:
     states: list[str] = []
-    plane.on_task_ready(states.append)
+    plane.on_task_ready(lambda state, labels: states.append(state))
     return states
 
 
@@ -78,7 +78,7 @@ def test_a_child_task_is_named_as_a_claim_names_it(tmp_path: Path) -> None:
 
 def test_the_returned_function_removes_the_callback(plane: ControlPlane) -> None:
     states: list[str] = []
-    remove = plane.on_task_ready(states.append)
+    remove = plane.on_task_ready(lambda state, labels: states.append(state))
     remove()
 
     plane.start("T-1", TICKET)
@@ -89,7 +89,7 @@ def test_the_returned_function_removes_the_callback(plane: ControlPlane) -> None
 def test_a_failing_ready_callback_does_not_fail_the_call(
     plane: ControlPlane, caplog: pytest.LogCaptureFixture
 ) -> None:
-    def broken(state: str) -> None:
+    def broken(state: str, labels: object) -> None:
         raise RuntimeError("the queue is down")
 
     plane.on_task_ready(broken)

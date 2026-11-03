@@ -150,3 +150,28 @@ def test_a_stop_waits_at_most_idle_for_the_claim_in_flight(tmp_path: Path) -> No
             return time.monotonic() - stopped
 
     assert asyncio.run(main()) < 3 + 1.5
+
+
+def test_a_waiting_claim_wakes_only_for_its_labels(tmp_path: Path) -> None:
+    async def main() -> tuple[int, float, str]:
+        with ControlPlane(sdlc(), database=sqlite_url(tmp_path / "w.db"), migrate=True) as plane:
+            async with http_client(plane) as client:
+                started = time.monotonic()
+                body = {
+                    "supervisor": "a",
+                    "states": ["coding"],
+                    "wait": 1.5,
+                    "labels": {"user": "a"},
+                }
+                claiming = asyncio.create_task(client.post("/tasks/claim", json=body))
+                await asyncio.sleep(0.2)
+                await asyncio.to_thread(plane.start, "T-B", TICKET, labels={"user": "b"})
+                answer = await claiming
+                took = time.monotonic() - started
+                return answer.status_code, took, plane.get("T-B").state
+
+    status, took, state = asyncio.run(main())
+
+    assert status == 204
+    assert took >= 1.4  # not woken by b's task
+    assert state == "coding"

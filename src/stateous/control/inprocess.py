@@ -39,7 +39,7 @@ class InProcess(CallingTransport):
         """A task of one of `states`, or None after up to `wait` seconds."""
         if wait <= 0:
             return await super().claim(supervisor, states, request=request, labels=labels)
-        with self._waiting.waiting(states) as ready:
+        with self._waiting.waiting(states, labels) as ready:
             grant = await super().claim(supervisor, states, request=request, labels=labels)
             if grant is not None:
                 return grant

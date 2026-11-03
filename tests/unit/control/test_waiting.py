@@ -2,7 +2,7 @@
 
 import asyncio
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from stateous.control.waiting import WaitingClaims
 
@@ -25,9 +25,9 @@ def test_close_does_not_deadlock_while_the_same_thread_holds_the_set() -> None:
 
 
 def test_the_set_hears_ready_only_while_claims_wait() -> None:
-    subscribed: list[Callable[[str], None]] = []
+    subscribed: list[Callable[[str, Mapping[str, str]], None]] = []
 
-    def subscribe(callback: Callable[[str], None]) -> Callable[[], None]:
+    def subscribe(callback: Callable[[str, Mapping[str, str]], None]) -> Callable[[], None]:
         subscribed.append(callback)
         return lambda: subscribed.remove(callback)
 
@@ -42,3 +42,18 @@ def test_the_set_hears_ready_only_while_claims_wait() -> None:
         assert subscribed == []
 
     asyncio.run(main())
+
+
+def test_a_waiter_with_labels_wakes_only_for_matching_labels() -> None:
+    waiting = WaitingClaims()
+
+    async def main() -> tuple[bool, bool]:
+        with waiting.waiting(["coding"], {"user": "a"}) as ready:
+            waiting.ready("coding", {"user": "b"})
+            await asyncio.sleep(0.05)
+            other = ready.is_set()
+            waiting.ready("coding", {"user": "a", "project": "p"})
+            await asyncio.sleep(0.05)
+            return other, ready.is_set()
+
+    assert asyncio.run(main()) == (False, True)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -41,6 +41,8 @@ class Notice:
     """For `event`: the state that the token moves to (`__end__` at the end). Else the
     state that the token is in."""
     at: datetime
+    labels: dict[str, str] = field(default_factory=dict[str, str])
+    """The token's labels."""
 
 
 class _HandlerFailed(Exception):
@@ -98,4 +100,5 @@ def _notice(row: tables.Notice, workflow: str, namespace: str | None) -> Notice:
         payload=None if row.payload is None else dict(row.payload),
         state=row.state,
         at=row.at.replace(tzinfo=UTC),
+        labels=cast("dict[str, str]", dict(row.labels)),
     )

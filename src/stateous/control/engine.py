@@ -191,9 +191,11 @@ class Engine:
         """The graph document of the main workflow."""
         return self.graph.document
 
-    def on_task_ready(self, callback: Callable[[str], None]) -> Callable[[], None]:
-        """Call `callback(state)` after each commit that makes a task of `state`
-        claimable. Returns the function that removes it."""
+    def on_task_ready(
+        self, callback: Callable[[str, Mapping[str, str]], None]
+    ) -> Callable[[], None]:
+        """Call `callback(state, labels)` after each commit that makes a task of
+        `state` claimable. Returns the function that removes it."""
         return self.store.on_ready(callback)
 
     def health(self) -> dict[str, Any]:
@@ -308,7 +310,7 @@ class Engine:
                 timer.due_at += tx.now - max(paused_at, timer.set_at)
             member.status = "active"
             tx.append(member.token, "resumed")
-            tx.ready(_claim_name(member, member.state))  # its queued task, if it has one
+            tx.ready(_claim_name(member, member.state), member.labels)  # its queued task, if any
             held.extend((event, member) for event in _held_events(entries))
         for event, member in sorted(held, key=_arrival):
             self._replay(tx, member, event)
@@ -862,7 +864,7 @@ class Engine:
         if task.attempt <= graph.state(task.state).retries:
             task.status, task.claimed_by = "queued", None
             tx.append(row.token, "task_retrying", task=task.id, attempt=task.attempt + 1)
-            tx.ready(_claim_name(row, task.state))
+            tx.ready(_claim_name(row, task.state), row.labels)
             # The next attempt runs the routine again, and it sets its own timers.
             # The state's timeout stays: it covers every attempt.
             for timer in tx.pending_timers(row.token):
@@ -1072,7 +1074,7 @@ class Engine:
         if not spec.parallel:
             task = tx.queue_task(row.token, state, visit)
             tx.append(row.token, "task_queued", task=task.id, state=state)
-            tx.ready(_claim_name(row, state))
+            tx.ready(_claim_name(row, state), row.labels)
         if spec.timeout is not None:
             self._set_timer(tx, row, TIMEOUT, None, parse_duration(spec.timeout), kind="timeout")
         inputs = {key: row.context[key] for key in spec.inputs if key in row.context}

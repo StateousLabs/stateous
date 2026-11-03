@@ -28,7 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from stateous.control import checks
 from stateous.control.checks import MAX_BODY, MAX_DEPTH, MAX_TASK, Problem
 from stateous.control.clock import LOST
-from stateous.control.engine import Fired, HistoryEntry, Token
+from stateous.control.engine import Fired, HistoryEntry, Token, check_labels
 from stateous.control.errors import (
     ChildToken,
     ControlPlaneError,
@@ -73,7 +73,9 @@ class Served(Protocol):
     @property
     def lost(self) -> bool: ...
 
-    def on_task_ready(self, callback: Callable[[str], None]) -> Callable[[], None]: ...
+    def on_task_ready(
+        self, callback: Callable[[str, Mapping[str, str]], None]
+    ) -> Callable[[], None]: ...
 
     def start(
         self, token: str, context: dict[str, Any], *, labels: Mapping[str, str] | None = None
@@ -206,7 +208,7 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         states = checks.state_names(body.get("states"), "states")
         request_id = checks.request_id(body.get("request"))
         wait = checks.claim_wait(body.get("wait"))
-        labels = body.get("labels")
+        labels = check_labels(body.get("labels"))
 
         def claimed() -> TaskGrant | None:
             return engine.claim(supervisor, states, request=request_id, labels=labels)
@@ -214,7 +216,7 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         if wait == 0:
             grant = await run_in_threadpool(claimed)
         else:
-            with waiting.waiting(states) as ready:
+            with waiting.waiting(states, labels) as ready:
                 grant = await run_in_threadpool(claimed)
                 if grant is None and await _woken(ready, request, wait):
                     grant = await run_in_threadpool(claimed)
