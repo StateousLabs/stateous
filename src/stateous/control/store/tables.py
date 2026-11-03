@@ -64,6 +64,20 @@ class Token(Base):
     """The token whose parallel state started this one; None for a top token."""
     workflow: Mapped[str | None] = mapped_column(String(64), default=None)
     """The child workflow of a child token; None for a token of the main workflow."""
+    labels: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    """The token's labels, as they were at start. `token_labels` has them as rows, to
+    filter by."""
+
+
+class TokenLabel(Base):
+    """One label of a token, for a claim or a list that filters by labels."""
+
+    __tablename__ = "token_labels"
+    __table_args__ = (Index("token_labels_pair", "key", "value"),)
+
+    token: Mapped[str] = mapped_column(String(256), primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(256))
 
 
 class Task(Base):

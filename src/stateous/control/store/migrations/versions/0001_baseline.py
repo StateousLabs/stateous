@@ -115,14 +115,25 @@ def upgrade() -> None:
         sa.Column("entered_at", sa.DateTime(), nullable=False),
         sa.Column("parent", sa.String(length=256), nullable=True),
         sa.Column("workflow", sa.String(length=64), nullable=True),
+        sa.Column("labels", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("token"),
     )
+    op.create_table(
+        "token_labels",
+        sa.Column("token", sa.String(length=256), nullable=False),
+        sa.Column("key", sa.String(length=64), nullable=False),
+        sa.Column("value", sa.String(length=256), nullable=False),
+        sa.PrimaryKeyConstraint("token", "key"),
+    )
+    op.create_index("token_labels_pair", "token_labels", ["key", "value"], unique=False)
     op.create_index("tokens_folded", "tokens", [sa.text("lower(token)")], unique=True)
     op.create_index("tokens_parent", "tokens", ["parent"], unique=False)
 
 
 def downgrade() -> None:
     """Drop everything that `upgrade` made."""
+    op.drop_index("token_labels_pair", table_name="token_labels")
+    op.drop_table("token_labels")
     op.drop_index("tokens_parent", table_name="tokens")
     op.drop_index("tokens_folded", table_name="tokens")
     op.drop_table("tokens")

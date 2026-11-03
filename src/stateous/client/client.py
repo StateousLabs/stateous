@@ -14,6 +14,7 @@ of the control plane: it speaks only HTTP."""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 from urllib.parse import quote
 
@@ -73,12 +74,20 @@ class Client:
     ```
     """
 
-    def __init__(self, url: str, *, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        timeout: float = 30.0,
+        headers: Callable[[], Mapping[str, str]] | None = None,
+    ) -> None:
         """Make a client for one control plane.
 
         Args:
             url: The control plane's URL, for example `http://127.0.0.1:8080`.
             timeout: How long to wait for each answer, in seconds.
+            headers: Called for each request: headers to send, for example a bearer
+                token for a gateway.
 
         Raises:
             ClientError: `url` is not a valid URL.
@@ -92,18 +101,29 @@ class Client:
         if problem is not None:
             raise ClientError(_bad_host(self.url, problem))
         self._http = http
+        self._headers = headers
 
-    def start(self, token: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def start(
+        self,
+        token: str,
+        context: dict[str, Any] | None = None,
+        *,
+        labels: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Start a token. If the token exists, it is returned unchanged.
 
         Args:
             token: The token's id, for example `TICKET-1`.
             context: The token's context. None: `{}`.
+            labels: The token's labels, for example `{"user": "u42"}`. They never change.
 
         Returns:
             The token.
         """
-        return self._object("POST", "/tokens", {"token": token, "context": context or {}})
+        body: dict[str, Any] = {"token": token, "context": context or {}}
+        if labels:
+            body["labels"] = dict(labels)
+        return self._object("POST", "/tokens", body)
 
     def get(self, token: str) -> dict[str, Any]:
         """Read one token.
@@ -121,7 +141,12 @@ class Client:
         return self._object("GET", f"/tokens/{_segment(token)}")
 
     def tokens(
-        self, *, status: str | None = None, parent: str | None = None, limit: int | None = None
+        self,
+        *,
+        status: str | None = None,
+        parent: str | None = None,
+        limit: int | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """List the tokens, the most recently moved first.
 
@@ -129,17 +154,19 @@ class Client:
             status: Only the tokens with this status, for example `"active"`.
             parent: Only the children of this token.
             limit: The most tokens to return: 1 to 1000. None: 100.
+            labels: Only the tokens that have each of these labels.
 
         Returns:
             The tokens.
         """
-        params: dict[str, str] = {}
+        params: list[tuple[str, str]] = []
         if status is not None:
-            params["status"] = status
+            params.append(("status", status))
         if parent is not None:
-            params["parent"] = parent
+            params.append(("parent", parent))
         if limit is not None:
-            params["limit"] = str(limit)
+            params.append(("limit", str(limit)))
+        params.extend(("label", f"{key}={value}") for key, value in (labels or {}).items())
         return self._list("GET", "/tokens", params=params)
 
     def history(self, token: str) -> list[dict[str, Any]]:
@@ -281,7 +308,7 @@ class Client:
         return cast("dict[str, Any]", answer)
 
     def _list(
-        self, method: str, path: str, *, params: dict[str, str] | None = None
+        self, method: str, path: str, *, params: list[tuple[str, str]] | None = None
     ) -> list[dict[str, Any]]:
         answer = self._call(method, path, params=params)
         if not isinstance(answer, list):
@@ -295,10 +322,12 @@ class Client:
         body: dict[str, Any] | None = None,
         *,
         headers: dict[str, str] | None = None,
-        params: dict[str, str] | None = None,
+        params: list[tuple[str, str]] | None = None,
     ) -> Any:
+        sent = {**(dict(self._headers()) if self._headers is not None else {}), **(headers or {})}
         try:
-            response = self._http.request(method, path, json=body, headers=headers, params=params)
+            query = None if params is None else httpx2.QueryParams(tuple(params))
+            response = self._http.request(method, path, json=body, headers=sent, params=query)
         except httpx2.InvalidURL as error:
             raise ClientError(_not_a_url(self.url + path, error)) from None
         except httpx2.TransportError as error:

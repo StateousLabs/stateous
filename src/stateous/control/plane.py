@@ -12,7 +12,7 @@ import asyncio
 import json
 import logging
 import threading
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
@@ -111,19 +111,34 @@ class ControlPlane:
 
     # ── tokens ──────────────────────────────────────────────────────────
 
-    def start(self, token: str, context: dict[str, Any]) -> Token:
-        """Start a token. To start a token that exists returns it, unchanged."""
-        return self._engine.start(token, context)
+    def start(
+        self,
+        token: str,
+        context: dict[str, Any],
+        *,
+        labels: Mapping[str, str] | None = None,
+        caller: object = None,
+    ) -> Token:
+        """Start a token. To start a token that exists returns it, unchanged. `labels`
+        (at most 16) never change after the start; a child token gets them too."""
+        return self._engine.start(token, context, labels=labels)
 
     def get(self, token: str) -> Token:
         """The token. Raises `TokenNotFound`."""
         return self._engine.get(token)
 
     def tokens(
-        self, *, status: str | None = None, limit: int = 100, parent: str | None = None
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        parent: str | None = None,
+        labels: Mapping[str, str] | None = None,
+        caller: object = None,
     ) -> list[Token]:
-        """Tokens, the most recently moved first. With `parent`: only its children."""
-        return self._engine.tokens(status=status, limit=limit, parent=parent)
+        """Tokens, the most recently moved first. With `parent`: only its children.
+        With `labels`: only the tokens that have each of them."""
+        return self._engine.tokens(status=status, limit=limit, parent=parent, labels=labels)
 
     def history(self, token: str) -> list[HistoryEntry]:
         """The ledger of the token, oldest first."""

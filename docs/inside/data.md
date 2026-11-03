@@ -17,6 +17,7 @@ erDiagram
     tokens |o--o{ tokens : "parent, the child tokens"
     tasks |o--o| claims : "task_id, the last claim"
     tokens ||--o{ notices : "token, changes for your handler"
+    tokens ||--o{ token_labels : "token, its labels as rows"
 
     tokens {
         string token PK
@@ -27,6 +28,12 @@ erDiagram
         datetime entered_at
         string parent
         string workflow
+        json labels
+    }
+    token_labels {
+        string token PK
+        string key PK
+        string value
     }
     ledger {
         string token PK
@@ -102,6 +109,7 @@ erDiagram
 | `tokens` | Where each token is now: its state, its status, its visit of the state, and its context. A child token has `parent` and `workflow`. | Start a token, Fire an event, Report an outcome, Timer fires, Lease expiry, Pause and resume, Cancel, Join. |
 | `tasks` | One row each time a token enters a state that is not parallel. `attempt` counts the claims. `lease_until` is set while a supervisor holds the task. | Start a token, Fire an event, Claim a task, Heartbeat, Report an outcome, Lease expiry, Timer fires, Cancel, Join. |
 | `timers` | The timeout of a state (`kind` is `timeout`), and the timers of routines (`kind` is `timer`). | Start a token, Fire an event, Report an outcome, Lease expiry, Timer fires, Pause and resume, Cancel, Join. |
+| `token_labels` | One row for each label of a token, so a claim or a list can filter by labels. `tokens.labels` has the same labels. | Start a token, Join (a child copies its parent's labels). |
 | `memory` | The routine's memory: one key and its value, for one token and one state. The rows of a token are deleted when it ends. | Report an outcome (memory writes), and the end of a token. |
 | `claims` | The last claim of each supervisor: the request id, and the task and attempt that it got. An empty `task_id` means that the claim got no task. | Claim a task. |
 | `control_plane` | One row. The structure and the checksum of the graph on record, and the control plane that holds the database now. `notices` says if each change also writes a notice. | Serve, and its clock. |

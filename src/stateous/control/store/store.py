@@ -24,6 +24,7 @@ from sqlalchemy import (
     create_engine,
     delete,
     event,
+    exists,
     false,
     func,
     or_,
@@ -93,6 +94,18 @@ DEFAULT_NAMESPACE = "stateous"
 `public`, so the tables never meet an application's own tables."""
 
 _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,62}")
+
+
+def with_labels(labels: dict[str, str] | None) -> list[ColumnElement[bool]]:
+    """One clause for each pair of `labels`: the token has that label."""
+    return [
+        exists().where(
+            tables.TokenLabel.token == tables.Token.token,
+            tables.TokenLabel.key == key,
+            tables.TokenLabel.value == value,
+        )
+        for key, value in (labels or {}).items()
+    ]
 
 
 def check_namespace(name: str) -> str:
@@ -662,16 +675,29 @@ class Transaction:
         self._session.add(row)
         self._session.flush()
 
+    def set_labels(self, token: str, labels: dict[str, str]) -> None:
+        """The rows of a new token's labels."""
+        for key, value in labels.items():
+            self._session.add(tables.TokenLabel(token=token, key=key, value=value))
+        self._session.flush()
+
     def find_tokens(
-        self, status: str | None, limit: int, *, parent: str | None = None
+        self,
+        status: str | None,
+        limit: int,
+        *,
+        parent: str | None = None,
+        labels: dict[str, str] | None = None,
     ) -> list[tables.Token]:
         """Tokens, the most recently moved first; only those of `status`, if given; only
-        the children of `parent`, if given."""
+        the children of `parent`, if given; only those with each of `labels`."""
         query = select(tables.Token)
         if status is not None:
             query = query.where(tables.Token.status == status)
         if parent is not None:
             query = query.where(tables.Token.parent == parent)
+        for clause in with_labels(labels):
+            query = query.where(clause)
         query = query.order_by(tables.Token.entered_at.desc(), tables.Token.token).limit(limit)
         return list(self._session.scalars(query))
 

@@ -198,7 +198,7 @@ A token's line has the form `TICKET-1: coding, active`. From the second visit to
 ### stateous token start
 
 ```text
-stateous token start ID [CONTEXT_JSON] [--url URL]
+stateous token start ID [CONTEXT_JSON] [--label KEY=VALUE ...] [--url URL]
 ```
 
 It starts a token, and prints its line. If the token exists, it shows that token and does not start a second one.
@@ -207,6 +207,7 @@ It starts a token, and prints its line. If the token exists, it shows that token
 |---|---|
 | `ID` | The token's id, for example `TICKET-1`. |
 | `CONTEXT_JSON` | The token's context, as a JSON object. The default is `{}`. |
+| `--label KEY=VALUE` | A label of the token, for example `user=u42`. Give it once for each label. Labels never change after the start. |
 | `--url URL` | The control plane's URL. |
 
 ```bash

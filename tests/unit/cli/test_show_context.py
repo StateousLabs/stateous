@@ -89,3 +89,35 @@ def test_json_needs_a_token_id() -> None:
 
     assert result.exit_code == 1
     assert "--json needs a token ID" in result.output
+
+
+def test_token_show_prints_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Labeled(OneToken):
+        def get(self, token: str) -> dict[str, Any]:
+            return {**super().get(token), "labels": {"user": "u1", "project": "p7"}}
+
+    monkeypatch.setattr(tokens, "Client", Labeled)
+
+    result = CliRunner().invoke(app, ["token", "show", "T-1"])
+
+    assert "labels: project=p7, user=u1" in result.output
+
+
+def test_token_start_takes_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    started: list[dict[str, str] | None] = []
+
+    class Starting(OneToken):
+        def start(
+            self, token: str, context: dict[str, Any], *, labels: dict[str, str] | None = None
+        ) -> dict[str, Any]:
+            started.append(labels)
+            return self.get(token)
+
+    monkeypatch.setattr(tokens, "Client", Starting)
+
+    result = CliRunner().invoke(
+        app, ["token", "start", "T-1", "--label", "user=u1", "--label", "project=p7"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert started == [{"user": "u1", "project": "p7"}]

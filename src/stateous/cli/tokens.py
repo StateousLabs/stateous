@@ -36,12 +36,19 @@ def start(
         str | None,
         typer.Argument(metavar="CONTEXT_JSON", help="The token's context: a JSON object."),
     ] = None,
+    label: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--label", metavar="KEY=VALUE", help="A label of the token. Give it once for each."
+        ),
+    ] = None,
     url: Url = DEFAULT_URL,
 ) -> None:
     """Start a token. Starting one that exists shows it."""
     given = {} if context is None else json_object(context, "CONTEXT_JSON")
+    labels = label_pairs(label or [])
     with Client(url) as client:
-        typer.echo(token_line(client.start(token, given)))
+        typer.echo(token_line(client.start(token, given, labels=labels)))
 
 
 @token_app.command("fire")
@@ -108,6 +115,9 @@ def show(
             typer.echo(json.dumps(whole, indent=2))
             return
         typer.echo(token_line(found_token))
+        if labels := found_token.get("labels"):
+            shown = ", ".join(f"{key}={value}" for key, value in sorted(labels.items()))
+            typer.echo(f"labels: {shown}")
         for line in context_lines(found_token["context"]):
             typer.echo(line)
         for child in children:
@@ -155,6 +165,17 @@ def token_line(token: dict[str, Any]) -> str:
     visit = token.get("visit", 1)
     shown = f" (visit {visit})" if isinstance(visit, int) and visit > 1 else ""
     return f"{token['token']}: {_named(str(token['state']))}{shown}, {token['status']}"
+
+
+def label_pairs(given: list[str]) -> dict[str, str]:
+    """`--label KEY=VALUE`, each once, as a dict."""
+    found: dict[str, str] = {}
+    for pair in given:
+        key, equals, value = pair.partition("=")
+        if not equals:
+            raise CommandError(f"--label {pair!r} is not KEY=VALUE, for example user=u42")
+        found[key] = value
+    return found
 
 
 def context_lines(context: dict[str, Any]) -> list[str]:

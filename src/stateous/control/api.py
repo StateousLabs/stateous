@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
@@ -75,12 +75,19 @@ class Served(Protocol):
 
     def on_task_ready(self, callback: Callable[[str], None]) -> Callable[[], None]: ...
 
-    def start(self, token: str, context: dict[str, Any]) -> Token: ...
+    def start(
+        self, token: str, context: dict[str, Any], *, labels: Mapping[str, str] | None = None
+    ) -> Token: ...
 
     def get(self, token: str) -> Token: ...
 
     def tokens(
-        self, *, status: str | None = None, limit: int = 100, parent: str | None = None
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        parent: str | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> list[Token]: ...
 
     def history(self, token: str) -> list[HistoryEntry]: ...
@@ -137,8 +144,9 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         body = await body_of(request)
         token = token_id(body.get("token"))
         context = _object(body.get("context"), "context", "invalid_context") or {}
+        labels = body.get("labels")
         existed = await run_in_threadpool(lambda: _exists(engine, token))
-        started = await run_in_threadpool(lambda: engine.start(token, context))
+        started = await run_in_threadpool(lambda: engine.start(token, context, labels=labels))
         return JSONResponse(token_json(started), status_code=200 if existed else 201)
 
     async def list_tokens(request: Request) -> Response:
@@ -147,8 +155,9 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
             raise Problem(422, f"'status' is one of: {', '.join(STATUSES)}", "invalid_argument")
         limit = _limit(request.query_params.get("limit"))
         parent = _parent(request.query_params.get("parent"))
+        labels = _label_filter(request.query_params.getlist("label"))
         found = await run_in_threadpool(
-            lambda: engine.tokens(status=status, limit=limit, parent=parent)
+            lambda: engine.tokens(status=status, limit=limit, parent=parent, labels=labels)
         )
         return JSONResponse([token_json(token) for token in found])
 
@@ -302,7 +311,20 @@ def token_json(token: Token) -> dict[str, Any]:
     }
     if token.parent is not None:
         out["parent"] = token.parent
+    if token.labels:
+        out["labels"] = token.labels
     return out
+
+
+def _label_filter(values: list[str]) -> dict[str, str]:
+    """`?label=key=value`, given once for each label, as a dict."""
+    found: dict[str, str] = {}
+    for value in values:
+        key, equals, wanted = value.partition("=")
+        if not equals:
+            raise Problem(422, "'label' is key=value, for example user=u42", "invalid_argument")
+        found[key] = wanted
+    return found
 
 
 def entry_json(entry: HistoryEntry) -> dict[str, Any]:

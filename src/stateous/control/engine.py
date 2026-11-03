@@ -29,9 +29,9 @@ import functools
 import json
 import logging
 import re
-from collections.abc import Callable, Collection, Generator
+from collections.abc import Callable, Collection, Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 
@@ -127,6 +127,8 @@ class Token:
     entered_at: datetime
     parent: str | None = None
     """The token whose parallel state started this one; None for a top token."""
+    labels: dict[str, str] = field(default_factory=dict[str, str])
+    """The token's labels: fixed at start; a child token has its parent's."""
 
 
 @dataclass(frozen=True)
@@ -201,9 +203,12 @@ class Engine:
     # ── tokens ──────────────────────────────────────────────────────────
 
     @_retried
-    def start(self, token: str, context: dict[str, Any]) -> Token:
+    def start(
+        self, token: str, context: dict[str, Any], *, labels: Mapping[str, str] | None = None
+    ) -> Token:
         """Start a token: it leaves START for the state its context leads to. To
-        start a token that exists returns it, unchanged."""
+        start a token that exists returns it, unchanged (its first labels too)."""
+        given = check_labels(labels)
         if not re.fullmatch(TOKEN_ID_PATTERN, token):
             raise InvalidTokenId(
                 "a token id is a letter or digit, then up to 127 letters, digits, '.', '_' or '-'"
@@ -216,7 +221,7 @@ class Engine:
                         f"a token {taken!r} already exists; token ids are compared "
                         "without regard to case"
                     )
-                row = self._create(tx, token, context, self.graph)
+                row = self._create(tx, token, context, self.graph, labels=given)
             return _token(row)
 
     @_retried
@@ -226,13 +231,21 @@ class Engine:
 
     @_retried
     def tokens(
-        self, *, status: str | None = None, limit: int = 100, parent: str | None = None
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        parent: str | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> list[Token]:
-        """Tokens, the most recently moved first. With `parent`: only its children."""
+        """Tokens, the most recently moved first. With `parent`: only its children.
+        With `labels`: only the tokens that have each of them."""
         if not 0 < limit <= MOST_TOKENS:
             raise InvalidArgument(f"a listing returns 1 to {MOST_TOKENS} tokens, not {limit}")
+        wanted = check_labels(labels)
         with self._transaction() as tx:
-            return [_token(row) for row in tx.find_tokens(status, limit, parent=parent)]
+            found = tx.find_tokens(status, limit, parent=parent, labels=wanted)
+            return [_token(row) for row in found]
 
     @_retried
     def history(self, token: str) -> list[HistoryEntry]:
@@ -937,10 +950,11 @@ class Engine:
         graph: Graph,
         *,
         parent: tables.Token | None = None,
+        labels: dict[str, str] | None = None,
     ) -> tables.Token:
         """A new token of `graph`'s workflow, in the state that its context leads to.
-        With `parent`, it is a child of the parent's parallel state, and it takes the
-        lock of the parent's family."""
+        With `parent`, it is a child of the parent's parallel state, it takes the lock
+        of the parent's family, and it gets the parent's labels."""
         values = graph.with_defaults(context)
         if problem := _not_json(values):
             raise InvalidContext(f"the context is not JSON: {problem}")
@@ -953,15 +967,20 @@ class Engine:
             raise InvalidContext(problem)
         if parent is not None:
             tx.adopt(token, parent.token)
-        family: dict[str, str] = {} if parent is None else {"parent": parent.token}
+        family: dict[str, Any] = {} if parent is None else {"parent": parent.token}
+        kept = dict(parent.labels) if parent is not None else dict(labels or {})
+        if kept:
+            family["labels"] = kept
         tx.append(token, "started", context=values, **family)
         row = tables.Token(
             token=token, state=START, status="active", visit=0, context=values,
             entered_at=tx.now,
             parent=None if parent is None else parent.token,
             workflow=None if parent is None else graph.name,
+            labels=kept,
         )  # fmt: skip
         tx.add_token(row)
+        tx.set_labels(token, kept)
         # Recorded as any other move: the history shows where the token began, and the
         # first state's routine is told that `__started__` brought the token there.
         tx.append(token, "event_accepted", event=STARTED, payload=None, state=START)
@@ -1208,7 +1227,39 @@ def _token(row: tables.Token) -> Token:
         context=dict(row.context),
         entered_at=row.entered_at.replace(tzinfo=UTC),
         parent=row.parent,
+        labels=cast("dict[str, str]", dict(row.labels)),
     )
+
+
+MAX_LABELS = 16
+"""The most labels of one token."""
+LABEL_KEY = r"[a-z][a-z0-9_.-]{0,63}"
+"""A label's key: a lower-case letter, then up to 63 lower-case letters, digits, `_`,
+`.` or `-`."""
+MAX_LABEL_VALUE = 256
+
+
+def check_labels(labels: Any) -> dict[str, str]:
+    """`labels` as a dict, if they are labels; else `InvalidArgument`. None is `{}`."""
+    if labels is None:
+        return {}
+    if not isinstance(labels, Mapping):
+        raise InvalidArgument("'labels' is an object of string keys and string values")
+    pairs = cast("Mapping[Any, Any]", labels)
+    if len(pairs) > MAX_LABELS:
+        raise InvalidArgument(f"a token has at most {MAX_LABELS} labels, not {len(pairs)}")
+    for key, value in pairs.items():
+        if not isinstance(key, str) or not re.fullmatch(LABEL_KEY, key):
+            raise InvalidArgument(
+                f"the label key {key!r} is not a lower-case letter, then up to 63 "
+                "lower-case letters, digits, '_', '.' or '-'"
+            )
+        if not isinstance(value, str) or not 1 <= len(value) <= MAX_LABEL_VALUE:
+            raise InvalidArgument(
+                f"the label {key!r} has a value that is not a string of 1 to "
+                f"{MAX_LABEL_VALUE} characters"
+            )
+    return {str(key): str(value) for key, value in pairs.items()}
 
 
 def _claim_name(row: tables.Token, state: str) -> str:

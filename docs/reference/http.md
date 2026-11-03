@@ -50,8 +50,9 @@ Start a token.
 |---|---|
 | `token` | The token's id: a letter or a digit, then up to 127 letters, digits, `.`, `_` or `-`. Required. |
 | `context` | The token's context, as a JSON object. The default is `{}`. |
+| `labels` | The token's labels: an object of at most 16 string pairs, for example `{"user": "u42"}`. Optional. A key is a lower-case letter, then up to 63 lower-case letters, digits, `_`, `.` or `-`. A value has 1 to 256 characters. |
 
-The answer is the token, with `201`. If the token exists, the answer is that token, unchanged, with `200`.
+The answer is the token, with `201`. If the token exists, the answer is that token, unchanged, with `200`. Its first labels stay. A token with labels has the field `labels`, and a child token has its parent's labels.
 
 ### `GET /tokens`
 
@@ -62,6 +63,7 @@ List the tokens, the most recently moved first. The answer is a list of tokens.
 | `status` | Only the tokens with this status. |
 | `parent` | Only the children of this token, for example `GET /tokens?parent=<id>`. |
 | `limit` | The most tokens in the answer: 1 to 1000. The default is 100. |
+| `label` | Only the tokens with this label, as `key=value`. Give it once for each label, for example `?label=user=u42&label=project=p7`. |
 
 ### `GET /tokens/{id}`
 

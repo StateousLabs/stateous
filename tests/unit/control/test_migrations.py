@@ -124,8 +124,8 @@ def insert_a_token(url: str) -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "INSERT INTO tokens (token, state, status, visit, context, entered_at) "
-                "VALUES ('T-1', 'coding', 'active', 1, '{}', '2026-10-06 09:00:00')"
+                "INSERT INTO tokens (token, state, status, visit, context, entered_at, labels) "
+                "VALUES ('T-1', 'coding', 'active', 1, '{}', '2026-10-06 09:00:00', '{}')"
             )
         )
     engine.dispose()
@@ -144,7 +144,7 @@ def test_a_new_database_is_made_at_the_newest_revision(tmp_path: Path) -> None:
     assert version_of(url) == head()
     assert table_names(url) == [
         "claims", "control_plane", "ledger", "memory", "notices", "stateous_version", "tasks",
-        "timers", "tokens",
+        "timers", "token_labels", "tokens",
     ]  # fmt: skip
 
 
