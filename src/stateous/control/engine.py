@@ -61,6 +61,7 @@ from stateous.control.graph import (
     Graph,
     TransitionSpec,
 )
+from stateous.control.scope import public_id
 from stateous.control.store import Store, Transaction, tables
 from stateous.model.durations import duration_problem, parse_duration
 from stateous.model.guards import GuardInput, evaluate
@@ -211,7 +212,7 @@ class Engine:
         """Start a token: it leaves START for the state its context leads to. To
         start a token that exists returns it, unchanged (its first labels too)."""
         given = check_labels(labels)
-        if not re.fullmatch(TOKEN_ID_PATTERN, token):
+        if not re.fullmatch(TOKEN_ID_PATTERN, public_id(token)):
             raise InvalidTokenId(
                 "a token id is a letter or digit, then up to 127 letters, digits, '.', '_' or '-'"
             )
@@ -220,7 +221,7 @@ class Engine:
             if row is None:
                 if (taken := tx.token_folded(token)) is not None:
                     raise InvalidTokenId(
-                        f"a token {taken!r} already exists; token ids are compared "
+                        f"a token {public_id(taken)!r} already exists; token ids are compared "
                         "without regard to case"
                     )
                 row = self._create(tx, token, context, self.graph, labels=given)
@@ -269,7 +270,8 @@ class Engine:
             self._refuse_child(tx, row, "pause")
             if row.status != "active":
                 raise TokenNotActive(
-                    f"token {token!r} is {row.status}; only an active token can be paused"
+                    f"token {public_id(token)!r} is {row.status}; "
+                    "only an active token can be paused"
                 )
             self._pause(tx, row)
             return _token(row)
@@ -292,7 +294,8 @@ class Engine:
             self._refuse_child(tx, row, "resume")
             if row.status != "paused":
                 raise TokenNotActive(
-                    f"token {token!r} is {row.status}; only a paused token can be resumed"
+                    f"token {public_id(token)!r} is {row.status}; "
+                    "only a paused token can be resumed"
                 )
             self._resume(tx, row)
             return _token(row)
@@ -338,8 +341,9 @@ class Engine:
             top = above
         done = {"pause": "paused", "resume": "resumed", "cancel": "cancelled"}[verb]
         raise ChildToken(
-            f"token {row.token!r} is a child of {row.parent!r}: it is part of its parent's "
-            f"work, and cannot be {done} on its own; {verb} {top.token!r} instead"
+            f"token {public_id(row.token)!r} is a child of {public_id(row.parent or '')!r}: "
+            f"it is part of its parent's work, and cannot be {done} on its own; "
+            f"{verb} {public_id(top.token)!r} instead"
         )
 
     @_retried
@@ -351,7 +355,7 @@ class Engine:
             self._refuse_child(tx, row, "cancel")
             if row.status not in ("active", "paused"):
                 raise TokenNotActive(
-                    f"token {token!r} is {row.status}; only an active or paused token "
+                    f"token {public_id(token)!r} is {row.status}; only an active or paused token "
                     "can be cancelled"
                 )
             self._cancel(tx, row)
@@ -376,7 +380,7 @@ class Engine:
         graph = self._graph(row)
         event, payload = held.event, held.payload
         if row.status != "active":
-            reason = f"token {row.token!r} is {row.status}; it takes no events"
+            reason = f"token {public_id(row.token)!r} is {row.status}; it takes no events"
             tx.append(row.token, "event_dropped", event=event, reason=reason)
             return
         if held.origin is not None and held.origin != (row.state, row.visit):
@@ -452,7 +456,7 @@ class Engine:
         if key is not None and tx.find_key(row.token, key) is not None:
             return Fired(_token(row), duplicate=True)
         if row.status in ENDED:
-            reason = f"token {row.token!r} is {row.status}; it takes no events"
+            reason = f"token {public_id(row.token)!r} is {row.status}; it takes no events"
             return self._reject(tx, row, event, reason, TokenNotActive)
         if event in OWN_EVENTS:
             reason = f"{event!r} is Stateous's own event; only Stateous fires it"
@@ -483,7 +487,7 @@ class Engine:
         visit and task it came from. Returns why the event cannot move the token, or
         None. The caller records the refusal."""
         if row.status in ENDED:  # pragma: no cover - every caller checks first
-            return f"token {row.token!r} is {row.status}; it takes no events"
+            return f"token {public_id(row.token)!r} is {row.status}; it takes no events"
         if row.status == "paused":
             self._hold(tx, row, event, payload, key=key, task=task)
             return None
@@ -912,7 +916,7 @@ class Engine:
         state = _claim_name(row, task.state)
         return TaskGrant(
             task=task.id,
-            token=task.token,
+            token=public_id(task.token),
             state=state,
             visit=task.visit,
             attempt=task.attempt,
@@ -1001,7 +1005,7 @@ class Engine:
             raise InvalidContext(problem)
         if parent is not None:
             tx.adopt(token, parent.token)
-        family: dict[str, Any] = {} if parent is None else {"parent": parent.token}
+        family: dict[str, Any] = {} if parent is None else {"parent": public_id(parent.token)}
         kept = dict(parent.labels) if parent is not None else dict(labels or {})
         if kept:
             family["labels"] = kept
@@ -1057,13 +1061,13 @@ class Engine:
         inputs = {key: context[key] for key in spec.inputs if key in context}
         for workflow in spec.parallel:
             child = child_id(token, state, visit, workflow)
-            if len(child) > MAX_TOKEN_ID:
+            if len(public_id(child)) > MAX_TOKEN_ID:
                 return (
-                    f"the child {child!r} of {state!r} would have an id longer than "
+                    f"the child {public_id(child)!r} of {state!r} would have an id longer than "
                     f"{MAX_TOKEN_ID} characters; use a shorter token id"
                 )
             if tx.token_taken(child):
-                return f"the child id {child!r} is taken by another token"
+                return f"the child id {public_id(child)!r} is taken by another token"
             if problem := self._cannot_start(tx, child, self.graphs[workflow], inputs):
                 return f"the child {workflow!r} of {state!r} cannot start: {problem}"
         return None
@@ -1103,7 +1107,7 @@ class Engine:
                 # join. Then the parent has left the state: it starts no more children.
                 return
             child = child_id(row.token, state, visit, workflow)
-            tx.append(row.token, "branch_started", workflow=workflow, token=child)
+            tx.append(row.token, "branch_started", workflow=workflow, token=public_id(child))
             self._create(tx, child, inputs, self.graphs[workflow], parent=row)
 
     def _set_timer(
@@ -1204,7 +1208,7 @@ class Engine:
         child was in when it ended; `context` is its context then."""
         return {
             "workflow": child.workflow,
-            "token": child.token,
+            "token": public_id(child.token),
             "status": child.status,
             "final": child.state,
             "context": dict(child.context),
@@ -1232,7 +1236,7 @@ class Engine:
     def _existing(self, tx: Transaction, token: str) -> tables.Token:
         row = tx.token(token)
         if row is None:
-            raise TokenNotFound(f"there is no token {token!r}")
+            raise TokenNotFound(f"there is no token {public_id(token)!r}")
         return row
 
     @contextmanager
@@ -1254,13 +1258,13 @@ class Engine:
 
 def _token(row: tables.Token) -> Token:
     return Token(
-        token=row.token,
+        token=public_id(row.token),
         state=row.state,
         status=row.status,
         visit=row.visit,
         context=dict(row.context),
         entered_at=row.entered_at.replace(tzinfo=UTC),
-        parent=row.parent,
+        parent=None if row.parent is None else public_id(row.parent),
         labels=cast("dict[str, str]", dict(row.labels)),
     )
 

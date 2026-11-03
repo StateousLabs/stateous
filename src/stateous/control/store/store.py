@@ -43,6 +43,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from stateous.control.scope import public_id
 from stateous.control.store import tables
 from stateous.control.store.errors import DatabaseHeld, SchemaNotReady
 from stateous.control.store.migrations import head, is_current
@@ -756,8 +757,8 @@ class Transaction:
         self._session.add(
             tables.Notice(
                 family=self.family(row.token),
-                token=row.token,
-                parent=row.parent,
+                token=public_id(row.token),
+                parent=None if row.parent is None else public_id(row.parent),
                 workflow=workflow,
                 kind=kind,
                 event=event,
