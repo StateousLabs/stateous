@@ -6,17 +6,22 @@ writes inside a transaction that the engine opens, at a time that the engine giv
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 import os
 import re
 import socket
 import threading
+import time
 import uuid
 from collections.abc import Callable, Collection, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
+import psycopg
+import psycopg.sql
 from sqlalchemy import (
     ColumnElement,
     Connection,
@@ -97,6 +102,19 @@ DEFAULT_NAMESPACE = "stateous"
 `public`, so the tables never meet an application's own tables."""
 
 _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,62}")
+
+
+LISTEN_EVERY = 1.0
+"""Seconds that a replica's listener waits for notices before it checks for a stop."""
+
+LISTEN_BACKOFF: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+"""Seconds before a lost listener connects again. The last value repeats."""
+
+
+def ready_channel(namespace: str) -> str:
+    """The Postgres channel of "task ready" between the replicas of `namespace`: at most
+    63 bytes, the most that Postgres keeps of a name."""
+    return f"stateous_ready_{namespace}"[:63]
 
 
 def with_labels(labels: dict[str, str] | None) -> list[ColumnElement[bool]]:
@@ -257,6 +275,12 @@ class Store:
         """The engine for session-level work: the hold's lock, and LISTEN."""
         self._replica = replica
         self._joined: tuple[str, str] | None = None
+        self._channel: str | None = (
+            None if not replica or self.namespace is None else ready_channel(self.namespace)
+        )
+        """Postgres replicas: the channel of "task ready" between them."""
+        self._listening = threading.Event()
+        self._listener: threading.Thread | None = None
         self.engine: Engine = (
             self._engine
             if self.namespace is None
@@ -303,6 +327,12 @@ class Store:
                 raise DatabaseHeld(
                     "an exclusive control plane serves this namespace; stop it first"
                 )
+            if self._channel is not None:
+                self._listening.set()
+                self._listener = threading.Thread(
+                    target=self._listen, name=f"stateous-listen-{self.namespace}", daemon=True
+                )
+                self._listener.start()
         except BaseException:
             self.close()  # gives up the hold, if taken, and the connections
             raise
@@ -335,6 +365,10 @@ class Store:
     def close(self) -> None:
         """Give up the hold, if this store has it, and let go of the connections."""
         self._closed = True
+        if self._listener is not None:
+            self._listening.clear()
+            self._listener.join(timeout=LISTEN_EVERY * 3)
+            self._listener = None
         if self._holding:
             self._holding = False
             try:
@@ -435,6 +469,55 @@ class Store:
             connection.close()
         return held
 
+    def _listen(self) -> None:
+        """Replicas: hear the "task ready" of the other replicas, and call this store's
+        callbacks for each. A lost connection is logged and made again with backoff."""
+        assert self._channel is not None
+        failures = 0
+        while self._listening.is_set():
+            raw = None
+            try:
+                raw = self._direct.raw_connection()
+                connection = cast("psycopg.Connection[Any]", raw.driver_connection)
+                connection.autocommit = True
+                connection.execute(
+                    psycopg.sql.SQL("LISTEN {}").format(psycopg.sql.Identifier(self._channel))
+                )
+                failures = 0
+                while self._listening.is_set():
+                    for notice in connection.notifies(timeout=LISTEN_EVERY):
+                        self._heard(notice.payload)
+            except Exception as error:
+                if not self._listening.is_set():
+                    break
+                delay = LISTEN_BACKOFF[min(failures, len(LISTEN_BACKOFF) - 1)]
+                failures += 1
+                log.warning(
+                    "cannot hear the other replicas (%s); trying again in %gs",
+                    " ".join(str(error).split()) or type(error).__name__,
+                    delay,
+                )
+                end = time.monotonic() + delay
+                while self._listening.is_set() and time.monotonic() < end:
+                    time.sleep(min(LISTEN_EVERY, end - time.monotonic()))
+            finally:
+                if raw is not None:
+                    with contextlib.suppress(Exception):
+                        raw.invalidate()  # never give a LISTEN session back to the pool
+                        raw.close()
+
+    def _heard(self, payload: str) -> None:
+        """One "task ready" of a replica: call the callbacks, unless it is this one's."""
+        try:
+            data = json.loads(payload)
+            if data.get("from") == self.holder:
+                return
+            state, labels = str(data["state"]), dict(data.get("labels") or {})
+        except (ValueError, KeyError, TypeError, AttributeError):
+            log.warning("a task-ready notice that cannot be read was skipped")
+            return
+        self._ready(state, labels)
+
     def _serving_is_held(self) -> bool:
         """Postgres: whether an exclusive control plane holds the namespace now. The
         lock is tried, and let go at once."""
@@ -480,18 +563,28 @@ class Store:
                 # A developer's engine has its own connection settings: the time
                 # limits hold for each transaction of Stateous only.
                 session.execute(text(_GIVEN_LIMITS))
-            tx = Transaction(session, utc(now), namespace=self.namespace, notices=self.notices_on)
+            tx = Transaction(
+                session,
+                utc(now),
+                namespace=self.namespace,
+                notices=self.notices_on,
+                channel=self._channel,
+                holder=self.holder,
+            )
             yield tx
         # Committed: say which states have a task that can be claimed now.
         for state, labels in tx.readied:
-            for callback in list(self._on_ready):
-                try:
-                    callback(state, labels)
-                except Exception as error:  # a hook must not fail the change
-                    log.error(
-                        "a task-ready callback failed (%s)",
-                        " ".join(str(error).split()) or type(error).__name__,
-                    )
+            self._ready(state, labels)
+
+    def _ready(self, state: str, labels: Mapping[str, str]) -> None:
+        for callback in list(self._on_ready):
+            try:
+                callback(state, labels)
+            except Exception as error:  # a hook must not fail the change
+                log.error(
+                    "a task-ready callback failed (%s)",
+                    " ".join(str(error).split()) or type(error).__name__,
+                )
 
     def on_ready(self, callback: ReadyCallback) -> Callable[[], None]:
         """Call `callback(state, labels)` after each commit that makes a task of
@@ -537,12 +630,16 @@ class Transaction:
         *,
         namespace: str | None = None,
         notices: bool = False,
+        channel: str | None = None,
+        holder: str = "",
     ) -> None:
         self._session = session
         self.now = now
         self._namespace = namespace
         self._notices = notices
         """Whether `notify` writes: the store's `notices_on`."""
+        self._channel = channel
+        self._holder = holder
         self.readied: list[tuple[str, dict[str, str]]] = []
         """The states, as a claim names them, whose task became claimable here, with
         the labels of the task's token."""
@@ -644,8 +741,16 @@ class Transaction:
         """A task of `state` (`<workflow>/<state>` for a child), of a token with
         `labels`, can be claimed once this transaction commits."""
         entry = (state, dict(labels))
-        if entry not in self.readied:
-            self.readied.append(entry)
+        if entry in self.readied:
+            return
+        self.readied.append(entry)
+        if self._channel is not None:
+            # Sent with the commit, or not at all: the other replicas hear it then.
+            payload = json.dumps({"state": state, "labels": dict(labels), "from": self._holder})
+            self._session.execute(
+                text("SELECT pg_notify(:channel, :payload)"),
+                {"channel": self._channel, "payload": payload},
+            )
 
     def next_notice_family(self, tried: Collection[str]) -> str | None:
         """The family of the oldest notice, of the families not in `tried`; None when
