@@ -48,11 +48,11 @@ Start a token.
 
 | Body field | Meaning |
 |---|---|
-| `token` | The token's id: a letter or a digit, then up to 127 letters, digits, `.`, `_` or `-`. Required. |
+| `token` | The token's id: a letter or a digit, then up to 127 letters, digits, `.`, `_` or `-`. Optional: with no `token`, the control plane makes an id, a ULID of 26 characters. |
 | `context` | The token's context, as a JSON object. The default is `{}`. |
 | `labels` | The token's labels: an object of at most 16 string pairs, for example `{"user": "u42"}`. Optional. A key is a lower-case letter, then up to 63 lower-case letters, digits, `_`, `.` or `-`. A value has 1 to 256 characters. |
 
-The answer is the token, with `201`. If the token exists, the answer is that token, unchanged, with `200`. Its first labels stay. A token with labels has the field `labels`, and a child token has its parent's labels.
+The answer is the token, with `201`. If the token exists, the answer is that token, unchanged, with `200`. Its first labels stay. With no `token`, the header `Idempotency-Key` makes the start safe to retry: the same key gives the same token, with `200`. A token with labels has the field `labels`, and a child token has its parent's labels.
 
 ### `GET /tokens`
 

@@ -67,6 +67,9 @@ FACTS: dict[str, list[str]] = {
         "`Forbidden`",
         "count_claimed",
         "Stateous never makes a caller",
+        "ALL_SCOPES",
+        "ScopeConflict",
+        "ULID",
     ],
     "concepts/transports.md": [
         "one attempt",
