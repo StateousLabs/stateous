@@ -111,3 +111,10 @@ class Forbidden(ControlPlaneError, PermissionError):
     """The authorizer of the control plane refused the caller this action."""
 
     code: ClassVar[str] = "forbidden"
+
+
+class ScopeConflict(ControlPlaneError, RuntimeError):
+    """The namespace keeps its tokens under another scope. A control plane with another
+    scope can open it only while it has no token."""
+
+    code: ClassVar[str] = "scope_conflict"

@@ -117,8 +117,8 @@ def test_a_lapsed_replica_row_does_not_block_a_new_structure() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "INSERT INTO flow.replicas (holder, structure, checksum, seen) "
-                "VALUES ('gone:1:x', 'old', 'old', :seen)"
+                "INSERT INTO flow.replicas (holder, structure, checksum, scope, seen) "
+                "VALUES ('gone:1:x', 'old', 'old', '[]', :seen)"
             ),
             {"seen": long_ago},
         )
@@ -182,3 +182,15 @@ def test_a_replica_needs_the_psycopg_3_driver() -> None:
     url = fresh_postgres_database().replace("postgresql://", "postgresql+psycopg2://")
     with pytest.raises(ValueError, match="psycopg 3"):
         ControlPlane(sdlc(), database=create_engine(url), namespace="flow", exclusive=False)
+
+
+def test_replicas_with_different_scopes_refuse_each_other() -> None:
+    from stateous import ScopeConflict
+
+    url = fresh_postgres_database()
+    first = replica(url, scope=["user"])
+    try:
+        with pytest.raises(ScopeConflict):
+            replica(url, scope=["tenant"])
+    finally:
+        first.close()

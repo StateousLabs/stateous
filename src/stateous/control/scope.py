@@ -31,3 +31,26 @@ def digest_of(key: str) -> str | None:
     """The digest of a key; None for a key with no scope."""
     digest, colon, _ = key.partition(":")
     return digest if colon else None
+
+
+class AllScopes:
+    """The type of `ALL_SCOPES`."""
+
+    _made = False
+
+    def __new__(cls) -> AllScopes:
+        if cls._made:
+            raise TypeError("use stateous.ALL_SCOPES")
+        cls._made = True
+        return super().__new__(cls)
+
+    def __repr__(self) -> str:
+        return "ALL_SCOPES"
+
+
+ALL_SCOPES = AllScopes()
+"""For a trusted caller (an admin view, a service on the server, a shared pool of
+supervisors): act across every scope. The authorizer still decides each action."""
+
+MAX_SCOPE_KEYS = 4
+"""The most label keys in a scope."""

@@ -286,7 +286,7 @@ class Store:
                 f"{self._direct.dialect.driver}; it hears the other replicas"
             )
         self._replica = replica
-        self._joined: tuple[str, str] | None = None
+        self._joined: tuple[str, str, str] | None = None
         self._channel: str | None = (
             None if not replica or self.namespace is None else ready_channel(self.namespace)
         )
@@ -568,11 +568,31 @@ class Store:
         with self.transaction(wall_clock()) as tx:
             return tx.live_replicas(self.holder)
 
-    def join_replicas(self, structure: str, checksum: str) -> None:
+    def join_replicas(self, structure: str, checksum: str, scope: str = "[]") -> None:
         """Write this replica's row. The clock renews it; `close()` removes it."""
-        self._joined = (structure, checksum)
+        self._joined = (structure, checksum, scope)
         with self.transaction(wall_clock()) as tx:
-            tx.renew_replica(self.holder, structure, checksum)
+            tx.renew_replica(self.holder, structure, checksum, scope)
+
+    def live_replica_scopes(self) -> set[str]:
+        """The scopes (as JSON) of the other replicas that serve the namespace now."""
+        with self.transaction(wall_clock()) as tx:
+            return tx.live_replica_scopes(self.holder)
+
+    def recorded_scope(self) -> list[str] | None:
+        """The scope on record; None for a namespace where no control plane wrote one."""
+        with self.transaction(wall_clock()) as tx:
+            found = tx.control_plane().scope
+            return None if found is None else list(found)
+
+    def record_scope(self, scope: list[str]) -> None:
+        with self.transaction(wall_clock()) as tx:
+            tx.control_plane().scope = scope
+
+    def count_tokens(self) -> int:
+        """How many tokens the namespace has, ended ones too."""
+        with self.transaction(wall_clock()) as tx:
+            return tx.count_tokens()
 
     def _keep_lock(self) -> bool:
         """Postgres: whether this process still holds the advisory lock. A dead
@@ -907,16 +927,55 @@ class Transaction:
         )
         return [(found, structure, checksum) for found, structure, checksum in rows]
 
-    def renew_replica(self, holder: str, structure: str, checksum: str) -> None:
+    def renew_replica(self, holder: str, structure: str, checksum: str, scope: str = "[]") -> None:
         """Write or renew the row of the replica `holder`."""
         row = self._session.get(tables.Replica, holder)
         if row is None:
             self._session.add(
-                tables.Replica(holder=holder, structure=structure, checksum=checksum, seen=self.now)
+                tables.Replica(
+                    holder=holder,
+                    structure=structure,
+                    checksum=checksum,
+                    scope=scope,
+                    seen=self.now,
+                )
             )
         else:
             row.seen = self.now
         self._session.flush()
+
+    def live_replica_scopes(self, holder: str) -> set[str]:
+        rows = self._session.scalars(
+            select(tables.Replica.scope)
+            .where(tables.Replica.holder != holder)
+            .where(tables.Replica.seen >= self.now - SERVING_LEASE)
+        )
+        return set(rows)
+
+    def count_tokens(self) -> int:
+        return self._session.scalar(select(func.count()).select_from(tables.Token)) or 0
+
+    def keys_for_public(self, token: str) -> list[str]:
+        """The keys whose public id is `token`: in no scope, or in any scope."""
+        return list(
+            self._session.scalars(
+                select(tables.Token.token).where(
+                    or_(
+                        tables.Token.token == token,
+                        tables.Token.token.endswith(":" + token, autoescape=True),
+                    )
+                )
+            )
+        )
+
+    def task_keys(self, tasks: Collection[int]) -> dict[int, str]:
+        """The token key of each task; a task that is not there is left out."""
+        if not tasks:
+            return {}
+        rows = self._session.execute(
+            select(tables.Task.id, tables.Task.token).where(tables.Task.id.in_(list(tasks)))
+        )
+        return {task: token for task, token in rows}
 
     def leave_replicas(self, holder: str) -> None:
         self._session.execute(delete(tables.Replica).where(tables.Replica.holder == holder))

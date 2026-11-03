@@ -106,3 +106,25 @@ def test_every_route_passes_its_caller(tmp_path: Path) -> None:
     statuses = asyncio.run(main())
 
     assert all(status < 300 for status in statuses), statuses
+
+
+def test_scope_of_the_caller_hides_other_scopes(tmp_path: Path) -> None:
+    def scope_of(caller: object) -> Mapping[str, str] | None:
+        return None if caller is None else {"user": str(caller)}
+
+    async def main() -> tuple[int, int, int]:
+        url = sqlite_url(tmp_path / "s.db")
+        with ControlPlane(
+            sdlc(), database=url, migrate=True, scope=["user"], scope_of=scope_of
+        ) as plane:
+            app = create_app(plane, caller=user_of)
+            async with httpx2.AsyncClient(
+                base_url="http://testserver", transport=httpx2.ASGITransport(app=app)
+            ) as client:
+                body = {"token": "T-1", "context": TICKET, "labels": U1}
+                made = await client.post("/tokens", json=body, headers={"X-User": "u1"})
+                mine = await client.get("/tokens/T-1", headers={"X-User": "u1"})
+                theirs = await client.get("/tokens/T-1", headers={"X-User": "u2"})
+                return made.status_code, mine.status_code, theirs.status_code
+
+    assert asyncio.run(main()) == (201, 200, 404)

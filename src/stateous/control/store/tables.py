@@ -145,6 +145,8 @@ class ControlPlane(Base):
     """The control plane that holds the database: `host:pid:id`."""
     since: Mapped[datetime | None] = mapped_column(default=None)
     """When that control plane last said that it still serves."""
+    scope: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    """The label keys of the namespace's scope; None before a control plane recorded it."""
     notices: Mapped[bool] = mapped_column(default=False)
     """Whether each change also writes its notice (`Notice`). `stateous migrate
     --notices` sets it for the namespace."""
@@ -203,4 +205,6 @@ class Replica(Base):
     holder: Mapped[str] = mapped_column(String(256), primary_key=True)
     structure: Mapped[str] = mapped_column(String(80))
     checksum: Mapped[str] = mapped_column(String(80))
+    scope: Mapped[str] = mapped_column(String(512), default="[]")
+    """The label keys of the replica's scope, as JSON."""
     seen: Mapped[datetime]

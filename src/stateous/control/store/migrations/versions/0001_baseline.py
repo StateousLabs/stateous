@@ -26,6 +26,7 @@ def upgrade() -> None:
         sa.Column("checksum", sa.String(length=80), nullable=True),
         sa.Column("serving", sa.String(length=256), nullable=True),
         sa.Column("since", sa.DateTime(), nullable=True),
+        sa.Column("scope", sa.JSON(), nullable=True),
         sa.Column("notices", sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -38,6 +39,7 @@ def upgrade() -> None:
         sa.Column("holder", sa.String(length=256), nullable=False),
         sa.Column("structure", sa.String(length=80), nullable=False),
         sa.Column("checksum", sa.String(length=80), nullable=False),
+        sa.Column("scope", sa.String(length=512), nullable=False),
         sa.Column("seen", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("holder"),
     )

@@ -5,6 +5,7 @@ import stateous
 
 def test_the_public_names_are_the_contracts() -> None:
     assert stateous.__all__ == [
+        "ALL_SCOPES",
         "END",
         "START",
         "AttemptOver",
@@ -33,6 +34,7 @@ def test_the_public_names_are_the_contracts() -> None:
         "Occurrence",
         "OutcomeError",
         "SchemaNotReady",
+        "ScopeConflict",
         "StateRef",
         "TaskNotFound",
         "TaskNotHeld",

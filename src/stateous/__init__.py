@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         InvalidPayload,
         InvalidTokenId,
         NoticesOff,
+        ScopeConflict,
         TaskNotFound,
         TaskNotHeld,
         TokenNotActive,
@@ -41,11 +42,13 @@ if TYPE_CHECKING:
     )
     from stateous.control.notices import Notice, NoticeKind
     from stateous.control.plane import ControlPlane
+    from stateous.control.scope import ALL_SCOPES
     from stateous.control.store.errors import DatabaseHeld, ForeignDatabase, SchemaNotReady
     from stateous.supervisor.run import supervise
 
 _LAZY: dict[str, str] = {
     "ControlPlane": "stateous.control.plane",
+    "ALL_SCOPES": "stateous.control.scope",
     "Fired": "stateous.control.engine",
     "HistoryEntry": "stateous.control.engine",
     "Token": "stateous.control.engine",
@@ -70,6 +73,7 @@ _LAZY: dict[str, str] = {
             "InvalidPayload",
             "InvalidTokenId",
             "NoticesOff",
+            "ScopeConflict",
             "TaskNotFound",
             "TaskNotHeld",
             "TokenNotActive",
@@ -95,6 +99,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "ALL_SCOPES",
     "END",
     "START",
     "AttemptOver",
@@ -123,6 +128,7 @@ __all__ = [
     "Occurrence",
     "OutcomeError",
     "SchemaNotReady",
+    "ScopeConflict",
     "StateRef",
     "TaskNotFound",
     "TaskNotHeld",

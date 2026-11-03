@@ -133,6 +133,12 @@ Each error of a control plane has `code`, the stable code of its refusal. The HT
 
 ::: stateous.Forbidden
 
+::: stateous.ScopeConflict
+
+A trusted caller can act across every scope with `ALL_SCOPES`. See [Tenancy](../concepts/tenancy.md).
+
+::: stateous.ALL_SCOPES
+
 The authorizer is your function. `Action` names what a caller does.
 
 ::: stateous.control.access.Action

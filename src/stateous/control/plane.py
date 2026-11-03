@@ -11,12 +11,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import threading
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.engine import Engine as Database
 
@@ -24,6 +25,7 @@ from stateous.control.access import Action, Authorize
 from stateous.control.clock import LOST, TICK_EVERY, Clock
 from stateous.control.engine import (
     DEFAULT_LEASE,
+    LABEL_KEY,
     Engine,
     Fired,
     HistoryEntry,
@@ -32,14 +34,38 @@ from stateous.control.engine import (
     check_limit,
     utcnow,
 )
-from stateous.control.errors import Forbidden, GraphConflict, HoldLost, NoticesOff
+from stateous.control.errors import (
+    Forbidden,
+    GraphConflict,
+    HoldLost,
+    InvalidArgument,
+    NoticesOff,
+    ScopeConflict,
+    TaskNotFound,
+    TokenNotFound,
+)
 from stateous.control.graph import Graph
 from stateous.control.notices import Notice, deliver
+from stateous.control.scope import (
+    MAX_SCOPE_KEYS,
+    AllScopes,
+    digest_of,
+    key_of,
+    scope_digest,
+)
 from stateous.control.store import Store
 from stateous.model.graph_file import load_graph
 from stateous.model.wire import Outcome, TaskGrant
 
 log = logging.getLogger("stateous.notices")
+
+Scope = Mapping[str, str] | AllScopes | None
+"""The scope of a call: its values, `ALL_SCOPES`, or None (then `scope_of(caller)`)."""
+
+ScopeOf = Callable[[object], Mapping[str, str] | AllScopes | None]
+"""The developer's function: the scope of a caller."""
+
+_RAISE = object()
 
 LIST_PAGE = 1000
 """Tokens that a list with an authorizer reads at a time, until its limit is full."""
@@ -83,8 +109,12 @@ class ControlPlane:
         authorize: Authorize | None = None,
         exclusive: bool = True,
         direct: str | Database | None = None,
+        scope: Sequence[str] = (),
+        scope_of: ScopeOf | None = None,
     ) -> None:
         self._authorize = authorize
+        self._scope_keys = _scope_keys(scope)
+        self._scope_of = scope_of
         self._exclusive = exclusive
         self._graph = Graph(_document(graph))
         self.name: str = self._graph.name
@@ -99,6 +129,7 @@ class ControlPlane:
         )
         try:
             self._engine = Engine(self._store, self._graph, clock=now, lease=lease)
+            self._check_scope()
             self._check_graph()
         except BaseException:
             self._store.close()
@@ -146,21 +177,24 @@ class ControlPlane:
         context: dict[str, Any],
         *,
         labels: Mapping[str, str] | None = None,
+        scope: Scope = None,
         caller: object = None,
     ) -> Token:
         """Start a token. To start a token that exists returns it, unchanged. `labels`
-        (at most 16) never change after the start; a child token gets them too. The
-        authorizer checks `start` with `labels`, and `read` for a token that exists
-        with other labels."""
+        (at most 16) never change after the start; a child token gets them too. In a
+        scoped namespace the labels give the token's scope; a call scope that differs
+        is `Forbidden`. The authorizer checks `start` with `labels`, and `read` for a
+        token that exists with other labels."""
+        key = self._start_key(token, labels or {}, scope, caller)
         self._allow(caller, "start", labels or {})
-        started = self._engine.start(token, context, labels=labels)
+        started = self._engine.start(key, context, labels=labels)
         if started.labels != dict(labels or {}):
             self._allow(caller, "read", started.labels)
         return started
 
-    def get(self, token: str, *, caller: object = None) -> Token:
-        """The token. Raises `TokenNotFound`."""
-        found = self._engine.get(token)
+    def get(self, token: str, *, scope: Scope = None, caller: object = None) -> Token:
+        """The token. Raises `TokenNotFound`, also for a token of another scope."""
+        found = self._engine.get(self._key(token, scope, caller))
         self._allow(caller, "read", found.labels)
         return found
 
@@ -171,19 +205,28 @@ class ControlPlane:
         limit: int = 100,
         parent: str | None = None,
         labels: Mapping[str, str] | None = None,
+        scope: Scope = None,
         caller: object = None,
     ) -> list[Token]:
-        """Tokens, the most recently moved first. With `parent`: only its children.
-        With `labels`: only the tokens that have each of them. With an authorizer:
-        only the tokens that the caller may read, up to `limit` of them."""
+        """Tokens of the call's scope, the most recently moved first. With `parent`:
+        only its children. With `labels`: only the tokens that have each of them. With
+        an authorizer: only the tokens that the caller may read, up to `limit` of
+        them."""
+        in_scope = self._scope(scope, caller)
+        wanted = self._with_scope(labels, in_scope)
+        if wanted is None:
+            return []
+        parent_key = None if parent is None else self._key(parent, scope, caller, missing=None)
+        if parent is not None and parent_key is None:
+            return []
         if self._authorize is None:
-            return self._engine.tokens(status=status, limit=limit, parent=parent, labels=labels)
+            return self._engine.tokens(status=status, limit=limit, parent=parent_key, labels=wanted)
         check_limit(limit)
         allowed: list[Token] = []
         after: Token | None = None
         while len(allowed) < limit:
             page = self._engine.tokens(
-                status=status, limit=LIST_PAGE, parent=parent, labels=labels, after=after
+                status=status, limit=LIST_PAGE, parent=parent_key, labels=wanted, after=after
             )
             allowed.extend(t for t in page if self._authorize(caller, "read", t.labels))
             if len(page) < LIST_PAGE:
@@ -191,10 +234,13 @@ class ControlPlane:
             after = page[-1]
         return allowed[:limit]
 
-    def history(self, token: str, *, caller: object = None) -> list[HistoryEntry]:
+    def history(
+        self, token: str, *, scope: Scope = None, caller: object = None
+    ) -> list[HistoryEntry]:
         """The ledger of the token, oldest first."""
-        self.get(token, caller=caller)
-        return self._engine.history(token)
+        key = self._key(token, scope, caller)
+        self._allow(caller, "read", self._engine.get(key).labels)
+        return self._engine.history(key)
 
     def fire(
         self,
@@ -203,27 +249,32 @@ class ControlPlane:
         payload: dict[str, Any] | None = None,
         *,
         key: str | None = None,
+        scope: Scope = None,
         caller: object = None,
     ) -> Fired:
         """Fire `event` on `token` from outside. With `key`: a second call with the
         same key changes nothing and answers `duplicate`."""
-        self._allow_token(caller, "fire", token)
-        return self._engine.fire(token, event, payload, key=key)
+        found = self._key(token, scope, caller)
+        self._allow_token(caller, "fire", found)
+        return self._engine.fire(found, event, payload, key=key)
 
-    def pause(self, token: str, *, caller: object = None) -> Token:
+    def pause(self, token: str, *, scope: Scope = None, caller: object = None) -> Token:
         """Stop the token: its events are held, its tasks wait, its timers stand still."""
-        self._allow_token(caller, "pause", token)
-        return self._engine.pause(token)
+        found = self._key(token, scope, caller)
+        self._allow_token(caller, "pause", found)
+        return self._engine.pause(found)
 
-    def resume(self, token: str, *, caller: object = None) -> Token:
+    def resume(self, token: str, *, scope: Scope = None, caller: object = None) -> Token:
         """Start a paused token again. Its held events apply in order."""
-        self._allow_token(caller, "resume", token)
-        return self._engine.resume(token)
+        found = self._key(token, scope, caller)
+        self._allow_token(caller, "resume", found)
+        return self._engine.resume(found)
 
-    def cancel(self, token: str, *, caller: object = None) -> Token:
+    def cancel(self, token: str, *, scope: Scope = None, caller: object = None) -> Token:
         """End the token as cancelled, with its children."""
-        self._allow_token(caller, "cancel", token)
-        return self._engine.cancel(token)
+        found = self._key(token, scope, caller)
+        self._allow_token(caller, "cancel", found)
+        return self._engine.cancel(found)
 
     # ── supervisors ─────────────────────────────────────────────────────
 
@@ -234,18 +285,22 @@ class ControlPlane:
         *,
         request: str | None = None,
         labels: Mapping[str, str] | None = None,
+        scope: Scope = None,
         caller: object = None,
     ) -> TaskGrant | None:
-        """The oldest queued task of `states`, now claimed by `supervisor` with a
-        lease; None if there is none. With `labels`: only a task whose token has each
-        of them; the authorizer checks `claim` with these labels. A repeat with the
-        same `request` gets the same grant again."""
+        """The oldest queued task of `states` in the call's scope, now claimed by
+        `supervisor` with a lease; None if there is none. With `labels`: only a task
+        whose token has each of them; the authorizer checks `claim` with these labels.
+        A repeat with the same `request` gets the same grant again."""
+        wanted = self._with_scope(labels, self._scope(scope, caller))
+        if wanted is None:
+            return None
         self._allow(caller, "claim", labels or {})
-        return self._engine.claim(supervisor, states, request=request, labels=labels)
+        return self._engine.claim(supervisor, states, request=request, labels=wanted or None)
 
     def count_claimed(self, labels: Mapping[str, str]) -> int:
         """How many tasks are claimed now whose token has each of `labels`: for an
-        entitlement, for example "3 tasks at a time on this plan"."""
+        entitlement, for example "about 3 tasks at a time on this plan"."""
         return self._engine.count_claimed(labels)
 
     def report(
@@ -255,31 +310,49 @@ class ControlPlane:
         *,
         supervisor: str | None = None,
         attempt: int | None = None,
+        scope: Scope = None,
         caller: object = None,
     ) -> Fired:
         """The outcome of a task: from its supervisor, or (without `supervisor`) from
-        outside."""
+        outside. A task of another scope is `TaskNotFound`."""
+        self._task_in_scope(task, scope, caller)
         self._allow_task(caller, "report", task)
         return self._engine.report(task, outcome, supervisor=supervisor, attempt=attempt)
 
     def heartbeat(
-        self, supervisor: str, tasks: Collection[int], *, caller: object = None
+        self,
+        supervisor: str,
+        tasks: Collection[int],
+        *,
+        scope: Scope = None,
+        caller: object = None,
     ) -> list[int]:
         """Renew the leases of `tasks`. Returns the tasks that the supervisor lost. A
-        task that the authorizer refuses is lost too, and its lease is not renewed."""
+        task of another scope, or one that the authorizer refuses, is lost too, and
+        its lease is not renewed."""
+        outside = self._outside_scope(tasks, scope, caller)
+        tasks = [t for t in tasks if t not in outside]
         if self._authorize is None:
-            return self._engine.heartbeat(supervisor, tasks)
+            lost = set(self._engine.heartbeat(supervisor, tasks)) if tasks else set[int]()
+            return sorted(lost | outside)
         labels = self._engine.task_labels(tasks)
         check = self._authorize
         refused = {t for t, found in labels.items() if not check(caller, "heartbeat", found)}
         allowed = [t for t in tasks if t not in refused]
         lost = set(self._engine.heartbeat(supervisor, allowed)) if allowed else set[int]()
-        return sorted(lost | refused)
+        return sorted(lost | refused | outside)
 
     def note(
-        self, task: int, text: str, *, attempt: int | None = None, caller: object = None
+        self,
+        task: int,
+        text: str,
+        *,
+        attempt: int | None = None,
+        scope: Scope = None,
+        caller: object = None,
     ) -> None:
         """One line of progress in the token's history."""
+        self._task_in_scope(task, scope, caller)
         self._allow_task(caller, "note", task)
         self._engine.note(task, text, attempt=attempt)
 
@@ -290,11 +363,117 @@ class ControlPlane:
         value: Any,
         *,
         attempt: int | None = None,
+        scope: Scope = None,
         caller: object = None,
     ) -> None:
         """Save one key of the routine's memory for the task's token and state."""
+        self._task_in_scope(task, scope, caller)
         self._allow_task(caller, "memory", task)
         self._engine.set_memory(task, key, value, attempt=attempt)
+
+    # ── scopes ──────────────────────────────────────────────────────────
+
+    def _scope(self, scope: Scope, caller: object) -> dict[str, str] | AllScopes | None:
+        """The call's scope: `scope=`, else `scope_of(caller)`. None in a namespace with
+        no scope. In a scoped one, no scope at all is `InvalidArgument`."""
+        if not self._scope_keys:
+            return None
+        found = (
+            scope
+            if scope is not None
+            else (self._scope_of(caller) if self._scope_of is not None else None)
+        )
+        if found is None:
+            raise InvalidArgument("this control plane keeps token ids for each scope; give scope=")
+        if isinstance(found, AllScopes):
+            return found
+        missing = [k for k in self._scope_keys if k not in found]
+        if missing:
+            raise InvalidArgument(f"the scope has no value for {', '.join(missing)}")
+        return {k: str(found[k]) for k in self._scope_keys}
+
+    def _key(self, token: str, scope: Scope, caller: object, *, missing: object = _RAISE) -> str:
+        """The key of `token` in the call's scope. With `ALL_SCOPES`: the one key whose
+        public id is `token`. Not there: `TokenNotFound`, or `missing` when given."""
+        in_scope = self._scope(scope, caller)
+        if in_scope is None:
+            return token
+        if not isinstance(in_scope, AllScopes):
+            return key_of(scope_digest(in_scope), token)
+        keys = self._engine.keys_for_public(token)
+        if len(keys) == 1:
+            return keys[0]
+        if len(keys) > 1:
+            raise InvalidArgument(f"the id {token!r} is in {len(keys)} scopes; give scope=")
+        if missing is not _RAISE:
+            return cast("str", missing)
+        raise TokenNotFound(f"there is no token {token!r}")
+
+    def _start_key(
+        self, token: str, labels: Mapping[str, str], scope: Scope, caller: object
+    ) -> str:
+        """The key of a new token: its scope comes from its labels. A call scope that
+        names another scope is `Forbidden`."""
+        if not self._scope_keys:
+            return token
+        missing = [k for k in self._scope_keys if k not in labels]
+        if missing:
+            raise InvalidArgument(
+                f"a token of this namespace needs the labels {', '.join(missing)}: its scope"
+            )
+        own = {k: str(labels[k]) for k in self._scope_keys}
+        given = (
+            scope
+            if scope is not None
+            else (self._scope_of(caller) if self._scope_of is not None else None)
+        )
+        if given is not None and not isinstance(given, AllScopes):
+            asked = {k: str(given.get(k)) for k in self._scope_keys}
+            if asked != own:
+                raise Forbidden("the token's labels name another scope than the caller's")
+        return key_of(scope_digest(own), token)
+
+    def _with_scope(
+        self, labels: Mapping[str, str] | None, in_scope: dict[str, str] | AllScopes | None
+    ) -> dict[str, str] | None:
+        """`labels`, with the scope's pairs added. None when they name another scope:
+        nothing can match."""
+        wanted = dict(labels or {})
+        if in_scope is None or isinstance(in_scope, AllScopes):
+            return wanted
+        for k, v in in_scope.items():
+            if wanted.setdefault(k, v) != v:
+                return None
+        return wanted
+
+    def _outside_scope(self, tasks: Collection[int], scope: Scope, caller: object) -> set[int]:
+        """The tasks of `tasks` whose token is in another scope than the call's."""
+        in_scope = self._scope(scope, caller)
+        if in_scope is None or isinstance(in_scope, AllScopes):
+            return set()
+        digest = scope_digest(in_scope)
+        keys = self._engine.task_keys(tasks)
+        return {t for t, k in keys.items() if digest_of(k) != digest}
+
+    def _task_in_scope(self, task: int, scope: Scope, caller: object) -> None:
+        if self._outside_scope([task], scope, caller):
+            raise TaskNotFound(f"there is no task {task}")
+
+    def _check_scope(self) -> None:
+        """The namespace's scope must be this plane's, or the namespace has no token."""
+        mine = list(self._scope_keys)
+        recorded = self._store.recorded_scope()
+        if recorded is not None and recorded != mine and self._store.count_tokens() > 0:
+            raise ScopeConflict(
+                f"the namespace keeps its tokens under the scope {recorded}, not {mine}; "
+                "a new scope needs a namespace with no token"
+            )
+        if self._store.is_postgres and any(
+            other != json.dumps(mine) for other in self._store.live_replica_scopes()
+        ):
+            raise ScopeConflict("a replica of this namespace serves another scope")
+        if recorded != mine:
+            self._store.record_scope(mine)
 
     def as_caller(self, caller: object) -> AsCaller:
         """This control plane, with `caller` given to each call: for a transport that
@@ -435,7 +614,9 @@ class ControlPlane:
         if recorded != RecordedGraph(graph.structure, graph.checksum):
             self._engine.record_graph()
         if not self._exclusive:
-            self._store.join_replicas(graph.structure, graph.checksum)
+            self._store.join_replicas(
+                graph.structure, graph.checksum, json.dumps(list(self._scope_keys))
+            )
 
 
 def _document(graph: str | Path | dict[str, Any]) -> dict[str, Any]:
@@ -537,3 +718,14 @@ class AsCaller:
 
     def set_memory(self, task: int, key: str, value: Any, *, attempt: int | None = None) -> None:
         self.plane.set_memory(task, key, value, attempt=attempt, caller=self.caller)
+
+
+def _scope_keys(scope: Sequence[str]) -> tuple[str, ...]:
+    """The label keys of a scope: at most `MAX_SCOPE_KEYS`, each a valid label key."""
+    keys = tuple(scope)
+    if len(keys) > MAX_SCOPE_KEYS:
+        raise ValueError(f"a scope has at most {MAX_SCOPE_KEYS} label keys, not {len(keys)}")
+    for key in keys:
+        if not re.fullmatch(LABEL_KEY, key):
+            raise ValueError(f"the scope key {key!r} is not a label key")
+    return keys

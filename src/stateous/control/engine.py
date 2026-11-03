@@ -685,6 +685,18 @@ class Engine:
         return self._grant(tx, task)
 
     @_retried
+    def keys_for_public(self, token: str) -> list[str]:
+        """The keys whose public id is `token`, in every scope."""
+        with self._transaction() as tx:
+            return tx.keys_for_public(token)
+
+    @_retried
+    def task_keys(self, tasks: Collection[int]) -> dict[int, str]:
+        """The token key of each task; a task that is not there is left out."""
+        with self._transaction() as tx:
+            return tx.task_keys(tasks)
+
+    @_retried
     def task_labels(self, tasks: Collection[int]) -> dict[int, dict[str, str]]:
         """The labels of each task's token; a task that is not there is left out."""
         with self._transaction() as tx:

@@ -84,6 +84,7 @@ erDiagram
         string checksum
         string serving
         datetime since
+        json scope
         bool notices
     }
     notices {
@@ -103,6 +104,7 @@ erDiagram
         string holder PK
         string structure
         string checksum
+        string scope
         datetime seen
     }
     stateous_version {

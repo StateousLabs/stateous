@@ -60,6 +60,7 @@ def real_codes() -> set[str]:
         DatabaseHeld,
         ForeignDatabase,
         SchemaNotReady,
+        errors.ScopeConflict,
     }
     codes: set[str] = {
         cls.code for cls in subclasses(errors.ControlPlaneError) if cls not in library_only
