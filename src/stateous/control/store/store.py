@@ -7,6 +7,7 @@ writes inside a transaction that the engine opens, at a time that the engine giv
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -111,10 +112,15 @@ LISTEN_BACKOFF: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 """Seconds before a lost listener connects again. The last value repeats."""
 
 
+NOTIFY_MOST = 7900
+"""Bytes of a "task ready" notice with its labels; Postgres takes at most 8000."""
+
+
 def ready_channel(namespace: str) -> str:
-    """The Postgres channel of "task ready" between the replicas of `namespace`: at most
-    63 bytes, the most that Postgres keeps of a name."""
-    return f"stateous_ready_{namespace}"[:63]
+    """The Postgres channel of "task ready" between the replicas of `namespace`. A hash
+    keeps it short (Postgres keeps 63 bytes of a name) and different for each one."""
+    digest = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:16]
+    return f"stateous_ready_{digest}"
 
 
 def with_labels(labels: dict[str, str] | None) -> list[ColumnElement[bool]]:
@@ -273,6 +279,11 @@ class Store:
             else direct
         )
         """The engine for session-level work: the hold's lock, and LISTEN."""
+        if replica and self._direct.dialect.driver != "psycopg":
+            raise ValueError(
+                "replicas need the psycopg 3 driver (postgresql+psycopg://), not "
+                f"{self._direct.dialect.driver}; it hears the other replicas"
+            )
         self._replica = replica
         self._joined: tuple[str, str] | None = None
         self._channel: str | None = (
@@ -318,12 +329,7 @@ class Store:
             self.notices_on = self._read_notices()
             if hold and not self.hold_serving():
                 raise DatabaseHeld(self._held_message())
-            if hold and self.is_postgres and self.live_replicas():
-                raise DatabaseHeld(
-                    "replicas serve this namespace; stop them first, or open this control "
-                    "plane with exclusive=False"
-                )
-            if replica and self._serving_is_held():
+            if replica and not self._take_shared():
                 raise DatabaseHeld(
                     "an exclusive control plane serves this namespace; stop it first"
                 )
@@ -420,6 +426,8 @@ class Store:
         if self._closed:
             return True
         if self._replica:
+            if not self._keep_shared():
+                return False
             if self._joined is not None:
                 with self.transaction(wall_clock()) as tx:
                     tx.renew_replica(self.holder, *self._joined)
@@ -512,23 +520,47 @@ class Store:
             data = json.loads(payload)
             if data.get("from") == self.holder:
                 return
-            state, labels = str(data["state"]), dict(data.get("labels") or {})
+            state = str(data["state"])
+            labels = data.get("labels")
+            if labels is None:
+                with self.transaction(wall_clock()) as tx:
+                    row = tx.token(str(data["token"]))
+                    labels = {} if row is None else dict(row.labels)
+            found = {str(key): str(value) for key, value in dict(labels).items()}
         except (ValueError, KeyError, TypeError, AttributeError):
             log.warning("a task-ready notice that cannot be read was skipped")
             return
-        self._ready(state, labels)
+        self._ready(state, found)
 
-    def _serving_is_held(self) -> bool:
-        """Postgres: whether an exclusive control plane holds the namespace now. The
-        lock is tried, and let go at once."""
-        with self._direct.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
-            key = {"key": lock_key(self.namespace, SERVING_LOCK)}
-            taken = bool(
-                c.scalar(text("SELECT pg_try_advisory_lock(hashtextextended(:key, 0))"), key)
+    def _take_shared(self) -> bool:
+        """Replicas: hold the serving lock in shared mode for life, on a connection set
+        aside for it. Each replica can hold it; an exclusive control plane cannot take
+        it then, and a replica cannot take it while an exclusive one holds it."""
+        connection = self._direct.connect().execution_options(isolation_level="AUTOCOMMIT")
+        held = bool(
+            connection.scalar(
+                text("SELECT pg_try_advisory_lock_shared(hashtextextended(:key, 0))"),
+                {"key": lock_key(self.namespace, SERVING_LOCK)},
             )
-            if taken:
-                c.execute(text("SELECT pg_advisory_unlock(hashtextextended(:key, 0))"), key)
-            return not taken
+        )
+        if held:
+            self._serving = connection
+        else:
+            connection.close()
+        return held
+
+    def _keep_shared(self) -> bool:
+        """Replicas: whether the shared lock is still held; a dead connection is dropped
+        and the lock taken again. False: an exclusive control plane took it meanwhile."""
+        if self._serving is not None:
+            try:
+                self._serving.scalar(text("SELECT 1"))
+                return True
+            except Exception:  # any failure means the connection is gone
+                self._serving.invalidate()
+                self._serving.close()
+                self._serving = None
+        return self._take_shared()
 
     def live_replicas(self) -> list[tuple[str, str, str]]:
         """The other replicas that serve the namespace now: holder, structure, checksum."""
@@ -737,7 +769,7 @@ class Transaction:
         )
         self._session.flush()
 
-    def ready(self, state: str, labels: Mapping[str, str]) -> None:
+    def ready(self, state: str, labels: Mapping[str, str], *, token: str = "") -> None:
         """A task of `state` (`<workflow>/<state>` for a child), of a token with
         `labels`, can be claimed once this transaction commits."""
         entry = (state, dict(labels))
@@ -746,7 +778,13 @@ class Transaction:
         self.readied.append(entry)
         if self._channel is not None:
             # Sent with the commit, or not at all: the other replicas hear it then.
-            payload = json.dumps({"state": state, "labels": dict(labels), "from": self._holder})
+            payload = json.dumps(
+                {"state": state, "labels": dict(labels), "from": self._holder},
+                ensure_ascii=False,
+            )
+            if len(payload.encode("utf-8")) > NOTIFY_MOST:
+                # Too long for Postgres: the listeners read the token's labels instead.
+                payload = json.dumps({"state": state, "token": token, "from": self._holder})
             self._session.execute(
                 text("SELECT pg_notify(:channel, :payload)"),
                 {"channel": self._channel, "payload": payload},
@@ -906,9 +944,11 @@ class Transaction:
         *,
         parent: str | None = None,
         labels: dict[str, str] | None = None,
+        after: tuple[datetime, str] | None = None,
     ) -> list[tables.Token]:
         """Tokens, the most recently moved first; only those of `status`, if given; only
-        the children of `parent`, if given; only those with each of `labels`."""
+        the children of `parent`, if given; only those with each of `labels`; only those
+        after `(entered_at, token)` in this order, if given."""
         query = select(tables.Token)
         if status is not None:
             query = query.where(tables.Token.status == status)
@@ -916,6 +956,14 @@ class Transaction:
             query = query.where(tables.Token.parent == parent)
         for clause in with_labels(labels):
             query = query.where(clause)
+        if after is not None:
+            at, token = utc(after[0]), after[1]
+            query = query.where(
+                or_(
+                    tables.Token.entered_at < at,
+                    and_(tables.Token.entered_at == at, tables.Token.token > token),
+                )
+            )
         query = query.order_by(tables.Token.entered_at.desc(), tables.Token.token).limit(limit)
         return list(self._session.scalars(query))
 

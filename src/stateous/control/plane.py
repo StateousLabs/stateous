@@ -24,12 +24,12 @@ from stateous.control.access import Action, Authorize
 from stateous.control.clock import LOST, TICK_EVERY, Clock
 from stateous.control.engine import (
     DEFAULT_LEASE,
-    MOST_TOKENS,
     Engine,
     Fired,
     HistoryEntry,
     RecordedGraph,
     Token,
+    check_limit,
     utcnow,
 )
 from stateous.control.errors import Forbidden, GraphConflict, HoldLost, NoticesOff
@@ -40,6 +40,9 @@ from stateous.model.graph_file import load_graph
 from stateous.model.wire import Outcome, TaskGrant
 
 log = logging.getLogger("stateous.notices")
+
+LIST_PAGE = 1000
+"""Tokens that a list with an authorizer reads at a time, until its limit is full."""
 
 NOTICES_EVERY = 1.0
 """Seconds between two rounds of `run_notices` when no notice waits."""
@@ -175,8 +178,17 @@ class ControlPlane:
         only the tokens that the caller may read, up to `limit` of them."""
         if self._authorize is None:
             return self._engine.tokens(status=status, limit=limit, parent=parent, labels=labels)
-        found = self._engine.tokens(status=status, limit=MOST_TOKENS, parent=parent, labels=labels)
-        allowed = [t for t in found if self._authorize(caller, "read", t.labels)]
+        check_limit(limit)
+        allowed: list[Token] = []
+        after: Token | None = None
+        while len(allowed) < limit:
+            page = self._engine.tokens(
+                status=status, limit=LIST_PAGE, parent=parent, labels=labels, after=after
+            )
+            allowed.extend(t for t in page if self._authorize(caller, "read", t.labels))
+            if len(page) < LIST_PAGE:
+                break
+            after = page[-1]
         return allowed[:limit]
 
     def history(self, token: str, *, caller: object = None) -> list[HistoryEntry]:

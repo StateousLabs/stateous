@@ -80,3 +80,19 @@ def test_tokens_filter_by_all_given_labels(plane: ControlPlane) -> None:
     assert [t.token for t in both] == ["T-1"]
     assert sorted(t.token for t in by_user) == ["T-1", "T-2"]
     assert len(plane.tokens()) == 3
+
+
+def test_a_list_filter_with_a_key_twice_is_refused() -> None:
+    from stateous.control.api import Problem, _label_filter  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(Problem):
+        _label_filter(["user=a", "user=b"])
+
+
+def test_the_ready_channel_of_long_namespaces_differs() -> None:
+    from stateous.control.store.store import ready_channel
+
+    first, second = ready_channel("a" * 63), ready_channel("a" * 62 + "b")
+
+    assert first != second
+    assert len(first.encode()) <= 63 and len(second.encode()) <= 63

@@ -161,3 +161,24 @@ def _rows(url: str) -> int:
             return int(connection.scalar(text("SELECT count(*) FROM flow.replicas")) or 0)
     finally:
         engine.dispose()
+
+
+def test_an_exclusive_plane_is_refused_by_a_replicas_lock_even_without_its_row() -> None:
+    url = fresh_postgres_database()
+    first = replica(url)
+    engine = create_engine(database_url(url))
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM flow.replicas"))  # as if the row lapsed
+    engine.dispose()
+    try:
+        with pytest.raises(DatabaseHeld):
+            ControlPlane(sdlc(), database=url, namespace="flow", migrate=True)
+    finally:
+        first.close()
+
+
+def test_a_replica_needs_the_psycopg_3_driver() -> None:
+    pytest.importorskip("psycopg2")
+    url = fresh_postgres_database().replace("postgresql://", "postgresql+psycopg2://")
+    with pytest.raises(ValueError, match="psycopg 3"):
+        ControlPlane(sdlc(), database=create_engine(url), namespace="flow", exclusive=False)

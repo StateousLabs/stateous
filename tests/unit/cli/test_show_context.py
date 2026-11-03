@@ -121,3 +121,10 @@ def test_token_start_takes_labels(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 0, result.output
     assert started == [{"user": "u1", "project": "p7"}]
+
+
+def test_token_start_refuses_a_label_key_twice() -> None:
+    result = CliRunner().invoke(app, ["token", "start", "T-1", "--label", "u=a", "--label", "u=b"])
+
+    assert result.exit_code == 1
+    assert "twice" in result.output

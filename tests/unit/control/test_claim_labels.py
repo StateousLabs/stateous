@@ -61,3 +61,15 @@ def test_count_claimed_counts_only_matching_claimed_tasks(plane: ControlPlane) -
     assert plane.count_claimed(U1) == 1
     assert plane.count_claimed(U2) == 1
     assert plane.count_claimed({"user": "u3"}) == 0
+
+
+def test_a_repeated_claim_with_other_labels_does_not_get_the_grant(plane: ControlPlane) -> None:
+    plane.start("A-1", TICKET, labels={"tenant": "a"})
+    first = plane.claim("worker", ["coding"], request="r1", labels={"tenant": "a"})
+    assert first is not None
+
+    again = plane.claim("worker", [], request="r1", labels={"tenant": "b"})
+
+    assert again is None
+    same = plane.claim("worker", [], request="r1", labels={"tenant": "a"})
+    assert same == first

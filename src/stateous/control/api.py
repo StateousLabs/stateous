@@ -345,6 +345,8 @@ def _label_filter(values: list[str]) -> dict[str, str]:
         key, equals, wanted = value.partition("=")
         if not equals:
             raise Problem(422, "'label' is key=value, for example user=u42", "invalid_argument")
+        if key in found:
+            raise Problem(422, f"the label {key!r} is given twice", "invalid_argument")
         found[key] = wanted
     return found
 

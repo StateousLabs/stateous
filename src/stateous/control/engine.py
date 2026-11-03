@@ -239,14 +239,16 @@ class Engine:
         limit: int = 100,
         parent: str | None = None,
         labels: Mapping[str, str] | None = None,
+        after: Token | None = None,
     ) -> list[Token]:
         """Tokens, the most recently moved first. With `parent`: only its children.
-        With `labels`: only the tokens that have each of them."""
-        if not 0 < limit <= MOST_TOKENS:
-            raise InvalidArgument(f"a listing returns 1 to {MOST_TOKENS} tokens, not {limit}")
+        With `labels`: only the tokens that have each of them. With `after`: only the
+        tokens after that one in this order (the next page)."""
+        check_limit(limit)
         wanted = check_labels(labels)
+        key = None if after is None else (after.entered_at, after.token)
         with self._transaction() as tx:
-            found = tx.find_tokens(status, limit, parent=parent, labels=wanted)
+            found = tx.find_tokens(status, limit, parent=parent, labels=wanted, after=key)
             return [_token(row) for row in found]
 
     @_retried
@@ -310,7 +312,8 @@ class Engine:
                 timer.due_at += tx.now - max(paused_at, timer.set_at)
             member.status = "active"
             tx.append(member.token, "resumed")
-            tx.ready(_claim_name(member, member.state), member.labels)  # its queued task, if any
+            # its queued task, if it has one
+            tx.ready(_claim_name(member, member.state), member.labels, token=member.token)
             held.extend((event, member) for event in _held_events(entries))
         for event, member in sorted(held, key=_arrival):
             self._replay(tx, member, event)
@@ -634,8 +637,12 @@ class Engine:
         if not states and request is None:
             return None
         with self._transaction() as tx:
-            if request is not None and (grant := self._repeat(tx, supervisor, request)):
-                return grant
+            if request is not None:
+                try:
+                    if grant := self._repeat(tx, supervisor, request, wanted):
+                        return grant
+                except _OtherLabels:
+                    return None  # the request id is a claim of other labels: change nothing
             task = tx.claim_task(supervisor, states, wanted) if states else None
             if request is not None:
                 tx.remember_claim(supervisor, request, task)
@@ -648,10 +655,13 @@ class Engine:
             )  # fmt: skip
             return self._grant(tx, task)
 
-    def _repeat(self, tx: Transaction, supervisor: str, request: str) -> TaskGrant | None:
-        """The grant of the supervisor's last claim, again, if `request` repeats it and
-        the supervisor still holds that attempt of the task, with a lease that has
-        not ended. The lease is renewed. None: the claim is a new one."""
+    def _repeat(
+        self, tx: Transaction, supervisor: str, request: str, wanted: dict[str, str]
+    ) -> TaskGrant | None:
+        """The grant of the supervisor's last claim, again, if `request` repeats it, the
+        supervisor still holds that attempt of the task with a lease that has not
+        ended, and the task's token has each of the `wanted` labels. The lease is
+        renewed. None: the claim is a new one."""
         last = tx.last_claim(supervisor)
         if last.request != request or last.task_id is None:
             return None
@@ -664,6 +674,9 @@ class Engine:
             or (task.lease_until is not None and task.lease_until < tx.now)
         ):
             return None
+        row = tx.token(task.token)
+        if row is None or any(row.labels.get(key) != value for key, value in wanted.items()):
+            raise _OtherLabels
         task.lease_until = tx.now + self.lease
         return self._grant(tx, task)
 
@@ -870,7 +883,7 @@ class Engine:
         if task.attempt <= graph.state(task.state).retries:
             task.status, task.claimed_by = "queued", None
             tx.append(row.token, "task_retrying", task=task.id, attempt=task.attempt + 1)
-            tx.ready(_claim_name(row, task.state), row.labels)
+            tx.ready(_claim_name(row, task.state), row.labels, token=row.token)
             # The next attempt runs the routine again, and it sets its own timers.
             # The state's timeout stays: it covers every attempt.
             for timer in tx.pending_timers(row.token):
@@ -1080,7 +1093,7 @@ class Engine:
         if not spec.parallel:
             task = tx.queue_task(row.token, state, visit)
             tx.append(row.token, "task_queued", task=task.id, state=state)
-            tx.ready(_claim_name(row, state), row.labels)
+            tx.ready(_claim_name(row, state), row.labels, token=row.token)
         if spec.timeout is not None:
             self._set_timer(tx, row, TIMEOUT, None, parse_duration(spec.timeout), kind="timeout")
         inputs = {key: row.context[key] for key in spec.inputs if key in row.context}
@@ -1250,6 +1263,16 @@ def _token(row: tables.Token) -> Token:
         parent=row.parent,
         labels=cast("dict[str, str]", dict(row.labels)),
     )
+
+
+class _OtherLabels(Exception):
+    """A repeated claim names a grant whose token lacks the labels that it asks for."""
+
+
+def check_limit(limit: int) -> None:
+    """A listing returns 1 to `MOST_TOKENS` tokens."""
+    if not 0 < limit <= MOST_TOKENS:
+        raise InvalidArgument(f"a listing returns 1 to {MOST_TOKENS} tokens, not {limit}")
 
 
 MAX_LABELS = 16

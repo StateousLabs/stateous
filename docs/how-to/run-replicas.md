@@ -5,6 +5,7 @@ This guide tells you how to run several control planes of one workflow at the sa
 ## Before you start
 
 - The workflow's tables are in Postgres. Replicas need Postgres; on SQLite a control plane always serves alone.
+- The connection uses psycopg 3, the driver that Stateous ships with: a URL `postgresql://` is enough. An engine of your own must be `postgresql+psycopg://`.
 - You run the control plane in your own service. See [Embed a control plane](embed-a-control-plane.md).
 
 ## 1. Open each replica with `exclusive=False`
@@ -31,7 +32,7 @@ An exclusive control plane and replicas do not mix on one namespace. The one tha
 
 ## 2. Run the clock of each replica
 
-Run `plane.run_clock()` in each replica, as for one control plane. Each timer and each ended lease runs in its own transaction, under its token's lock. So two clocks never fire one timer twice.
+Run `plane.run_clock()` in each replica, as for one control plane. Each timer and each ended lease runs in its own transaction, under its token's lock. So two clocks never fire one timer twice. The clock also renews the replica's row: a replica with no clock seems gone after 30 seconds.
 
 ## 3. Roll out a new graph
 
@@ -59,7 +60,7 @@ def open_behind_pooler(pooled_url: str, direct_url: str) -> ControlPlane:
 
 ## "Task ready" across replicas
 
-When a replica makes a task claimable, it sends a notice with the commit. The other replicas hear it, and they wake their waiting claims. A lost listener connection is made again, after 1, 2, 4, 8, 16, then every 30 seconds.
+When a replica makes a task claimable, it sends a notice with the commit. Postgres sends these notices one commit at a time, so very many replicas that commit at once wait a little for each other. The other replicas hear it, and they wake their waiting claims. A lost listener connection is made again, after 1, 2, 4, 8, 16, then every 30 seconds.
 
 ## See also
 

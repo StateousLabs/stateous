@@ -141,3 +141,26 @@ def test_the_authorizer_gets_each_action_by_name(tmp_path: Path) -> None:
 
     assert [action for _, action in seen] == ["start", "read", "claim", "heartbeat"]
     assert {caller for caller, _ in seen} == {"c"}
+
+
+def test_a_list_reads_pages_until_the_limit_is_full(
+    plane: ControlPlane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from stateous.control import plane as plane_module
+
+    monkeypatch.setattr(plane_module, "LIST_PAGE", 4)
+    for n in range(3):
+        plane.start(f"MINE-{n}", TICKET, labels=U2)
+    for n in range(10):  # moved later: they come first in the list
+        plane.start(f"THEIRS-{n}", TICKET, labels=U1)
+
+    found = plane.tokens(limit=3, caller="u2")
+
+    assert sorted(token.token for token in found) == ["MINE-0", "MINE-1", "MINE-2"]
+
+
+def test_a_list_limit_out_of_range_is_refused_with_an_authorizer(plane: ControlPlane) -> None:
+    from stateous import InvalidArgument
+
+    with pytest.raises(InvalidArgument):
+        plane.tokens(limit=5000, caller="u2")

@@ -105,3 +105,21 @@ def test_a_listener_that_lost_its_connection_hears_again() -> None:
         second.close()
 
     assert heard == ["coding"]
+
+
+def test_long_labels_on_replicas_still_work_and_are_heard() -> None:
+    url = fresh_postgres_database()
+    first, second = replica(url), replica(url)
+    labels = {f"k{n}": "é" * 256 for n in range(16)}  # valid; over 8000 bytes as JSON
+    heard: list[dict[str, str]] = []
+    second.on_task_ready(lambda state, found: heard.append(dict(found)))
+    try:
+        first.start("T-1", TICKET, labels=labels)
+        deadline = time.monotonic() + 5
+        while not heard and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        first.close()
+        second.close()
+
+    assert heard == [labels]

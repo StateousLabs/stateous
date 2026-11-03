@@ -174,6 +174,8 @@ def label_pairs(given: list[str]) -> dict[str, str]:
         key, equals, value = pair.partition("=")
         if not equals:
             raise CommandError(f"--label {pair!r} is not KEY=VALUE, for example user=u42")
+        if key in found:
+            raise CommandError(f"--label {key!r} is given twice")
         found[key] = value
     return found
 

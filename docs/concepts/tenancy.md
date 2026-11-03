@@ -35,7 +35,7 @@ So Stateous gives two small tools, and no tenancy model. Your code decides how t
 - Your queue: `answer(plane, call, caller=...)`.
 - Your own code: the keyword `caller` of each `ControlPlane` method.
 
-**Entitlements.** `plane.count_claimed(labels)` counts the tasks claimed now for those labels. Your authorizer can use it, for example to allow 3 tasks at a time on a plan.
+**Entitlements.** `plane.count_claimed(labels)` counts the tasks claimed now for those labels. Your authorizer can use it, for example to allow about 3 tasks at a time on a plan. It is a soft limit: two claims at the same moment can both see 2, and both claim.
 
 ## Example
 
