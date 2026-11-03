@@ -26,7 +26,7 @@ from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from stateous.control import checks
-from stateous.control.checks import MAX_TASK, Problem
+from stateous.control.checks import MAX_BODY, MAX_DEPTH, MAX_TASK, Problem
 from stateous.control.clock import LOST
 from stateous.control.engine import Fired, HistoryEntry, Token
 from stateous.control.errors import (
@@ -44,12 +44,6 @@ from stateous.control.errors import (
 )
 from stateous.control.waiting import WaitingClaims
 from stateous.model.wire import Outcome, TaskGrant, WireError
-
-MAX_BODY = 1024 * 1024
-"""The largest request body the API reads, in bytes: 1 MiB."""
-
-MAX_DEPTH = 64
-"""The deepest a request's JSON may nest. Contexts and payloads have a few levels."""
 
 MAX_DIGITS = 18
 """The most digits a Content-Length or a `limit` may have before `int()` reads it."""
@@ -136,7 +130,8 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
     health = engine.health()
     if waiting is None:
         waiting = WaitingClaims()
-    engine.on_task_ready(waiting.ready)
+    if waiting.subscribe is None:
+        waiting.subscribe = engine.on_task_ready
 
     async def start(request: Request) -> Response:
         body = await body_of(request)
@@ -411,26 +406,9 @@ def read_json(raw: bytes) -> Any:
         value = json.loads(raw, parse_constant=constant)
     except RecursionError:
         raise ValueError(too_deep) from None
-    if _depth_over(value, MAX_DEPTH):
+    if checks.depth_over(value, MAX_DEPTH):
         raise ValueError(too_deep)
     return value
-
-
-def _depth_over(value: Any, limit: int) -> bool:
-    """Whether `value` nests more than `limit` objects or lists deep. No recursion."""
-    stack: list[tuple[Any, int]] = [(value, 0)]
-    while stack:
-        item, depth = stack.pop()
-        if isinstance(item, dict):
-            children: list[Any] = list(cast("dict[str, Any]", item).values())
-        elif isinstance(item, list):
-            children = cast("list[Any]", item)
-        else:
-            continue
-        if depth + 1 > limit:
-            return True
-        stack.extend((child, depth + 1) for child in children)
-    return False
 
 
 class NotServing:

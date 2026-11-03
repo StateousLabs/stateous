@@ -9,14 +9,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Collection, Generator
+from collections.abc import Callable, Collection, Generator
 from contextlib import contextmanager
 
 
 class WaitingClaims:
     """The claims that wait now, by the states they claim."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        subscribe: Callable[[Callable[[str], None]], Callable[[], None]] | None = None,
+    ) -> None:
+        """`subscribe` is a control plane's `on_task_ready`. The set hears "ready"
+        only while a claim waits, so an app that is made and dropped leaves nothing
+        behind."""
+        self.subscribe = subscribe
+        self._unsubscribe: Callable[[], None] | None = None
         # Reentrant: a signal handler can call `close` on the thread that is inside
         # `waiting` now.
         self._lock = threading.RLock()
@@ -48,6 +56,8 @@ class WaitingClaims:
         entry = (frozenset(states), asyncio.get_running_loop(), event)
         with self._lock:
             self._waiting.append(entry)
+            if self.subscribe is not None and self._unsubscribe is None:
+                self._unsubscribe = self.subscribe(self.ready)
             if self.closed:
                 event.set()
         try:
@@ -55,6 +65,9 @@ class WaitingClaims:
         finally:
             with self._lock:
                 self._waiting.remove(entry)
+                if not self._waiting and self._unsubscribe is not None:
+                    self._unsubscribe()
+                    self._unsubscribe = None
 
 
 def _wake(loop: asyncio.AbstractEventLoop, event: asyncio.Event) -> None:

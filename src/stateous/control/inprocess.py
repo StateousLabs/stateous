@@ -20,8 +20,7 @@ class InProcess(CallingTransport):
 
     def __init__(self, plane: ControlPlane) -> None:
         self.plane = plane
-        self._waiting = WaitingClaims()
-        self._remove = plane.on_task_ready(self._waiting.ready)
+        self._waiting = WaitingClaims(plane.on_task_ready)
 
         async def send(call: Call) -> Reply:
             return await asyncio.to_thread(answer, plane, call)
@@ -48,6 +47,5 @@ class InProcess(CallingTransport):
             return await super().claim(supervisor, states, request=request)
 
     async def aclose(self) -> None:
-        """Stop hearing "task ready", and wake each claim that waits."""
-        self._remove()
+        """Wake each claim that waits."""
         self._waiting.close()

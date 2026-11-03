@@ -105,7 +105,7 @@ def open_all(database_url: str) -> dict[str, ControlPlane]:
     }
 ```
 
-Each control plane holds its namespace while it runs. A second control plane on the same namespace does not start.
+Each control plane holds its namespace while it runs. A second control plane on the same namespace does not start. To hold it, each control plane keeps one database connection open for its whole life. So give your pool one connection more for each workflow.
 
 ## 6. Connect the workflows
 
@@ -113,7 +113,7 @@ Workflows know nothing about each other. Your code connects them with [notices](
 
 ## Connection poolers
 
-The calls of a control plane work through a pooler in transaction mode, for example PgBouncer. The hold of a namespace needs a session connection. So give the control plane a direct connection to Postgres, not one through such a pooler.
+A control plane needs a session connection for the hold of its namespace. A pooler in transaction mode, for example PgBouncer, does not give one. So connect the control plane to Postgres directly, not through such a pooler.
 
 ## See also
 

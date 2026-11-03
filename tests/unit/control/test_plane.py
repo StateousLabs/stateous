@@ -167,3 +167,15 @@ def test_run_clock_raises_hold_lost_when_another_took_the_database(tmp_path: Pat
 
         with pytest.raises(HoldLost):
             asyncio.run(asyncio.wait_for(plane.run_clock(every=0.01), timeout=10))
+
+
+def test_the_store_errors_are_control_plane_errors() -> None:
+    assert stateous.DatabaseHeld.code == "database_held"
+    assert stateous.ForeignDatabase.code == "foreign_database"
+    assert stateous.SchemaNotReady.code == "schema_not_ready"
+    for error in (stateous.DatabaseHeld, stateous.ForeignDatabase, stateous.SchemaNotReady):
+        assert issubclass(error, ControlPlaneError)
+
+
+def test_dir_shows_the_names_that_load_later() -> None:
+    assert {"ControlPlane", "supervise", "Notice"} <= set(dir(stateous))

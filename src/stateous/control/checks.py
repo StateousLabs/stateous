@@ -121,3 +121,27 @@ def note_text(value: Any) -> str:
             422, f"a note needs a 'text' of 1 to {MAX_NOTE} characters", "invalid_payload"
         )
     return text
+
+
+MAX_BODY = 1024 * 1024
+"""The largest request body the API reads, in bytes: 1 MiB."""
+
+MAX_DEPTH = 64
+"""The deepest a request's JSON may nest. Contexts and payloads have a few levels."""
+
+
+def depth_over(value: Any, limit: int) -> bool:
+    """Whether `value` nests more than `limit` objects or lists deep. No recursion."""
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, dict):
+            children: list[Any] = list(cast("dict[str, Any]", item).values())
+        elif isinstance(item, list):
+            children = cast("list[Any]", item)
+        else:
+            continue
+        if depth + 1 > limit:
+            return True
+        stack.extend((child, depth + 1) for child in children)
+    return False

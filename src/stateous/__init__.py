@@ -87,6 +87,11 @@ def __getattr__(name: str) -> Any:
     return value
 
 
+def __dir__() -> list[str]:
+    """The public names, also those that load when first used."""
+    return sorted(set(globals()) | set(__all__))
+
+
 __all__ = [
     "END",
     "START",

@@ -6,13 +6,14 @@ never raises: it is a reply with the code of the refusal."""
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from sqlalchemy.exc import OperationalError
 
 from stateous.control import checks
-from stateous.control.checks import MAX_TASK, Problem
+from stateous.control.checks import MAX_BODY, MAX_DEPTH, MAX_TASK, Problem
 from stateous.control.errors import ControlPlaneError, HoldLost
 from stateous.control.plane import ControlPlane
 from stateous.model.wire import Outcome, WireError
@@ -28,6 +29,7 @@ def answer(plane: ControlPlane, call: Call) -> Reply:
     try:
         if plane.lost:
             raise HoldLost("another control plane took this database")
+        _check_limits(call)
         return Reply(ok=True, body=_run(plane, call.name, call.args))
     except ControlPlaneError as error:
         return _refused(error.code, error)
@@ -72,6 +74,15 @@ def _run(plane: ControlPlane, name: str, args: dict[str, Any]) -> Any:
             raise WireError("memory needs a 'value'; null deletes the key")
         plane.set_memory(task, key, args["value"], attempt=checks.attempt(args.get("attempt")))
     return None
+
+
+def _check_limits(call: Call) -> None:
+    """The HTTP API's limits on a request body, for a call by any transport: at most
+    `MAX_BODY` bytes of JSON, nested at most `MAX_DEPTH` levels."""
+    if checks.depth_over(call.args, MAX_DEPTH):
+        raise Problem(400, f"the call is nested more than {MAX_DEPTH} levels deep")
+    if len(json.dumps(call.args).encode("utf-8")) > MAX_BODY:
+        raise Problem(400, f"the call is larger than {MAX_BODY // (1024 * 1024)} MiB")
 
 
 def _task(value: Any) -> int:

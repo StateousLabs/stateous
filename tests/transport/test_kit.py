@@ -16,7 +16,7 @@ from stateous.model.wire import TaskGrant
 from stateous.supervisor.remote import HttpTransport
 from stateous.supervisor.retrying import Retrying
 from stateous.testing import check_transport
-from stateous.transport import Transport
+from stateous.transport import Call, Transport
 
 from ..unit.control.support import TICKET, sdlc, sqlite_url
 from .memory_queue import MemoryQueue
@@ -90,3 +90,19 @@ def test_a_lost_reply_retried_with_the_same_request_gets_the_same_grant(tmp_path
     assert grant is not None
     assert grant.attempt == 1  # claimed once: the second answer is the same grant
     assert answered == 2
+
+
+class NoAttemptOnNotes(MemoryQueue):
+    """A broken transport: it drops the attempt of a note."""
+
+    async def note(self, task: int, text: str, *, attempt: int) -> None:
+        await self._call(Call("note", {"task": task, "text": text}))
+
+
+async def drops_attempts(plane: ControlPlane) -> Transport:
+    return NoAttemptOnNotes(plane)
+
+
+def test_the_kit_finds_a_transport_that_drops_the_attempt() -> None:
+    with pytest.raises(AssertionError, match="note_keeps_its_attempt"):
+        asyncio.run(check_transport(drops_attempts))

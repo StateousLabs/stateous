@@ -132,6 +132,38 @@ async def _heartbeat_lists_lost_tasks(plane: ControlPlane, transport: Transport,
     assert lost == [999_999], f"the heartbeat answered {lost}, not [999999]"
 
 
+async def _note_keeps_its_attempt(plane: ControlPlane, transport: Transport, url: str) -> None:
+    plane.start("K-1", {"title": "one"})
+    first = await transport.claim(SUPERVISOR, ["work"])
+    assert first is not None, "a claim got no task, but one was queued"
+    failed = Outcome(kind="failed", error="kit", attempt=first.attempt)
+    await transport.report(first.task, failed, supervisor=SUPERVISOR)
+    second = await transport.claim(SUPERVISOR, ["work"])
+    assert second is not None, "no second attempt"
+    try:
+        await transport.note(first.task, "late", attempt=first.attempt)
+    except Refused as refused:
+        assert refused.code == "attempt_over", f"the code is {refused.code!r}"
+    else:
+        raise AssertionError("a note for an old attempt was not refused; carry `attempt`")
+
+
+async def _report_keeps_its_supervisor(plane: ControlPlane, transport: Transport, url: str) -> None:
+    plane.start("K-1", {"title": "one"})
+    grant = await transport.claim(SUPERVISOR, ["work"])
+    assert grant is not None, "a claim got no task, but one was queued"
+    outcome = Outcome(kind="event", event="done", attempt=grant.attempt)
+    try:
+        await transport.report(grant.task, outcome, supervisor="another-supervisor")
+    except Refused as refused:
+        assert refused.code == "task_not_held", f"the code is {refused.code!r}"
+    else:
+        raise AssertionError(
+            "a report by a supervisor that does not hold the task was not refused; "
+            "carry `supervisor`"
+        )
+
+
 async def _not_serving_is_not_reached(plane: ControlPlane, transport: Transport, url: str) -> None:
     _take_the_hold(url)
     with contextlib.suppress(HoldLost):  # the plane learns that it lost the database
@@ -173,6 +205,8 @@ CHECKS: dict[str, Callable[[ControlPlane, Transport, str], Awaitable[None]]] = {
     "refusal_keeps_its_code": _refusal_keeps_its_code,
     "late_attempt_refused": _late_attempt_refused,
     "heartbeat_lists_lost_tasks": _heartbeat_lists_lost_tasks,
+    "note_keeps_its_attempt": _note_keeps_its_attempt,
+    "report_keeps_its_supervisor": _report_keeps_its_supervisor,
     "not_serving_is_not_reached": _not_serving_is_not_reached,
     "wait_is_bounded": _wait_is_bounded,
 }

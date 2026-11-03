@@ -11,6 +11,7 @@ from typer.core import TyperGroup
 import stateous
 import stateous.client
 from stateous.control import errors
+from stateous.control.store.errors import DatabaseHeld, ForeignDatabase, SchemaNotReady
 from stateous.supervisor.folder import _config_text  # pyright: ignore[reportPrivateUsage]
 
 from .pages import ROOT, TYPER_OWN, Command, child, cli, commands, options, page, section
@@ -53,7 +54,13 @@ def subclasses(cls: type[errors.ControlPlaneError]) -> set[type[errors.ControlPl
 def real_codes() -> set[str]:
     """Each refusal code: those of the engine's errors, and those that the API and
     `serve` write as text."""
-    library_only = {errors.GraphConflict, errors.NoticesOff}  # the library's own: never sent
+    library_only = {  # the library's own: never sent
+        errors.GraphConflict,
+        errors.NoticesOff,
+        DatabaseHeld,
+        ForeignDatabase,
+        SchemaNotReady,
+    }
     codes: set[str] = {
         cls.code for cls in subclasses(errors.ControlPlaneError) if cls not in library_only
     }

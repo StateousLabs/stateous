@@ -127,3 +127,28 @@ def test_an_unexpected_error_is_one_sentence(
         "unexpected",
         "the call failed unexpectedly",
     )
+
+
+def test_an_app_made_again_and_again_leaves_no_callback(plane: ControlPlane) -> None:
+    from stateous.control.api import create_app
+
+    for _ in range(3):
+        create_app(plane)
+
+    assert plane._engine.store._on_ready == []  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_call_too_large_or_too_deep_is_bad_request(plane: ControlPlane) -> None:
+    from stateous.control.checks import MAX_BODY, MAX_DEPTH
+
+    deep: dict[str, object] = {}
+    inner = deep
+    for _ in range(MAX_DEPTH + 1):
+        inner["x"] = {}
+        inner = inner["x"]  # type: ignore[assignment]
+    large = Call("note", {"task": 1, "text": "x" * (MAX_BODY + 1), "attempt": 1})
+    nested = Call("set_memory", {"task": 1, "key": "k", "value": deep, "attempt": 1})
+
+    for call in (large, nested):
+        reply = answer(plane, call)
+        assert (reply.ok, reply.code) == (False, "bad_request"), reply
