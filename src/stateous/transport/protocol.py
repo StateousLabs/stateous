@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import Any, Protocol
 
 from stateous.model.wire import Outcome, TaskGrant
@@ -27,10 +27,11 @@ class Transport(Protocol):
         *,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         """A task of one of `states`, or None. With `wait`: the control plane may hold
-        the call up to `wait` seconds for a task. The same `request` gets the same
-        grant again."""
+        the call up to `wait` seconds for a task. With `labels`: only a task whose token
+        has each of them. The same `request` gets the same grant again."""
         ...
 
     async def report(self, task: int, outcome: Outcome, *, supervisor: str) -> None:

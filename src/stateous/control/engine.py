@@ -610,7 +610,12 @@ class Engine:
 
     @_retried
     def claim(
-        self, supervisor: str, states: Collection[str], *, request: str | None = None
+        self,
+        supervisor: str,
+        states: Collection[str],
+        *,
+        request: str | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         """The oldest queued task of `states` whose token is active, now claimed by
         `supervisor` with a lease; None if there is none.
@@ -621,6 +626,7 @@ class Engine:
         the lease is renewed, and no new task is claimed. So a claim whose answer
         was lost loses no task. Else the repeat is a new claim."""
         _check_supervisor(supervisor)
+        wanted = check_labels(labels)
         if request is not None:
             _check_request(request)
         if not states and request is None:
@@ -628,7 +634,7 @@ class Engine:
         with self._transaction() as tx:
             if request is not None and (grant := self._repeat(tx, supervisor, request)):
                 return grant
-            task = tx.claim_task(supervisor, states) if states else None
+            task = tx.claim_task(supervisor, states, wanted) if states else None
             if request is not None:
                 tx.remember_claim(supervisor, request, task)
             if task is None:
@@ -658,6 +664,13 @@ class Engine:
             return None
         task.lease_until = tx.now + self.lease
         return self._grant(tx, task)
+
+    @_retried
+    def count_claimed(self, labels: Mapping[str, str]) -> int:
+        """How many tasks are claimed now whose token has each of `labels`."""
+        wanted = check_labels(labels)
+        with self._transaction() as tx:
+            return tx.count_claimed(wanted)
 
     @_retried
     def report(

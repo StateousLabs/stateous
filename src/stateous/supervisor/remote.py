@@ -56,10 +56,14 @@ class HttpTransport:
         *,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         """A task of one of `states`, or None. With `wait`, the control plane may hold
-        the request up to `wait` seconds for a task."""
+        the request up to `wait` seconds for a task. With `labels`: only a task whose
+        token has each of them."""
         body: dict[str, Any] = {"supervisor": supervisor, "states": list(states)}
+        if labels:
+            body["labels"] = dict(labels)
         if request is not None:
             body["request"] = request
         if wait > 0:

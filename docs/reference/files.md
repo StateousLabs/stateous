@@ -135,6 +135,7 @@ To give the supervisor a name, remove the `#` before `name:`.
 | `url` | The control plane: an `http://` or `https://` address. Required. With a URL as the source, `init` writes that URL. With a graph file or a `flow.py`, it writes `http://127.0.0.1:8080`. |
 | `tasks` | How many routines run at once: 1 to 1000. The default is 4. |
 | `name` | The supervisor's name in the token's history: 1 to 128 characters. The default is the host name. |
+| `labels` | Labels that each claim asks for, for example `user: u42`. The supervisor then takes only the tasks of tokens with each of them. Optional. |
 
 A wrong key value stops `stateous supervise` with one line that names the key.
 

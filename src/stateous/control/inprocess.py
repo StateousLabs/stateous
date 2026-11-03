@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 
 from stateous.control.answer import answer
 from stateous.control.plane import ControlPlane
@@ -34,17 +34,18 @@ class InProcess(CallingTransport):
         *,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         """A task of one of `states`, or None after up to `wait` seconds."""
         if wait <= 0:
-            return await super().claim(supervisor, states, request=request)
+            return await super().claim(supervisor, states, request=request, labels=labels)
         with self._waiting.waiting(states) as ready:
-            grant = await super().claim(supervisor, states, request=request)
+            grant = await super().claim(supervisor, states, request=request, labels=labels)
             if grant is not None:
                 return grant
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(ready.wait(), wait)
-            return await super().claim(supervisor, states, request=request)
+            return await super().claim(supervisor, states, request=request, labels=labels)
 
     async def aclose(self) -> None:
         """Wake each claim that waits."""

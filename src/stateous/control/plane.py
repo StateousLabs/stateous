@@ -171,12 +171,23 @@ class ControlPlane:
     # ── supervisors ─────────────────────────────────────────────────────
 
     def claim(
-        self, supervisor: str, states: Collection[str], *, request: str | None = None
+        self,
+        supervisor: str,
+        states: Collection[str],
+        *,
+        request: str | None = None,
+        labels: Mapping[str, str] | None = None,
+        caller: object = None,
     ) -> TaskGrant | None:
         """The oldest queued task of `states`, now claimed by `supervisor` with a
-        lease; None if there is none. A repeat with the same `request` gets the same
-        grant again."""
-        return self._engine.claim(supervisor, states, request=request)
+        lease; None if there is none. With `labels`: only a task whose token has each
+        of them. A repeat with the same `request` gets the same grant again."""
+        return self._engine.claim(supervisor, states, request=request, labels=labels)
+
+    def count_claimed(self, labels: Mapping[str, str]) -> int:
+        """How many tasks are claimed now whose token has each of `labels`: for an
+        entitlement, for example "3 tasks at a time on this plan"."""
+        return self._engine.count_claimed(labels)
 
     def report(
         self,

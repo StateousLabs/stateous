@@ -675,6 +675,16 @@ class Transaction:
         self._session.add(row)
         self._session.flush()
 
+    def count_claimed(self, labels: dict[str, str]) -> int:
+        """How many tasks are claimed now whose token has each of `labels`."""
+        query = (
+            select(func.count())
+            .select_from(tables.Task)
+            .join(tables.Token, tables.Token.token == tables.Task.token)
+            .where(tables.Task.status == "claimed", *with_labels(labels))
+        )
+        return self._session.scalar(query) or 0
+
     def set_labels(self, token: str, labels: dict[str, str]) -> None:
         """The rows of a new token's labels."""
         for key, value in labels.items():
@@ -764,7 +774,12 @@ class Transaction:
             )
         )
 
-    def claim_task(self, supervisor: str, states: Collection[str]) -> tables.Task | None:
+    def claim_task(
+        self,
+        supervisor: str,
+        states: Collection[str],
+        labels: dict[str, str] | None = None,
+    ) -> tables.Task | None:
         """Claim the oldest queued task of one of `states` whose token is active and
         not busy. `<state>` names a state of the main workflow; `<workflow>/<state>`
         names a state of a child workflow. Two supervisors never take the same task."""
@@ -775,6 +790,7 @@ class Transaction:
                 tables.Task.status == "queued",
                 _served(states),
                 tables.Token.status == "active",  # a paused token's task waits
+                *with_labels(labels),
             )
             .order_by(tables.Task.id)
             .limit(CANDIDATES)

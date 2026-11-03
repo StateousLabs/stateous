@@ -89,3 +89,57 @@ def test_supervise_refuses_a_folder_for_another_graph(tmp_path: Path) -> None:
 
     with pytest.raises(SupervisorError, match="is for another version of the workflow"):
         asyncio.run(main())
+
+
+def test_supervise_claims_only_the_tasks_of_its_labels(tmp_path: Path) -> None:
+    graph = compile_flow(tmp_path, FLOW)
+    folder = folder_for(tmp_path, graph)
+
+    async def main() -> tuple[str, str]:
+        with ControlPlane(graph, database=database(tmp_path), migrate=True) as plane:
+            plane.start("J-1", {"title": "a"}, labels={"user": "u1"})
+            plane.start("J-2", {"title": "b"}, labels={"user": "u2"})
+            stop = asyncio.Event()
+
+            async def stop_when_done() -> None:
+                while plane.get("J-2").status != "completed":
+                    await asyncio.sleep(0.05)
+                await asyncio.sleep(0.3)  # time to take J-1, if it would
+                stop.set()
+
+            watcher = asyncio.create_task(stop_when_done())
+            await asyncio.wait_for(
+                supervise(folder, InProcess(plane), stop=stop, labels={"user": "u2"}), timeout=30
+            )
+            await watcher
+            return plane.get("J-1").status, plane.get("J-2").status
+
+    assert asyncio.run(main()) == ("active", "completed")
+
+
+def test_the_folder_gives_its_labels_to_the_supervisor(tmp_path: Path) -> None:
+    graph = compile_flow(tmp_path, FLOW)
+    folder = folder_for(tmp_path, graph)
+    config = folder / "stateous.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8") + "labels:\n  user: u2\n", encoding="utf-8"
+    )
+
+    async def main() -> str:
+        with ControlPlane(graph, database=database(tmp_path), migrate=True) as plane:
+            plane.start("J-1", {"title": "a"}, labels={"user": "u1"})
+            plane.start("J-2", {"title": "b"}, labels={"user": "u2"})
+            stop = asyncio.Event()
+
+            async def stop_when_done() -> None:
+                while plane.get("J-2").status != "completed":
+                    await asyncio.sleep(0.05)
+                await asyncio.sleep(0.3)
+                stop.set()
+
+            watcher = asyncio.create_task(stop_when_done())
+            await asyncio.wait_for(supervise(folder, InProcess(plane), stop=stop), timeout=30)
+            await watcher
+            return plane.get("J-1").status
+
+    assert asyncio.run(main()) == "active"

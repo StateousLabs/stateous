@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import replace
 from types import ModuleType
 from typing import Any
@@ -87,6 +87,7 @@ class FakeApi:
         stop: asyncio.Event | None = None,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         self.calls.append(("claim", supervisor, tuple(states)))
         self.claim_requests.append(request)

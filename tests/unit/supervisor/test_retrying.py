@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import Any
 
 import pytest
@@ -37,6 +37,7 @@ class Flaky:
         *,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         await self._attempt()
         return None

@@ -3,7 +3,7 @@ gives back its `Reply`. A queue transport needs only that function."""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from typing import Any, cast
 
 from stateous.model.wire import Outcome, TaskGrant, WireError
@@ -31,9 +31,16 @@ class CallingTransport:
         *,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         """A task of one of `states`, or None."""
-        args = {"supervisor": supervisor, "states": list(states), "request": request, "wait": wait}
+        args = {
+            "supervisor": supervisor,
+            "states": list(states),
+            "request": request,
+            "wait": wait,
+            "labels": None if labels is None else dict(labels),
+        }
         body = await self._call(Call("claim", args))
         if body is None:
             return None

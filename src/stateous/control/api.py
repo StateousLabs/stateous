@@ -108,7 +108,12 @@ class Served(Protocol):
     def cancel(self, token: str) -> Token: ...
 
     def claim(
-        self, supervisor: str, states: Collection[str], *, request: str | None = None
+        self,
+        supervisor: str,
+        states: Collection[str],
+        *,
+        request: str | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None: ...
 
     def report(
@@ -201,9 +206,10 @@ def create_app(engine: Served, *, waiting: WaitingClaims | None = None) -> Starl
         states = checks.state_names(body.get("states"), "states")
         request_id = checks.request_id(body.get("request"))
         wait = checks.claim_wait(body.get("wait"))
+        labels = body.get("labels")
 
         def claimed() -> TaskGrant | None:
-            return engine.claim(supervisor, states, request=request_id)
+            return engine.claim(supervisor, states, request=request_id, labels=labels)
 
         if wait == 0:
             grant = await run_in_threadpool(claimed)

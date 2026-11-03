@@ -51,7 +51,7 @@ import sqlite3
 import sys
 import threading
 import uuid
-from collections.abc import Callable, Collection, Generator
+from collections.abc import Callable, Collection, Generator, Mapping
 from dataclasses import dataclass, replace
 from types import FrameType
 from typing import Any, Protocol, cast
@@ -116,6 +116,7 @@ class Api(Protocol):
         stop: asyncio.Event | None = None,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None: ...
 
     async def report(
@@ -266,8 +267,10 @@ class Supervisor:
         idle: float = IDLE,
         cancel_wait: float = CANCEL_WAIT,
         outbox: Outbox | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> None:
-        """`outbox`: the outbox of the folder. None: an outbox in memory (for tests)."""
+        """`outbox`: the outbox of the folder. None: an outbox in memory (for tests).
+        `labels`: each claim takes only a task whose token has each of them."""
         if tasks < 1:
             raise ValueError("tasks must be 1 or more")
         self.api = api
@@ -277,6 +280,7 @@ class Supervisor:
         self.heartbeat_every = heartbeat_every
         self.idle = idle
         self.cancel_wait = cancel_wait
+        self.labels: dict[str, str] | None = dict(labels) if labels else None
         self.outbox = outbox if outbox is not None else Outbox.in_memory()
         self._running: set[_Running] = set()
         self._stopping = asyncio.Event()
@@ -407,6 +411,7 @@ class Supervisor:
                     stop=self._stopping,
                     request=request,
                     wait=min(self.idle, MAX_CLAIM_WAIT),
+                    labels=self.labels,
                 )
             except Refused as error:
                 log.warning("the control plane refused a claim: %s", error.message)
@@ -735,6 +740,7 @@ async def open_supervisor(
     *,
     heartbeat_every: float = HEARTBEAT_EVERY,
     idle: float = IDLE,
+    labels: Mapping[str, str] | None = None,
 ) -> Supervisor:
     """The supervisor of `folder`, checked against the control plane: its
     `contract.py` must be for the graph the control plane serves, and the folder
@@ -752,14 +758,22 @@ async def open_supervisor(
     except OutboxError as error:
         raise SupervisorError(str(error)) from None
     try:
-        return await _checked(folder, api, outbox, heartbeat_every=heartbeat_every, idle=idle)
+        return await _checked(
+            folder, api, outbox, heartbeat_every=heartbeat_every, idle=idle, labels=labels
+        )
     except BaseException:
         outbox.close()
         raise
 
 
 async def _checked(
-    folder: Folder, api: Api, outbox: Outbox, *, heartbeat_every: float, idle: float
+    folder: Folder,
+    api: Api,
+    outbox: Outbox,
+    *,
+    heartbeat_every: float,
+    idle: float,
+    labels: Mapping[str, str] | None = None,
 ) -> Supervisor:
     try:
         health = await api.health()
@@ -794,6 +808,7 @@ async def _checked(
         heartbeat_every=heartbeat_every,
         idle=idle,
         outbox=outbox,
+        labels=labels if labels is not None else folder.config.labels,
     )
 
 

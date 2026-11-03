@@ -50,6 +50,8 @@ class FolderConfig(BaseModel):
     """How many routines run at once."""
     name: str | None = Field(default=None, min_length=1, max_length=128)
     """The supervisor's name in the token's history. Default: the host name."""
+    labels: dict[str, str] | None = None
+    """Labels that each claim asks for: only a task whose token has each of them."""
 
     @field_validator("url")
     @classmethod

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import Any
 
 import pytest
@@ -384,8 +384,11 @@ def test_a_refused_claim_is_an_answer_and_the_next_claim_gets_a_new_request_id()
             stop: asyncio.Event | None = None,
             request: str | None = None,
             wait: float = 0,
+            labels: Mapping[str, str] | None = None,
         ) -> None:
-            await super().claim(supervisor, states, stop=stop, request=request, wait=wait)
+            await super().claim(
+                supervisor, states, stop=stop, request=request, wait=wait, labels=labels
+            )
             raise Refused("unexpected", "'states' is a list of state names")
 
     api = RefusingApi()

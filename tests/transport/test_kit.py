@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 import httpx2
@@ -56,8 +56,9 @@ class NoRequestId(MemoryQueue):
         *,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
-        return await super().claim(supervisor, states, wait=wait)
+        return await super().claim(supervisor, states, wait=wait, labels=labels)
 
 
 async def broken(plane: ControlPlane) -> Transport:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Mapping
 from pathlib import Path
 
 from stateous.supervisor.folder import FolderError, load_folder
@@ -21,6 +22,7 @@ async def supervise(
     *,
     stop: asyncio.Event | None = None,
     idle: float = IDLE,
+    labels: Mapping[str, str] | None = None,
 ) -> int:
     """Run the supervisor of `folder` over `transport`, until `stop` is set (then it
     stops as on Ctrl-C: the running routines end and report) or until it ends.
@@ -29,12 +31,15 @@ async def supervise(
 
     `idle` is how long a claim may wait for a task at the control plane (at most 30
     seconds), and the time between two claims when there is none. A longer `idle`
-    sends fewer claims; a stop then can wait up to `idle` for the claim in flight."""
+    sends fewer claims; a stop then can wait up to `idle` for the claim in flight.
+
+    `labels` replace the `labels` of the folder's `stateous.yaml`: each claim takes
+    only a task whose token has each of them."""
     try:
         loaded = load_folder(Path(folder))
     except FolderError as error:
         raise SupervisorError(str(error)) from None
-    supervisor = await open_supervisor(loaded, Retrying(transport), idle=idle)
+    supervisor = await open_supervisor(loaded, Retrying(transport), idle=idle, labels=labels)
     watcher: asyncio.Task[None] | None = None
     if stop is not None:
 

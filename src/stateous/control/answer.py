@@ -55,7 +55,8 @@ def _run(plane: ControlPlane, name: str, args: dict[str, Any]) -> Any:
         supervisor = checks.supervisor_name(args.get("supervisor"))
         states = checks.state_names(args.get("states"), "states")
         request = checks.request_id(args.get("request"))
-        grant = plane.claim(supervisor, states, request=request)
+        checks.claim_wait(args.get("wait"))
+        grant = plane.claim(supervisor, states, request=request, labels=args.get("labels"))
         return None if grant is None else grant.to_json()
     if name == "heartbeat":
         supervisor = checks.supervisor_name(args.get("supervisor"))

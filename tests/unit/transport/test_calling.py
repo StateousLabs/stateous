@@ -51,7 +51,9 @@ def test_each_call_is_encoded_as_the_kit_expects() -> None:
     transport = CallingTransport(send, where="a queue")
 
     async def run() -> None:
-        grant = await transport.claim("box-1", ["coding"], request="r1", wait=5)
+        grant = await transport.claim(
+            "box-1", ["coding"], request="r1", wait=5, labels={"user": "u1"}
+        )
         assert grant is not None and grant.task == 7
         await transport.report(7, Outcome(kind="waiting"), supervisor="box-1")
         assert await transport.heartbeat("box-1", [3, 7]) == [3]
@@ -62,7 +64,14 @@ def test_each_call_is_encoded_as_the_kit_expects() -> None:
     asyncio.run(run())
 
     assert send.calls[0] == Call(
-        "claim", {"supervisor": "box-1", "states": ["coding"], "request": "r1", "wait": 5}
+        "claim",
+        {
+            "supervisor": "box-1",
+            "states": ["coding"],
+            "request": "r1",
+            "wait": 5,
+            "labels": {"user": "u1"},
+        },
     )
     assert send.calls[1] == Call(
         "report",

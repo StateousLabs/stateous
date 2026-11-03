@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from typing import Any, TypeVar
 
 from stateous.model.wire import Outcome, TaskGrant
@@ -61,12 +61,16 @@ class Retrying:
         stop: asyncio.Event | None = None,
         request: str | None = None,
         wait: float = 0,
+        labels: Mapping[str, str] | None = None,
     ) -> TaskGrant | None:
         """A task of one of `states`, or None. Also None when `stop` is set while the
         claim waits to try again. Each new try sends the same `request` id."""
         try:
             return await self._until_answered(
-                lambda: self.transport.claim(supervisor, states, request=request, wait=wait), stop
+                lambda: self.transport.claim(
+                    supervisor, states, request=request, wait=wait, labels=labels
+                ),
+                stop,
             )
         except GaveUp:
             return None
