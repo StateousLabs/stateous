@@ -44,6 +44,7 @@ The control plane keeps its data in SQLite or in Postgres.
 - [Agents, with PHD](concepts/agents.md): run a coding agent in a routine.
 - [Embed a control plane](how-to/embed-a-control-plane.md): run a control plane in your own service, with your own database.
 - [Transports](concepts/transports.md): connect supervisors over HTTP, a gateway, or your own queue.
+- [Tenancy](concepts/tenancy.md): scope tokens to your tenants with labels, and decide who may do what.
 - [Write a workflow](how-to/write-a-workflow.md) and the other how-to guides: do one task, step by step.
 - [How Stateous works inside](inside/event-graph.md): the internal workflows, their events, and the tables.
 - [The reference](reference/cli.md): every command, route, file and limit.

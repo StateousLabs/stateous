@@ -105,7 +105,7 @@ def open_all(database_url: str) -> dict[str, ControlPlane]:
     }
 ```
 
-Each control plane holds its namespace while it runs. A second control plane on the same namespace does not start. To hold it, each control plane keeps one database connection open for its whole life. So give your pool one connection more for each workflow.
+Each control plane holds its namespace while it runs. A second control plane on the same namespace does not start. To serve one namespace from several processes, see [Run replicas](run-replicas.md). To hold it, each control plane keeps one database connection open for its whole life. So give your pool one connection more for each workflow.
 
 ## 6. Connect the workflows
 

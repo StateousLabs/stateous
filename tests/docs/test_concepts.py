@@ -60,6 +60,14 @@ INSIDE_WORDS = [
 """The words of how Stateous works inside. `inside/words.md` defines each one."""
 
 FACTS: dict[str, list[str]] = {
+    "concepts/tenancy.md": [
+        "at most 16 labels",
+        "never change after the start",
+        "authorize=fn",
+        "`Forbidden`",
+        "count_claimed",
+        "Stateous never makes a caller",
+    ],
     "concepts/transports.md": [
         "one attempt",
         "`Refused`",

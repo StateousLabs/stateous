@@ -28,7 +28,7 @@ These are the seven mechanisms:
 
 The control plane keeps all of its data in one database. Each change to a token is one transaction. The transaction changes the token, its tasks and its timers, and it adds rows to the ledger. Either all of it is saved, or none of it.
 
-Each change locks the token, so one token moves one step at a time. One control plane serves one namespace of a database. A second control plane on the same namespace does not start. On SQLite, a namespace is a database file.
+Each change locks the token, so one token moves one step at a time. One control plane serves one namespace of a database. A second control plane on the same namespace does not start. On SQLite, a namespace is a database file. On Postgres, several replicas can serve one namespace together: see [Run replicas](../how-to/run-replicas.md).
 
 With notices on, a change also writes its [notice](notices.md) in the same transaction. Your handler gets each notice at least once.
 
