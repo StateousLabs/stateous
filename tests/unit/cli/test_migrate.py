@@ -1,6 +1,7 @@
 """`stateous migrate`, and `stateous serve` with and without `--namespace`."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -89,5 +90,6 @@ def test_serve_refuses_a_namespace_on_sqlite(tmp_path: Path) -> None:
 
 def test_serve_has_the_namespace_option() -> None:
     result = runner.invoke(app, ["serve", "--help"])
+    text = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)  # CI shows the help in color
 
-    assert "--namespace" in result.stdout
+    assert "--namespace" in text
