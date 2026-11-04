@@ -14,10 +14,13 @@ from stateous.control.api import MAX_BODY, MAX_DEPTH
 from stateous.control.engine import (
     DEFAULT_LEASE,
     KEY_LENGTH,
+    MAX_LABEL_VALUE,
+    MAX_LABELS,
     MEMORY_KEY_LENGTH,
     NOTE_LENGTH,
     SUPERVISOR_LENGTH,
 )
+from stateous.control.scope import MAX_SCOPE_KEYS
 from stateous.control.store.store import (
     CANDIDATES,
     POSTGRES_CONNECT_WITHIN,
@@ -117,7 +120,10 @@ SAID: dict[str, list[str]] = {
         f"| A request body | {MIB} MiB |",
         f"| The nesting of a body's JSON | {MAX_DEPTH} levels |",
         f"| A token id | {MAX_TOKEN_ID} characters |",
-        f"| An idempotency key | {KEY_LENGTH} characters |",
+        f"| An idempotency key, and a start key | {KEY_LENGTH} characters |",
+        f"| The labels of a token | {MAX_LABELS}; a key has at most 64 characters, "
+        f"a value 1 to {MAX_LABEL_VALUE} |",
+        f"| The label keys of a scope | {MAX_SCOPE_KEYS} |",
         f"| A supervisor's name | {SUPERVISOR_LENGTH} characters in a claim; "
         f"{NAME_IN_YAML} characters in `stateous.yaml` |",
         f"| A note | {NOTE_LENGTH} characters |",
