@@ -126,3 +126,31 @@ def test_every_call_goes_to_the_inner_transport() -> None:
     asyncio.run(all_calls())
     assert fake.calls == ["claim", "heartbeat", "note", "set_memory", "report", "aclose"]
     assert watching.where == "fake"
+
+
+def test_calls_for_an_unknown_task_pass_on() -> None:
+    fake = Fake()
+    watching = Watching(fake)
+
+    async def calls() -> None:
+        await watching.claim("s", ["work"])
+        await watching.note(99, "n", attempt=1)
+        await watching.report(99, Outcome("waiting"), supervisor="s")
+
+    asyncio.run(calls())
+    assert watching.steps[0].notes == []
+    assert watching.steps[0].ended is None
+    assert fake.calls == ["claim", "note", "report"]
+
+
+def test_a_report_without_an_attempt_closes_the_open_step() -> None:
+    watching = Watching(Fake())
+
+    async def calls() -> None:
+        await watching.claim("s", ["work"])
+        await watching.claim("s", ["work"])
+        await watching.report(7, Outcome("waiting", attempt=2), supervisor="s")
+        await watching.report(7, Outcome("waiting"), supervisor="s")
+
+    asyncio.run(calls())
+    assert [step.outcome for step in watching.steps] == ["waiting", "waiting"]

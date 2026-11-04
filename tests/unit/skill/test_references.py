@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 import yaml
 
+from stateous.skill import references
 from stateous.skill.references import PAGES, reference_root, render_api
 
 from ...docs.pages import PRIVATE, ROOT
@@ -102,3 +103,20 @@ def test_the_wheel_holds_the_pages_and_no_other(tmp_path: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
         names = [n for n in archive.namelist() if n.startswith(prefix)]
     assert sorted(n.removeprefix(prefix) for n in names) == sorted(PAGES)
+
+
+def test_render_api_refuses_a_module_that_does_not_exist() -> None:
+    with pytest.raises(ValueError, match=r"stateous\.nope\.Thing"):
+        render_api("::: stateous.nope.Thing\n")
+
+
+def test_a_constant_with_no_docstring_has_only_its_code() -> None:
+    out = render_api("::: stateous.control.graph.END\n")
+    assert 'END = "__end__"' in out
+    assert out.endswith("```\n\n")
+
+
+def test_no_pages_is_one_sentence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(references, "__file__", str(tmp_path / "a" / "b" / "c" / "references.py"))
+    with pytest.raises(FileNotFoundError, match="reference pages"):
+        reference_root()
