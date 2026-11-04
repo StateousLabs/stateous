@@ -35,6 +35,7 @@ PAGES: tuple[str, ...] = (
     "concepts/tenancy.md",
     "how-to/write-a-workflow.md",
     "how-to/write-a-routine.md",
+    "how-to/use-an-agent.md",
     "how-to/run-supervisors.md",
     "how-to/use-postgres.md",
     "how-to/steer-tokens.md",

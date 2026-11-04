@@ -2,7 +2,7 @@
 
 This page lists every `stateous` command, its arguments and its options.
 
-Stateous has six commands: `compile`, `serve`, `migrate`, `init`, `supervise` and `token`. `init` and `token` each have commands of their own.
+Stateous has seven commands: `compile`, `serve`, `migrate`, `init`, `supervise`, `token` and `install`. `init`, `token` and `install` each have commands of their own.
 
 ## For every command
 
@@ -24,6 +24,7 @@ Stateous has six commands: `compile`, `serve`, `migrate`, `init`, `supervise` an
 | `stateous token pause ID` | Pause a token. |
 | `stateous token resume ID` | Resume a token. |
 | `stateous token cancel ID` | Cancel a token. |
+| `stateous install skill DIRECTORY` | Write the skill for a coding agent. |
 
 ## Workflows
 
@@ -309,6 +310,28 @@ stateous token cancel TICKET-1
 ```
 
 You cannot pause, resume or cancel a child token. Steer its top token. See [Steer tokens](../how-to/steer-tokens.md).
+
+## Tooling
+
+### stateous install skill
+
+```text
+stateous install skill DIRECTORY [--force]
+```
+
+It writes the Stateous skill for a coding agent into `DIRECTORY/stateous/`. The skill has `SKILL.md`, the pages of this site in `references/`, and a try-out script in `scripts/`. It is for the version of Stateous that is installed. It prints the path that it wrote.
+
+| Argument or option | Meaning |
+|---|---|
+| `DIRECTORY` | The folder where your coding agent reads skills. You choose it. The command makes it if it does not exist. |
+| `--force` | Replace the skill if it exists. Use it after you upgrade Stateous. |
+
+It refuses a `DIRECTORY/stateous/` that exists, if you do not give `--force`. See [Build a workflow with an agent](../how-to/use-an-agent.md).
+
+```bash
+stateous install skill .claude/skills
+stateous install skill .claude/skills --force
+```
 
 ## See also
 

@@ -41,6 +41,8 @@ Stateous has no authentication. Keep a control plane that listens on a wider add
 
 The documentation is at [stateouslabs.github.io/stateous](https://stateouslabs.github.io/stateous/). It explains the model, then tells you how to do the work, then gives the reference. To run the short example step by step, follow [Getting started](https://stateouslabs.github.io/stateous/getting-started/).
 
+To let your coding agent build a workflow, give it the Stateous skill with `stateous install skill DIRECTORY`. See [Build a workflow with an agent](https://stateouslabs.github.io/stateous/how-to/use-an-agent/).
+
 ## Licence
 
 Apache License 2.0. See [`LICENSE`](https://github.com/StateousLabs/stateous/blob/main/LICENSE) and [`NOTICE`](https://github.com/StateousLabs/stateous/blob/main/NOTICE).

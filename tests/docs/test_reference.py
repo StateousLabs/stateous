@@ -73,13 +73,24 @@ def real_codes() -> set[str]:
     return codes
 
 
-def test_there_are_six_commands() -> None:
+def test_there_are_seven_commands() -> None:
     group = cli()
 
-    assert set(group.commands) == {"compile", "serve", "migrate", "init", "supervise", "token"}
+    assert set(group.commands) == {
+        "compile",
+        "serve",
+        "migrate",
+        "init",
+        "supervise",
+        "token",
+        "install",
+    }
     token = child(group, "token")
     assert isinstance(token, TyperGroup)
     assert set(token.commands) == {"start", "fire", "show", "pause", "resume", "cancel"}
+    install = child(group, "install")
+    assert isinstance(install, TyperGroup)
+    assert set(install.commands) == {"skill"}
 
 
 def test_the_cli_reference_has_exactly_the_commands() -> None:

@@ -1,4 +1,4 @@
-"""The `stateous` command: compile, serve, init, supervise and token.
+"""The `stateous` command: compile, serve, migrate, init, supervise, token and install.
 
 The commands import what they need when they run. `serve` and `supervise` import
 the server, the database and the supervisor (`stateous.cli.running`). So `--help`,
@@ -304,6 +304,35 @@ def supervise(
 
 
 app.add_typer(token_app, name="token")
+
+install_app = typer.Typer(help="Add tooling for Stateous to your computer.", no_args_is_help=True)
+
+
+@install_app.command("skill")
+def install_skill_command(
+    directory: Annotated[
+        Path,
+        typer.Argument(
+            help="The folder where your coding agent reads skills. The skill goes into "
+            "DIRECTORY/stateous.",
+            show_default=False,
+        ),
+    ],
+    force: Annotated[bool, typer.Option("--force", help="Replace the skill if it exists.")] = False,
+) -> None:
+    """Write the Stateous skill for a coding agent: SKILL.md, the docs, and a try-out script."""
+    from stateous.skill.install import SkillExists, install_skill
+
+    try:
+        path = install_skill(directory, force=force)
+    except SkillExists as error:
+        exit_with(str(error))
+    except OSError as error:
+        exit_with(f"cannot write {directory}: {error.strerror or error}")
+    typer.echo(f"wrote    {path}")
+
+
+app.add_typer(install_app, name="install")
 
 
 def main() -> None:

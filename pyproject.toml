@@ -91,6 +91,7 @@ packages = ["src/stateous"]
 "docs/concepts/tenancy.md" = "stateous/skill/references/concepts/tenancy.md"
 "docs/how-to/write-a-workflow.md" = "stateous/skill/references/how-to/write-a-workflow.md"
 "docs/how-to/write-a-routine.md" = "stateous/skill/references/how-to/write-a-routine.md"
+"docs/how-to/use-an-agent.md" = "stateous/skill/references/how-to/use-an-agent.md"
 "docs/how-to/run-supervisors.md" = "stateous/skill/references/how-to/run-supervisors.md"
 "docs/how-to/use-postgres.md" = "stateous/skill/references/how-to/use-postgres.md"
 "docs/how-to/steer-tokens.md" = "stateous/skill/references/how-to/steer-tokens.md"

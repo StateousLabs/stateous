@@ -102,6 +102,7 @@ nav:
   - How-to guides:
       - Write a workflow: how-to/write-a-workflow.md
       - Write a routine: how-to/write-a-routine.md
+      - Build a workflow with an agent: how-to/use-an-agent.md
       - Run supervisors: how-to/run-supervisors.md
       - Use Postgres: how-to/use-postgres.md
       - Steer tokens: how-to/steer-tokens.md

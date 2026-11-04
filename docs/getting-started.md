@@ -311,3 +311,4 @@ The control plane keeps the token, and it chooses each next state. The superviso
 
 - Concepts: [the words of Stateous](concepts/model.md), and [the two sides](concepts/two-sides.md), the control plane and the supervisor.
 - How-to guides: [change the starter into a workflow of your own](how-to/write-a-workflow.md), and [write the routines](how-to/write-a-routine.md).
+- With a coding agent: [give your agent the Stateous skill](how-to/use-an-agent.md), and the agent builds the workflow with you.
