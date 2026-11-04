@@ -88,6 +88,6 @@ def test_json_has_every_part_and_dumps_as_it_is() -> None:
 def test_every_stop_reason_has_a_page_entry() -> None:
     assert set(PAGE_OF) == {
         "completed", "failed", "cancelled", "no_routine",
-        "waits_outside", "waits_timer", "quiet", "time_limit",
+        "waits_outside", "waits_timer", "quiet", "time_limit", "fire_refused",
     }  # fmt: skip
     assert PAGE_OF["completed"] is None

@@ -48,24 +48,28 @@ stateous init supervisor NAME/build/NAME.json NAME-supervisor
 
 This writes `contract.py`, one stub for each state with a routine, `stateous.yaml` and `pyproject.toml`. Replace the body of each stub with the work of its state. A routine imports `contract.py`, never `flow.py`.
 
+The supervisor's folder is a Python project of its own. Add each package that the routines import to `NAME-supervisor/pyproject.toml`. Then run `uv sync` in that folder.
+
 Read first: `references/how-to/write-a-routine.md`, `references/concepts/tasks-and-routines.md`, `references/concepts/context-notes-memory.md`. For a routine that runs an agent: `references/concepts/agents.md`. For the names and signatures: `references/reference/python.md`.
 
 After each change to `flow.py`, compile again. Then run `stateous init supervisor` again: it writes a new `contract.py`, and a stub for each new state.
 
 ## Step 5: try it out
 
-Run the try-out script of this skill with the project's Python:
+Run the try-out script of this skill with the Python of the supervisor's folder. That Python has Stateous and the packages of the routines:
 
 ```text
-python <this skill>/scripts/try_workflow.py NAME/build/NAME.json NAME-supervisor --context '{"field": "value"}'
+uv run --project NAME-supervisor python <this skill>/scripts/try_workflow.py NAME/build/NAME.json NAME-supervisor --context @context.json
 ```
+
+Run it in the folder of the project, so that the paths of the routines stay the same. Write the context in a JSON file, for example `context.json`. A file is safe in each shell. PowerShell changes the quotes of a JSON argument.
 
 The script makes a new SQLite database in a temporary folder. It starts a control plane, the supervisor and one token, and it runs the real routines. It stops by itself and prints a report. Add `--json` for a JSON report.
 
 The options:
 
-- `--context JSON`: the context of the token. It must agree with the context model.
-- `--fire STATE=EVENT` or `--fire STATE=EVENT:PAYLOAD_JSON`: the answer for a state that waits. Give it once for each answer.
+- `--context @FILE` or `--context JSON`: the context of the token. It must agree with the context model.
+- `--fire STATE=EVENT`, `--fire STATE=EVENT:@FILE` or `--fire STATE=EVENT:PAYLOAD_JSON`: the answer for a state that waits. Give it once for each answer. For a state of a child workflow, write `WORKFLOW/STATE`. The script refuses a state or an event that the graph does not have.
 - `--timeout 600`: stop after this many seconds.
 - `--quiet 120`: stop when nothing changes for this many seconds. A note or a heartbeat of a running task is a change.
 - `--database PATH`: the SQLite file to make.
@@ -86,10 +90,13 @@ The first line of the report tells why the try-out stopped. Then the report give
 | `waits_timer` | The state waits for a timer, or for an event from outside. | Ask the developer. To fire the timer's event early, use `--fire`. | `references/concepts/timers.md` |
 | `quiet` | Nothing changed for the time of `--quiet`. | Find the routine that does not move. Add notes to a long routine. | `references/concepts/reliability.md` |
 | `time_limit` | The time of `--timeout` ended. The report names the running tasks. | Find why the task takes so long, or give more time. | `references/concepts/agents.md` |
+| `fire_refused` | The control plane refused a `--fire`, for example because no guard holds. | Ask the developer for an answer that the workflow takes. | `references/concepts/guards.md` |
 
 An error before the run is one sentence, for example a context that the workflow refuses, or a `contract.py` for another version of the workflow. Correct the cause and run again.
 
-When the version of this skill and the installed Stateous are not the same, the script stops. Then tell the developer to run `stateous install skill DIR --force`.
+When the version of this skill and the installed Stateous are not the same, the script stops. It names the command that writes the skill again with the right Python. Tell the developer to run it.
+
+When a routine blocks the try-out, the script ends itself some time after `--timeout`, with one sentence.
 
 ## Then
 

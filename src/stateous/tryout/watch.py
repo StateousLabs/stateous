@@ -41,9 +41,12 @@ class Step:
 class Watching:
     """A `Transport` that passes each call to `inner`, and records the tasks."""
 
-    def __init__(self, inner: Transport) -> None:
+    def __init__(self, inner: Transport, *, where: str | None = None) -> None:
+        """`where` replaces the inner transport's `where` in the supervisor's sentences.
+        The try-out gives the graph file, so that a sentence such as "run `stateous init
+        supervisor <where> <folder>` again" names a command that works."""
         self.inner = inner
-        self.where = inner.where
+        self.where = inner.where if where is None else where
         self.steps: list[Step] = []
         self.served: set[str] = set()
         """The states that the supervisor claims tasks of."""

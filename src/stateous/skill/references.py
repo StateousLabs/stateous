@@ -175,7 +175,35 @@ def _render(node: Definition, heading: str, owner: str) -> str:
             continue
         seen.add(found[0])
         parts.append(_section(f"#### {owner}.{found[0]}", found[1], found[2]))
+        if found[0] == "__init__" and isinstance(member, Function):
+            for name, code, doc in _attributes(member):
+                if name not in seen:
+                    seen.add(name)
+                    parts.append(_section(f"#### {owner}.{name}", code, doc))
     return "".join(parts)
+
+
+def _attributes(init: Function) -> list[tuple[str, str, str]]:
+    """The public attributes that `__init__` sets on `self` and documents with a string
+    after the line, as mkdocstrings shows them: the name, the code and the docstring."""
+    found: list[tuple[str, str, str]] = []
+    for index, statement in enumerate(init.body):
+        target: ast.expr | None = None
+        annotation = ""
+        if isinstance(statement, ast.AnnAssign):
+            target, annotation = statement.target, ast.unparse(statement.annotation)
+        elif isinstance(statement, ast.Assign):
+            target = statement.targets[0]
+        is_self = isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+        if not is_self or target is None:
+            continue
+        assert isinstance(target, ast.Attribute)
+        doc = _following_doc(init.body, index)
+        if target.attr.startswith("_") or not doc or getattr(target.value, "id", "") != "self":
+            continue
+        code = f"{target.attr}: {annotation}" if annotation else target.attr
+        found.append((target.attr, code, doc))
+    return found
 
 
 def _member(member: ast.stmt, body: list[ast.stmt], index: int) -> tuple[str, str, str] | None:

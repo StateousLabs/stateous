@@ -120,3 +120,11 @@ def test_no_pages_is_one_sentence(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(references, "__file__", str(tmp_path / "a" / "b" / "c" / "references.py"))
     with pytest.raises(FileNotFoundError, match="reference pages"):
         reference_root()
+
+
+def test_render_api_shows_the_attributes_set_in_init() -> None:
+    out = render_api("::: stateous.Context\n")
+    assert "#### Context.memory" in out
+    assert "#### Context.attempt" in out
+    assert "1, then 2 after a retry." in out
+    assert "memory: Memory" in out

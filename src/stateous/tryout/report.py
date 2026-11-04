@@ -20,6 +20,7 @@ Reason = Literal[
     "waits_timer",
     "quiet",
     "time_limit",
+    "fire_refused",
 ]
 
 PAGE_OF: dict[str, str | None] = {
@@ -31,6 +32,7 @@ PAGE_OF: dict[str, str | None] = {
     "waits_timer": "concepts/timers.md",
     "quiet": "concepts/reliability.md",
     "time_limit": "concepts/agents.md",
+    "fire_refused": "concepts/guards.md",
 }
 """For each reason of a stop, the reference page that tells about it."""
 

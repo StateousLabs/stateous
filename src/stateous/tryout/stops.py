@@ -42,7 +42,7 @@ def waiting_stop(
         tasks = [entry.kind for entry in visit if entry.kind in TASK_KINDS]
         if not tasks:
             continue
-        events = _leaving(body, token.state)
+        events = leaving(body, token.state)
         if tasks[-1] in ("task_queued", "task_retrying") and name not in served:
             return _stop(
                 "no_routine",
@@ -88,7 +88,7 @@ def _this_visit(history: list[HistoryEntry], state: str) -> list[HistoryEntry]:
     return history
 
 
-def _leaving(body: dict[str, Any], state: str) -> list[str]:
+def leaving(body: dict[str, Any], state: str) -> list[str]:
     """The events that can come from outside and leave `state`, in declaration order."""
     found: list[str] = []
     for transition in cast("list[dict[str, Any]]", body["transitions"]):

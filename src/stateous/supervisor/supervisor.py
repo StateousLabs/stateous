@@ -53,6 +53,7 @@ import threading
 import uuid
 from collections.abc import Callable, Collection, Generator, Mapping
 from dataclasses import dataclass, replace
+from pathlib import Path
 from types import FrameType
 from typing import Any, Protocol, cast
 
@@ -741,14 +742,17 @@ async def open_supervisor(
     heartbeat_every: float = HEARTBEAT_EVERY,
     idle: float = IDLE,
     labels: Mapping[str, str] | None = None,
+    outbox_file: Path | None = None,
 ) -> Supervisor:
     """The supervisor of `folder`, checked against the control plane: its
     `contract.py` must be for the graph the control plane serves, and the folder
     must have routines. An unreachable control plane is tried again with backoff.
 
     It opens the folder's outbox first. Another supervisor on the folder holds the
-    outbox: then this one does not start."""
-    path = outbox_path(folder.path)
+    outbox: then this one does not start. With `outbox`, it uses that file in place
+    of the folder's outbox (the try-out of the skill does, so that it never sends
+    the folder's messages to its own database)."""
+    path = outbox_file if outbox_file is not None else outbox_path(folder.path)
     try:
         outbox = Outbox.open(path)
     except OutboxBusy:

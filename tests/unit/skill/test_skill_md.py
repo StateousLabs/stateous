@@ -28,6 +28,8 @@ from ...docs.pages import (
 
 FRONT = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 INLINE_COMMAND = re.compile(r"`(stateous [^`]+)`")
+UV_OPTIONS = {"--project"}
+"""Options of uv, which SKILL.md names in a uv command."""
 OPTION = re.compile(r"(?<![\w-])(--[a-z][a-z-]*)")
 PAGE = re.compile(r"references/([\w./-]+\.md)")
 
@@ -79,7 +81,7 @@ def test_every_command_in_skill_md_exists() -> None:
 
 
 def test_every_option_in_skill_md_exists() -> None:
-    known: set[str] = set()
+    known: set[str] = set(UV_OPTIONS)
     for command in commands(cli()).values():
         known |= options(command)
     for action in parser()._actions:  # pyright: ignore[reportPrivateUsage]
@@ -105,3 +107,9 @@ def test_skill_md_names_no_private_document() -> None:
 def test_sentences_are_short() -> None:
     for sentence in sentences(body()):
         assert len(sentence.split()) <= MOST_WORDS, sentence
+
+
+def test_skill_md_tells_which_python_runs_the_script() -> None:
+    text = body()
+    assert "uv sync" in text
+    assert "@context.json" in text

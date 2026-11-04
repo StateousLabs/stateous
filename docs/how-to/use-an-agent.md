@@ -34,10 +34,10 @@ The agent then does these steps:
 
 ## 3. The try-out
 
-The agent runs the script with the project's Python:
+The agent runs the script with the Python of the supervisor's folder. It gives the context in a JSON file:
 
 ```text
-python .claude/skills/stateous/scripts/try_workflow.py GRAPH SUPERVISOR_FOLDER --context JSON
+uv run --project SUPERVISOR_FOLDER python .claude/skills/stateous/scripts/try_workflow.py GRAPH SUPERVISOR_FOLDER --context @context.json
 ```
 
 The script makes a new SQLite database in a temporary folder. It starts a control plane, the supervisor of the folder and one token. It runs the real routines, also the agents with PHD.
@@ -46,7 +46,7 @@ The script stops by itself. It stops when the token ends, when nothing changes f
 
 The report tells each task, how long it took, its event or its error, and its notes. It also holds the history of each token, and the page of this site that tells about the stop.
 
-At a state that waits for the world, the agent asks you what the answer is. It does not choose the answer itself. Then it runs the script again with `--fire STATE=EVENT`, or `--fire STATE=EVENT:PAYLOAD_JSON` for an event with data.
+At a state that waits for the world, the agent asks you what the answer is. It does not choose the answer itself. Then it runs the script again with `--fire STATE=EVENT`, or `--fire STATE=EVENT:@FILE` for an event with data in a JSON file.
 
 ## 4. After an upgrade
 

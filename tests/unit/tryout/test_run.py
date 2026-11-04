@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from stateous import InvalidContext
-from stateous.supervisor.supervisor import SupervisorError
+from stateous.supervisor.supervisor import Supervisor, SupervisorError
 from stateous.tryout.report import TryReport
 from stateous.tryout.run import Fire, parse_fire, try_workflow
 
@@ -78,9 +78,9 @@ def test_a_fire_answers_a_waiting_state(tmp_path: Path) -> None:
 
 
 def test_an_unused_fire_is_reported(tmp_path: Path) -> None:
-    report = tried(*job(tmp_path, "return events.done()"), fires=[parse_fire("nowhere=done")])
+    report = tried(*job(tmp_path, "return events.done()"), fires=[parse_fire("broken=done")])
     assert report.stop.reason == "completed"
-    assert report.fires_unused == ["nowhere=done"]
+    assert report.fires_unused == ["broken=done"]
 
 
 def test_a_timer_wait_stops_and_names_the_timer(tmp_path: Path) -> None:
@@ -144,9 +144,9 @@ def test_parse_fire_forms() -> None:
 
 
 def test_a_fire_for_another_state_is_not_used_at_a_wait(tmp_path: Path) -> None:
-    report = tried(*job(tmp_path, "return None"), fires=[parse_fire("nowhere=done")])
+    report = tried(*job(tmp_path, "return None"), fires=[parse_fire("broken=done")])
     assert report.stop.reason == "waits_outside"
-    assert report.fires_unused == ["nowhere=done"]
+    assert report.fires_unused == ["broken=done"]
 
 
 def test_a_token_that_fails_ends_the_run(tmp_path: Path) -> None:
@@ -160,10 +160,10 @@ def test_a_token_that_fails_ends_the_run(tmp_path: Path) -> None:
 def test_a_supervisor_that_ends_early_is_an_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def at_once(*args: object, **kwargs: object) -> int:
+    async def at_once(self: Supervisor) -> int:
         return 0
 
-    monkeypatch.setattr("stateous.tryout.run.supervise", at_once)
+    monkeypatch.setattr(Supervisor, "run", at_once)
     with pytest.raises(SupervisorError, match="stopped before the token ended"):
         tried(*job(tmp_path, "return events.done()"))
 

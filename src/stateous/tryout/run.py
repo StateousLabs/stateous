@@ -19,20 +19,23 @@ from pathlib import Path
 from typing import Any, cast
 
 from stateous.control.engine import HistoryEntry, Token
+from stateous.control.errors import ControlPlaneError
 from stateous.control.inprocess import InProcess
 from stateous.control.plane import ControlPlane
-from stateous.supervisor.run import supervise
-from stateous.supervisor.supervisor import SupervisorError
+from stateous.supervisor.folder import FolderError, load_folder
+from stateous.supervisor.retrying import Retrying
+from stateous.supervisor.supervisor import Supervisor, SupervisorError, open_supervisor
 from stateous.tryout.report import PAGE_OF, Reason, Stop, TryReport
-from stateous.tryout.stops import waiting_stop
+from stateous.tryout.stops import leaving, waiting_stop
 from stateous.tryout.watch import Step, Watching
 
 EVERY = 0.2
 """Seconds between two looks at the tokens."""
 GRACE = 5.0
-"""Seconds that the running routines get to end after the stop. Then they are cancelled."""
+"""Seconds that the running routines get to end after the stop. Then the supervisor
+cancels them, and after GRACE again its task is cancelled."""
 ENDED = ("completed", "failed", "cancelled")
-FORM = "give a fire as STATE=EVENT or STATE=EVENT:PAYLOAD_JSON"
+FORM = "give a fire as STATE=EVENT, STATE=EVENT:PAYLOAD_JSON or STATE=EVENT:@FILE"
 
 
 @dataclass(frozen=True)
@@ -49,13 +52,19 @@ class Fire:
 
 
 def parse_fire(text: str) -> Fire:
-    """`STATE=EVENT` or `STATE=EVENT:PAYLOAD_JSON`. ValueError with one sentence if bad."""
+    """`STATE=EVENT`, `STATE=EVENT:PAYLOAD_JSON`, or `STATE=EVENT:@FILE` for a payload in a
+    JSON file. ValueError with one sentence if bad."""
     state, equals, rest = text.partition("=")
     event, colon, payload_text = rest.partition(":")
     if not equals or not state or not event:
         raise ValueError(f"{text!r} is not a fire: {FORM}")
     if not colon:
         return Fire(state, event, None)
+    if payload_text.startswith("@"):
+        try:
+            payload_text = Path(payload_text[1:]).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            raise ValueError(f"cannot read the payload file of {text!r}: {FORM}") from None
     try:
         payload: object = json.loads(payload_text)
     except json.JSONDecodeError:
@@ -77,26 +86,33 @@ async def try_workflow(
 ) -> TryReport:
     """Run one token of `graph` with the routines of `folder`, and report why it stopped.
 
-    Raises `SupervisorError` for a folder that cannot run, and a `ControlPlaneError`
-    for a context or a fire that the control plane refuses."""
+    The supervisor uses an outbox next to the database, never the folder's own: so the
+    messages that a real supervisor left in the folder stay there. Raises ValueError for
+    a fire that names a state or an event that the graph does not have,
+    `SupervisorError` for a folder that cannot run, and a `ControlPlaneError` for a
+    context that the control plane refuses."""
     if database is None:
         database = Path(tempfile.mkdtemp(prefix="stateous-try-")) / "try.db"
+    outbox = database.with_name(f"{database.stem}-outbox.db")
     with ControlPlane(graph, database=f"sqlite:///{database.as_posix()}", migrate=True) as plane:
+        check_fires(plane.document, fires)
         top = plane.start(None, context).token
-        watching = Watching(InProcess(plane))
-        stopping = asyncio.Event()
+        watching = Watching(InProcess(plane), where=str(graph))
         clock = asyncio.create_task(plane.run_clock(every=0.5))
-        supervising = asyncio.create_task(supervise(folder, watching, stop=stopping, idle=1))
+        try:
+            supervisor = await _open(folder, watching, outbox)
+        except BaseException:
+            await _cancel(clock)
+            raise
+        supervising = asyncio.create_task(supervisor.run())
         left = list(fires)
         used: list[str] = []
         try:
             stop = await _watch(plane, top, watching, supervising, left, used, timeout, quiet)
         finally:
-            stopping.set()
-            await _end(supervising)
-            clock.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await clock
+            await _end(supervisor, supervising)
+            supervisor.close()
+            await _cancel(clock)
         family, _, histories = _family(plane, top)
         unused = [fire.label for fire in left]
         return TryReport(stop, watching.steps, family, histories, used, unused, database)
@@ -133,7 +149,10 @@ async def _watch(
                 fire = _take(left, waiting.state)
                 if fire is None:
                     return waiting
-                plane.fire(waiting.token, fire.event, fire.payload)
+                try:
+                    plane.fire(waiting.token, fire.event, fire.payload)
+                except ControlPlaneError as error:
+                    return _refused(fire, waiting, error)
                 used.append(fire.label)
                 continue
         now = time.monotonic()
@@ -191,10 +210,60 @@ def _late(reason: Reason, why: str, head: Token, running: list[Step]) -> Stop:
     return Stop(reason, head.token, head.state, sentence, PAGE_OF[reason])
 
 
-async def _end(supervising: asyncio.Task[int]) -> None:
-    """Wait for the supervisor to stop; after `GRACE` seconds, cancel it."""
+def check_fires(document: dict[str, Any], fires: Sequence[Fire]) -> None:
+    """Refuse a fire whose state is not in the graph, or whose event does not leave
+    that state. ValueError with one sentence. A guard can still refuse a fire at run time.
+
+    A state is `state` of the top workflow or of any child workflow, or `workflow/state`."""
+    children = cast("dict[str, dict[str, Any]]", document.get("workflows", {}))
+    for fire in fires:
+        workflow, slash, state = fire.state.rpartition("/")
+        if slash:
+            bodies = [children[workflow]] if workflow in children else []
+        else:
+            bodies = [document, *children.values()]
+        bodies = [body for body in bodies if state in body["states"]]
+        if not bodies:
+            raise ValueError(f"--fire {fire.label}: the graph has no state {fire.state!r}")
+        events = sorted({event for body in bodies for event in leaving(body, state)})
+        if fire.event not in events:
+            shown = ", ".join(events) or "none"
+            raise ValueError(
+                f"--fire {fire.label}: {fire.event!r} does not leave {fire.state!r} "
+                f"(events: {shown})"
+            )
+
+
+async def _open(folder: Path, watching: Watching, outbox: Path) -> Supervisor:
+    """The supervisor of `folder`, over `watching`, with its outbox at `outbox`."""
+    try:
+        loaded = load_folder(folder)
+    except FolderError as error:
+        raise SupervisorError(str(error)) from None
+    return await open_supervisor(loaded, Retrying(watching), idle=1, outbox_file=outbox)
+
+
+def _refused(fire: Fire, waiting: Stop, error: ControlPlaneError) -> Stop:
+    sentence = (
+        f"the control plane refused --fire {fire.label} on {waiting.token}: {error}; "
+        f"before that: {waiting.sentence}"
+    )
+    return Stop("fire_refused", waiting.token, waiting.state, sentence, PAGE_OF["fire_refused"])
+
+
+async def _end(supervisor: Supervisor, supervising: asyncio.Task[int]) -> None:
+    """Stop the supervisor: the running routines get `GRACE` seconds to end; then the
+    supervisor cancels them; after `GRACE` again, its task is cancelled."""
+    supervisor.on_signal()
     await asyncio.wait({supervising}, timeout=GRACE)
     if not supervising.done():
-        supervising.cancel()
+        supervisor.stop_now()
+        await asyncio.wait({supervising}, timeout=GRACE)
+    await _cancel(supervising)
+
+
+async def _cancel(task: asyncio.Task[Any]) -> None:
+    if not task.done():
+        task.cancel()
     with contextlib.suppress(asyncio.CancelledError, Exception):
-        await supervising
+        await task

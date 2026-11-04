@@ -10,8 +10,11 @@ import argparse
 import ast
 import asyncio
 import json
+import os
 import sys
-from collections.abc import Sequence
+import tempfile
+import threading
+from collections.abc import Callable, Sequence
 from importlib.metadata import version
 from importlib.util import find_spec
 from pathlib import Path
@@ -21,7 +24,7 @@ from stateous.control.errors import ControlPlaneError
 from stateous.control.store.errors import DatabaseHeld, ForeignDatabase, SchemaNotReady
 from stateous.model.graph_file import GraphFileError
 from stateous.supervisor.supervisor import SupervisorError
-from stateous.tryout.run import Fire, parse_fire, try_workflow
+from stateous.tryout.run import GRACE, Fire, parse_fire, try_workflow
 
 DESCRIPTION = """\
 Try out a Stateous workflow in one process, with the real routines. It makes a new
@@ -33,6 +36,10 @@ another reason. 2: wrong use."""
 FIRE_HELP = """\
 An answer for a state that waits: when a token waits at STATE, fire EVENT on it, with
 the payload if given. Give it once for each answer. Ask the developer for the answer."""
+
+
+WATCHDOG_MARGIN = 2 * GRACE + 10
+"""Seconds after the time limit before the watchdog ends the process."""
 
 
 class WrongUse(Exception):
@@ -51,13 +58,17 @@ def parser() -> argparse.ArgumentParser:
         "folder", metavar="SUPERVISOR_FOLDER", type=Path, help="the supervisor's folder"
     )
     found.add_argument(
-        "--context", required=True, metavar="JSON", help="the context of the token, a JSON object"
+        "--context",
+        required=True,
+        metavar="JSON",
+        help="the context of the token, a JSON object; or @FILE for a JSON file (use a file "
+        "in PowerShell, which changes the quotes of a JSON argument)",
     )
     found.add_argument(
         "--fire",
         action="append",
         default=[],
-        metavar="STATE=EVENT[:PAYLOAD_JSON]",
+        metavar="STATE=EVENT[:PAYLOAD_JSON|:@FILE]",
         help=FIRE_HELP,
     )
     found.add_argument(
@@ -96,15 +107,20 @@ def main(argv: Sequence[str], *, skill_version: str) -> int:
     if skill_version != installed:
         return _error(
             f"this skill is for Stateous {skill_version}, and this project has {installed}; "
-            "run: stateous install skill DIR --force"
+            f"run with this Python: {sys.executable} -m stateous install skill DIR --force"
         )
     folder = cast("Path", options.folder)
     if _imports_phd(folder) and find_spec("phd") is None:
         return _error(
             'the routines import PHD, and it is not installed; run: pip install "stateous[phd]"'
         )
+    database = cast("Path | None", options.database)
+    if database is None:
+        database = Path(tempfile.mkdtemp(prefix="stateous-try-")) / "try.db"
+    limit = cast("float", options.timeout) + WATCHDOG_MARGIN
+    watchdog = start_watchdog(limit, database)
     try:
-        report = asyncio.run(_run(options, context, fires))
+        report = asyncio.run(_run(options, context, fires, database))
     except (
         SupervisorError,
         ControlPlaneError,
@@ -115,6 +131,11 @@ def main(argv: Sequence[str], *, skill_version: str) -> int:
         OSError,
     ) as error:
         return _error(str(error) or type(error).__name__)
+    except ValueError as error:
+        print(f"wrong use: {error}", file=sys.stderr)
+        return 2
+    finally:
+        watchdog.cancel()
     if options.json:
         print(json.dumps(report.to_json(), indent=2))
     else:
@@ -122,7 +143,9 @@ def main(argv: Sequence[str], *, skill_version: str) -> int:
     return 0 if report.stop.reason == "completed" else 1
 
 
-async def _run(options: argparse.Namespace, context: dict[str, Any], fires: list[Fire]) -> Any:
+async def _run(
+    options: argparse.Namespace, context: dict[str, Any], fires: list[Fire], database: Path
+) -> Any:
     return await try_workflow(
         cast("Path", options.graph),
         cast("Path", options.folder),
@@ -130,11 +153,38 @@ async def _run(options: argparse.Namespace, context: dict[str, Any], fires: list
         fires=fires,
         timeout=cast("float", options.timeout),
         quiet=cast("float", options.quiet),
-        database=cast("Path | None", options.database),
+        database=database,
     )
 
 
+def start_watchdog(
+    seconds: float, database: Path, *, exit: Callable[[int], object] = os._exit
+) -> threading.Timer:
+    """A daemon timer that ends the process after `seconds`, with one sentence. The time
+    limit of the try-out is judged in the event loop: a routine that blocks the loop, or
+    that does not end when it is cancelled, would hang the try-out without it."""
+
+    def fire() -> None:
+        print(
+            f"error: the try-out did not stop {seconds:g} s after its start: a routine blocks "
+            f"the event loop, or does not end when it is cancelled; the database is {database}",
+            file=sys.stderr,
+            flush=True,
+        )
+        exit(1)
+
+    timer = threading.Timer(seconds, fire)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def _context(text: str) -> dict[str, Any]:
+    if text.startswith("@"):
+        try:
+            text = Path(text[1:]).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            raise WrongUse(f"cannot read the context file {text[1:]}") from None
     try:
         value: object = json.loads(text)
     except json.JSONDecodeError:
