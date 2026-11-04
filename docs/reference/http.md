@@ -9,7 +9,7 @@ The `token` commands and the `Client` use this API. A supervisor uses the `/task
 - The API has no prefix. For example, the health route is `GET /health`.
 - A body is a JSON object. An empty body is the same as `{}`. A body can be at most 1 MiB, and it can nest at most 64 levels.
 - An answer is JSON, except a `204` answer, which has no body.
-- The API has no authentication, no keys and no tenants. A caller that reaches the port can call every route.
+- `stateous serve` has no authentication. A caller that reaches its port can call every route. In your own service, `create_app(plane, caller=fn)` gives each call a caller, and your authorizer decides. See [Tenancy](../concepts/tenancy.md).
 - A time is ISO 8601, in UTC, with `Z`, for example `2026-10-07T05:43:39Z`.
 
 In the paths, `{id}` is a token's id or a task's id. A task's id is a whole number.

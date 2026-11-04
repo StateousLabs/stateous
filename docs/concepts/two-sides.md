@@ -107,7 +107,7 @@ The routine of `testing` knows that it can emit `passed` or `failed`. It does no
 - The supervisor's folder never holds `flow.py` or the graph file. Its routines import only `contract.py`.
 - A supervisor does not start when its `contract.py` is for a different graph.
 - The control plane checks each outcome again. An event that the state cannot emit, or a payload that does not fit its model, is refused.
-- Not guaranteed: who can call the control plane. Stateous has no authentication. Put it behind a VPN or a proxy.
+- Not guaranteed: who can call the control plane. Stateous does not authenticate callers. Put `stateous serve` behind a VPN or a proxy. In your own service, your gateway checks the caller, and your authorizer decides each action. See [Tenancy](tenancy.md).
 
 ## See also
 
