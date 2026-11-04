@@ -70,6 +70,44 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/stateous"]
 
+# The reference pages of the skill: one line for each public page, not a folder, so
+# that a private file in docs/ can never go in. tests/unit/skill checks the list.
+[tool.hatch.build.targets.wheel.force-include]
+"docs/index.md" = "stateous/skill/references/index.md"
+"docs/getting-started.md" = "stateous/skill/references/getting-started.md"
+"docs/concepts/model.md" = "stateous/skill/references/concepts/model.md"
+"docs/concepts/data.md" = "stateous/skill/references/concepts/data.md"
+"docs/concepts/two-sides.md" = "stateous/skill/references/concepts/two-sides.md"
+"docs/concepts/tasks-and-routines.md" = "stateous/skill/references/concepts/tasks-and-routines.md"
+"docs/concepts/guards.md" = "stateous/skill/references/concepts/guards.md"
+"docs/concepts/timers.md" = "stateous/skill/references/concepts/timers.md"
+"docs/concepts/context-notes-memory.md" = "stateous/skill/references/concepts/context-notes-memory.md"
+"docs/concepts/pause-resume-cancel.md" = "stateous/skill/references/concepts/pause-resume-cancel.md"
+"docs/concepts/parallel.md" = "stateous/skill/references/concepts/parallel.md"
+"docs/concepts/reliability.md" = "stateous/skill/references/concepts/reliability.md"
+"docs/concepts/agents.md" = "stateous/skill/references/concepts/agents.md"
+"docs/concepts/notices.md" = "stateous/skill/references/concepts/notices.md"
+"docs/concepts/transports.md" = "stateous/skill/references/concepts/transports.md"
+"docs/concepts/tenancy.md" = "stateous/skill/references/concepts/tenancy.md"
+"docs/how-to/write-a-workflow.md" = "stateous/skill/references/how-to/write-a-workflow.md"
+"docs/how-to/write-a-routine.md" = "stateous/skill/references/how-to/write-a-routine.md"
+"docs/how-to/run-supervisors.md" = "stateous/skill/references/how-to/run-supervisors.md"
+"docs/how-to/use-postgres.md" = "stateous/skill/references/how-to/use-postgres.md"
+"docs/how-to/steer-tokens.md" = "stateous/skill/references/how-to/steer-tokens.md"
+"docs/how-to/change-a-workflow.md" = "stateous/skill/references/how-to/change-a-workflow.md"
+"docs/how-to/embed-a-control-plane.md" = "stateous/skill/references/how-to/embed-a-control-plane.md"
+"docs/how-to/write-a-transport.md" = "stateous/skill/references/how-to/write-a-transport.md"
+"docs/how-to/run-replicas.md" = "stateous/skill/references/how-to/run-replicas.md"
+"docs/inside/words.md" = "stateous/skill/references/inside/words.md"
+"docs/inside/event-graph.md" = "stateous/skill/references/inside/event-graph.md"
+"docs/inside/workflows.md" = "stateous/skill/references/inside/workflows.md"
+"docs/inside/data.md" = "stateous/skill/references/inside/data.md"
+"docs/reference/cli.md" = "stateous/skill/references/reference/cli.md"
+"docs/reference/http.md" = "stateous/skill/references/reference/http.md"
+"docs/reference/python.md" = "stateous/skill/references/reference/python.md"
+"docs/reference/files.md" = "stateous/skill/references/reference/files.md"
+"docs/reference/limits.md" = "stateous/skill/references/reference/limits.md"
+
 # Only these go into the source package. A list, not the .gitignore files: the build
 # does not read a .gitignore inside a folder, so local notes would go in.
 [tool.hatch.build.targets.sdist]
