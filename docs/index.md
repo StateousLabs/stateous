@@ -42,6 +42,7 @@ The control plane keeps its data in SQLite or in Postgres.
 - [Where data goes](concepts/data.md): the context, the payload, and the two rules.
 - [The two sides](concepts/two-sides.md): the control plane and the supervisor, and what crosses between them.
 - [Agents, with PHD](concepts/agents.md): run a coding agent in a routine.
+- [Build a workflow with an agent](how-to/use-an-agent.md): give your coding agent the Stateous skill, and build the workflow with it.
 - [Embed a control plane](how-to/embed-a-control-plane.md): run a control plane in your own service, with your own database.
 - [Transports](concepts/transports.md): connect supervisors over HTTP, a gateway, or your own queue.
 - [Tenancy](concepts/tenancy.md): scope tokens to your tenants with labels, and decide who may do what.

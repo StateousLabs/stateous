@@ -1,6 +1,6 @@
 # The files
 
-This page tells what each file of the two folders holds, and which command writes it.
+This page tells what each file of the two folders holds, and which command writes it. It also tells about the folder of the skill for a coding agent.
 
 ```text
 orders/                      the workflow's folder: the control plane's side
@@ -167,6 +167,26 @@ At start, the supervisor sends the messages that are left, in order. Then it cla
 
 `.stateous/` holds the local state of the supervisor. Do not commit it: add `.stateous/` to the folder's `.gitignore`.
 
+## The skill's folder
+
+`stateous install skill DIRECTORY` writes the skill for a coding agent. See [Build a workflow with an agent](../how-to/use-an-agent.md).
+
+```text
+DIRECTORY/stateous/
+  SKILL.md                   the steps, and the pages to read before each step
+  references/                the pages of this site, for the installed version
+  scripts/try_workflow.py    the try-out
+```
+
+- `SKILL.md` names the version of Stateous that the skill is for. The script has the same version, and it stops when the installed Stateous has another one.
+- `references/` has the same folders as this site, so the links between the pages work. In `reference/python.md`, each name has its signature and its docstrings.
+- Do not edit the folder. `stateous install skill DIRECTORY --force` writes it again, for example after an upgrade.
+
+The try-out makes its files in a new temporary folder, or next to the file of `--database`:
+
+- `try.db`: the SQLite database of the control plane. The script keeps it after the run, and the report names it.
+- `try-outbox.db`: the outbox of the supervisor. The try-out never uses the outbox of the supervisor's folder, so the messages that are left in `.stateous/outbox.db` stay there.
+
 ## The control plane's database
 
 Without `--db`, `stateous serve` keeps its data in `stateous.db`, a SQLite file in the current folder. [The data](../inside/data.md) tells what each table holds.
@@ -174,5 +194,6 @@ Without `--db`, `stateous serve` keeps its data in `stateous.db`, a SQLite file 
 ## See also
 
 - [The commands](cli.md): the commands that write these files.
+- [Build a workflow with an agent](../how-to/use-an-agent.md): the skill and its try-out.
 - [The two sides](../concepts/two-sides.md): why the supervisor has a contract and not the graph.
 - [Run supervisors](../how-to/run-supervisors.md): set `stateous.yaml`, and start the supervisor.
