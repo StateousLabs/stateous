@@ -176,6 +176,13 @@ def test_a_new_temporary_database_without_one(tmp_path: Path) -> None:
 
 
 def test_a_time_limit_with_nothing_running_names_the_state(tmp_path: Path) -> None:
-    report = tried(*job(tmp_path, "return events.done()"), timeout=0)
+    graph, folder = job(tmp_path, "return events.done()")
+    config = folder / "stateous.yaml"
+    # The supervisor claims only tasks with this label, and the token has none: no task
+    # ever runs, and the state is served, so only the time limit can stop the try-out.
+    text = config.read_text(encoding="utf-8") + "labels:\n  team: other\n"
+    config.write_text(text, encoding="utf-8")
+    report = tried(graph, folder, timeout=1, quiet=60)
     assert report.stop.reason == "time_limit"
-    assert "is at" in report.stop.sentence
+    assert report.steps == []
+    assert f"{report.stop.token} is at work" in report.stop.sentence
