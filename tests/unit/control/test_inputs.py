@@ -17,6 +17,7 @@ from stateous.control.engine import (
     InvalidTokenId,
     TaskNotFound,
     TaskNotHeld,
+    TokenLive,
     TokenNotActive,
     TokenNotFound,
 )
@@ -37,6 +38,7 @@ def test_every_engine_error_is_an_engine_error_and_keeps_its_base() -> None:
         InvalidTokenId: ValueError,
         EventNotAllowed: ValueError,
         TokenNotActive: ValueError,
+        TokenLive: ValueError,
         TaskNotHeld: ValueError,
         AttemptOver: TaskNotHeld,
         InvalidArgument: ValueError,
@@ -66,7 +68,8 @@ def test_the_test_above_names_every_error_of_the_engine() -> None:
     }
     assert errors == {
         TokenNotFound, TaskNotFound, InvalidContext, InvalidPayload, InvalidTokenId,
-        EventNotAllowed, TokenNotActive, TaskNotHeld, AttemptOver, InvalidArgument, ChildToken,
+        EventNotAllowed, TokenNotActive, TokenLive, TaskNotHeld, AttemptOver, InvalidArgument,
+        ChildToken,
     }  # fmt: skip
 
 

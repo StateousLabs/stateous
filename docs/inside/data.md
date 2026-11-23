@@ -119,17 +119,17 @@ erDiagram
 
 | Table | What it holds | Which workflows write it |
 |---|---|---|
-| `ledger` | The history of each token. One row for each change, numbered by `seq` for each token. A row is never changed or deleted. `key` holds the idempotency key of an event from outside. | All workflows that change a token. |
-| `tokens` | Where each token is now: its state, its status, its visit of the state, and its context. A child token has `parent` and `workflow`. | Start a token, Fire an event, Report an outcome, Timer fires, Lease expiry, Pause and resume, Cancel, Join. |
-| `tasks` | One row each time a token enters a state that is not parallel. `attempt` counts the claims. `lease_until` is set while a supervisor holds the task. | Start a token, Fire an event, Claim a task, Heartbeat, Report an outcome, Lease expiry, Timer fires, Cancel, Join. |
-| `timers` | The timeout of a state (`kind` is `timeout`), and the timers of routines (`kind` is `timer`). | Start a token, Fire an event, Report an outcome, Lease expiry, Timer fires, Pause and resume, Cancel, Join. |
+| `ledger` | The history of each token. One row for each change, numbered by `seq` for each token. A row is never changed. Only a purge deletes it. `key` holds the idempotency key of an event from outside. | All workflows that change a token. Purge. |
+| `tokens` | Where each token is now: its state, its status, its visit of the state, and its context. A child token has `parent` and `workflow`. | Start a token, Fire an event, Report an outcome, Timer fires, Lease expiry, Pause and resume, Cancel, Join, Purge. |
+| `tasks` | One row each time a token enters a state that is not parallel. `attempt` counts the claims. `lease_until` is set while a supervisor holds the task. An id is never given again, also on SQLite (`AUTOINCREMENT`), so a late report of a purged task cannot reach a new task. | Start a token, Fire an event, Claim a task, Heartbeat, Report an outcome, Lease expiry, Timer fires, Cancel, Join, Purge. |
+| `timers` | The timeout of a state (`kind` is `timeout`), and the timers of routines (`kind` is `timer`). | Start a token, Fire an event, Report an outcome, Lease expiry, Timer fires, Pause and resume, Cancel, Join, Purge. |
 | `replicas` | One row for each control plane that serves the namespace as a replica (`exclusive=False`). Its clock renews `seen`; a row older than 30 seconds has lapsed. | Serve, and its clock. |
-| `start_keys` | The idempotency key of a start with no id, in its scope, and the token that it made. A retry with the same key gets that token. | Start a token. |
-| `token_labels` | One row for each label of a token, so a claim or a list can filter by labels. `tokens.labels` has the same labels. | Start a token, Join (a child copies its parent's labels). |
-| `memory` | The routine's memory: one key and its value, for one token and one state. The rows of a token are deleted when it ends. | Report an outcome (memory writes), and the end of a token. |
-| `claims` | The last claim of each supervisor: the request id, and the task and attempt that it got. An empty `task_id` means that the claim got no task. | Claim a task. |
+| `start_keys` | The idempotency key of a start with no id, in its scope, and the token that it made. A retry with the same key gets that token. | Start a token, Purge. |
+| `token_labels` | One row for each label of a token, so a claim or a list can filter by labels. `tokens.labels` has the same labels. | Start a token, Join (a child copies its parent's labels), Purge. |
+| `memory` | The routine's memory: one key and its value, for one token and one state. The rows of a token are deleted when it ends. | Report an outcome (memory writes), and the end of a token. Purge. |
+| `claims` | The last claim of each supervisor: the request id, and the task and attempt that it got. An empty `task_id` means that the claim got no task, or that its task was purged. | Claim a task, Purge. |
 | `control_plane` | One row. The structure and the checksum of the graph on record, and the control plane that holds the database now. `notices` says if each change also writes a notice. | Serve, and its clock. |
-| `notices` | Changes that your handler did not get yet: an accepted event, the end of a token, the last failure of a task. A row is deleted when the handler has it. `family` is the top token of the token's family. The table stays empty while `notices` is off. | Fire an event, Report an outcome, Timer fires, Pause and resume, Cancel, Join. |
+| `notices` | Changes that your handler did not get yet: an accepted event, the end of a token, the last failure of a task. A row is deleted when the handler has it. `family` is the top token of the token's family. A purge deletes the rows of the family. The table stays empty while `notices` is off. | Fire an event, Report an outcome, Timer fires, Pause and resume, Cancel, Join, Purge. |
 | `stateous_version` | The version of the schema of the tables. It has its own name, so a different application can use Alembic in the same database. | Serve, at start. |
 
 On Postgres, the tables of one workflow are in its namespace, a schema. The default namespace is `stateous`.
@@ -249,7 +249,7 @@ The supervisor claims again each second when it gets no task. So its last claim 
 
 | version_num |
 |---|
-| 0003 |
+| 0002 |
 
 `structure` and `checksum` are equal here, because no state has `timeout=` or `retries=`. `serving` names the control plane as `host:pid:id`. The clock writes `since` again about each 10 seconds.
 

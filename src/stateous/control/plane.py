@@ -29,6 +29,7 @@ from stateous.control.engine import (
     Engine,
     Fired,
     HistoryEntry,
+    Purged,
     RecordedGraph,
     Token,
     check_limit,
@@ -318,6 +319,22 @@ class ControlPlane:
         found = self._key(token, scope, caller)
         self._allow_token(caller, "cancel", found)
         return self._engine.cancel(found)
+
+    def purge(self, token: str, *, scope: Scope = None, caller: object = None) -> Purged:
+        """Delete a token that ended, with its children, for good: its history, tasks,
+        timers, labels, context, memory and notices. A live token raises `TokenLive`:
+        cancel it first. A child raises `ChildToken`. No such token in the scope:
+        `Purged` with `tokens=0`, so the call can be made again."""
+        found = self._key(token, scope, caller, missing="")
+        if not found:  # in no scope: there is nothing to purge
+            return Purged(token, 0)
+        if self._authorize is not None:
+            try:
+                labels = self._engine.get(found).labels
+            except TokenNotFound:
+                return Purged(token, 0)
+            self._allow(caller, "purge", labels)
+        return self._engine.purge(found)
 
     # ── supervisors ─────────────────────────────────────────────────────
 
@@ -733,6 +750,9 @@ class AsCaller:
 
     def cancel(self, token: str) -> Token:
         return self.plane.cancel(token, caller=self.caller)
+
+    def purge(self, token: str) -> Purged:
+        return self.plane.purge(token, caller=self.caller)
 
     def claim(
         self,

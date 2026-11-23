@@ -56,6 +56,7 @@ INSIDE_WORDS = [
     "outbox",
     "idempotency key",
     "held event",
+    "purge",
 ]
 """The words of how Stateous works inside. `inside/words.md` defines each one."""
 

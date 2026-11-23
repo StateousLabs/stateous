@@ -446,6 +446,46 @@ Actor-initiated. A person runs `stateous token cancel`, or a program calls `Clie
 | In | The token id. |
 | Out | `tokens.status` (`cancelled`). `tasks.status` (`cancelled`). `timers.status` (`cancelled`). The rows of `memory` of the token are deleted. |
 
+## Purge
+
+**Trigger**
+
+Actor-initiated. A person runs `stateous token purge`, or a program calls `Client.purge`, `ControlPlane.purge` or `POST /tokens/{id}/purge`. A notice handler can call it too, for example at the `cancelled` notice of a token; that is the developer's code, not Stateous's.
+
+**Steps**
+
+1. Find the token in the call's scope. No such token: answer that nothing was purged, and stop.
+2. Ask the authorizer, with the action `purge` and the token's labels.
+3. Take the lock of the token's family. Read the token again: it can have gone meanwhile.
+4. Refuse a child token: purge its top token.
+5. Find each token below it: the children of each visit of each parallel state, and their children.
+6. Refuse the purge when the token or any token below it is active or paused.
+7. In one transaction, delete their rows of `ledger`, `tasks`, `timers`, `memory`, `token_labels`, `start_keys` and `tokens`. Delete the rows of `notices` of the family that no deliverer holds now. Clear `task_id` and `attempt` of each `claims` row that names one of their tasks.
+8. A supervisor that still runs a routine of a purged task learns at its next heartbeat that the task is lost. Its report gets `task_not_found`, and it removes the message from its outbox.
+
+**Actors**
+
+- Human: the operator.
+- AI: none.
+- System: the client or the command, the control plane, the database.
+
+**Events**
+
+| On | Emitted |
+|---|---|
+| success | No ledger entry: the ledger of the token is deleted too. Log: `purged token TICKET-1 and 2 child token(s)`. HTTP 200 with `{"token": "TICKET-1", "purged": 3}`. |
+| no such token | HTTP 200 with `{"token": "TICKET-1", "purged": 0}`. Nothing else. |
+| an active or paused token, or a child of it | HTTP 409, `token_live`. Nothing is deleted. |
+| a child token | HTTP 409, `child_token`. Nothing is deleted. |
+| the authorizer refuses | HTTP 403, `forbidden`. Nothing is deleted. |
+
+**Data**
+
+| | Fields |
+|---|---|
+| In | The token id; the caller and the scope, from the transport. |
+| Out | The answer: `token` (the id that the call named) and `purged` (how many tokens were deleted). The rows of the token and its children are gone from every table. `claims.task_id` and `claims.attempt` are cleared where they named a purged task. |
+
 ## Join of a parallel state
 
 **Trigger**

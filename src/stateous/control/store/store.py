@@ -846,8 +846,13 @@ class Transaction:
         )
 
     def delete_notice(self, notice: tables.Notice) -> None:
-        self._session.delete(notice)
-        self._session.flush()
+        """Delete the notice. A purge of its family can have deleted it already, while
+        the handler had it: then nothing is left to delete."""
+        self._session.execute(
+            delete(tables.Notice)
+            .where(tables.Notice.id == notice.id)
+            .execution_options(synchronize_session=False)
+        )
 
     def entries(self, token: str) -> list[tables.LedgerEntry]:
         return list(
@@ -1303,6 +1308,46 @@ class Transaction:
     def delete_memory(self, token: str) -> None:
         """Delete all of the token's memory, of every state."""
         self._session.execute(delete(tables.Memory).where(tables.Memory.token == token))
+
+    # ── purge ───────────────────────────────────────────────────────────
+
+    def purge(self, tokens: Collection[str], *, family: str) -> None:
+        """Delete every row that names one of `tokens`, in each table: the ledger, the
+        tasks, the timers, the memory, the labels, the start keys and the tokens. The
+        notices of `family`, the top token of them all, go too, except those that a
+        deliverer holds now and deletes itself. A supervisor's last
+        claim that got one of their tasks keeps its request id, and forgets the task.
+        Call it under the family's lock."""
+        keys = list(tokens)
+        tasks = select(tables.Task.id).where(tables.Task.token.in_(keys))
+        self._session.execute(
+            update(tables.Claim)
+            .where(tables.Claim.task_id.in_(tasks))
+            .values(task_id=None, attempt=None)
+            .execution_options(synchronize_session=False)
+        )
+        for table in (
+            tables.LedgerEntry, tables.Task, tables.Timer, tables.Memory,
+            tables.TokenLabel, tables.StartKey, tables.Token,
+        ):  # fmt: skip
+            self._session.execute(
+                delete(table)
+                .where(table.token.in_(keys))
+                .execution_options(synchronize_session=False)
+            )
+        # A deliverer can hold notices of the family now, and its handler can be the
+        # caller of this purge: skip the rows that it locked, which it deletes itself.
+        held_by_no_one = (
+            select(tables.Notice.id)
+            .where(tables.Notice.family == family)
+            .with_for_update(skip_locked=True)
+        )
+        self._session.execute(
+            delete(tables.Notice)
+            .where(tables.Notice.id.in_(held_by_no_one))
+            .execution_options(synchronize_session=False)
+        )
+        self._session.expunge_all()
 
     # ── the control plane ───────────────────────────────────────────────
 

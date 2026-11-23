@@ -84,7 +84,12 @@ class Task(Base):
     """The task queue: one row for each task that entering a state makes."""
 
     __tablename__ = "tasks"
-    __table_args__ = (Index("tasks_queue", "status", "state"),)
+    __table_args__ = (
+        Index("tasks_queue", "status", "state"),
+        # SQLite would give a deleted row's id again. A purge deletes tasks, and a
+        # supervisor can still report on one: a task id must never repeat.
+        {"sqlite_autoincrement": True},
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     token: Mapped[str] = mapped_column(String(256))

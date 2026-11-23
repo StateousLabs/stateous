@@ -57,7 +57,7 @@ To start a token that exists returns it, unchanged. So a notice that comes twice
 ## Guarantees
 
 - A change and its notice are saved in one transaction, or neither is.
-- A notice is deleted only after the handler returned with no error.
+- A notice is deleted only after the handler returned with no error, or when its token family is purged. A purge skips the notices that a deliverer holds at that moment: the deliverer deletes them itself. So, on Postgres, a handler can purge the token of its notice.
 - Two deliverers on one database never get the same family at the same time.
 
 ## See also

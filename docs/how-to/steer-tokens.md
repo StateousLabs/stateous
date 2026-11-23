@@ -1,6 +1,6 @@
 # Steer tokens
 
-This guide tells you how to start, fire, show, pause, resume and cancel tokens, from the command line and from Python.
+This guide tells you how to start, fire, show, pause, resume, cancel and purge tokens, from the command line and from Python.
 
 Each command sends one HTTP request to the control plane. See [Pause, resume and cancel](../concepts/pause-resume-cancel.md) for what each action does to a token.
 
@@ -95,6 +95,25 @@ stateous token cancel TICKET-1
 
 You cannot pause, resume or cancel a child token of a parallel state. Steer its parent. See [Parallel and nested work](../concepts/parallel.md).
 
+## 5. Purge a token that ended
+
+```bash
+stateous token cancel TICKET-1
+stateous token purge TICKET-1
+```
+
+`purge` deletes the token and its child tokens for good: the history, the tasks, the timers, the labels, the context and the memory. It prints:
+
+```text
+TICKET-1: purged
+```
+
+- `purge` works on a token that ended: `completed`, `failed` or `cancelled`. A live token is refused with the code `token_live`: cancel it first.
+- A token that is not there prints `TICKET-1: no such token; nothing to purge`, and the exit code is 0. So you can run it again.
+- A parent prints how many child tokens went with it, for example `TICKET-1: purged, with 2 child token(s)`. You cannot purge a child alone.
+
+See [Purge](../concepts/pause-resume-cancel.md#purge) for what it deletes.
+
 ## When the control plane refuses
 
 An error prints one sentence to stderr, and the exit code is 1:
@@ -122,6 +141,7 @@ with Client("http://cp.internal:8080") as c:
     c.pause("TICKET-1")
     c.resume("TICKET-1")
     c.cancel("TICKET-1")
+    c.purge("TICKET-1")  # {"token": "TICKET-1", "purged": 1}
 ```
 
 Each method returns the JSON answer of the control plane. Without `with`, call `c.close()` at the end.
@@ -160,7 +180,7 @@ The `Idempotency-Key` header is the key. A payload goes in the body, as `{"paylo
 
 ## See also
 
-- [Pause, resume and cancel](../concepts/pause-resume-cancel.md): held events, and the order of replay.
+- [Pause, resume and cancel](../concepts/pause-resume-cancel.md): held events, the order of replay, and what a purge deletes.
 - [Reliability](../concepts/reliability.md): idempotency keys.
 - [Tasks and routines](../concepts/tasks-and-routines.md): tasks that wait.
 - [The model](../concepts/model.md): the words [token](../concepts/model.md#token) and [idempotency key](../inside/words.md#idempotency-key).

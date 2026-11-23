@@ -20,7 +20,7 @@ from stateous.model.events import Occurrence
 from stateous.model.workflow import END, START, Workflow
 
 if TYPE_CHECKING:
-    from stateous.control.engine import Fired, HistoryEntry, Token
+    from stateous.control.engine import Fired, HistoryEntry, Purged, Token
     from stateous.control.errors import (
         AttemptOver,
         ChildToken,
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
         ScopeConflict,
         TaskNotFound,
         TaskNotHeld,
+        TokenLive,
         TokenNotActive,
         TokenNotFound,
     )
@@ -51,6 +52,7 @@ _LAZY: dict[str, str] = {
     "ALL_SCOPES": "stateous.control.scope",
     "Fired": "stateous.control.engine",
     "HistoryEntry": "stateous.control.engine",
+    "Purged": "stateous.control.engine",
     "Token": "stateous.control.engine",
     "Notice": "stateous.control.notices",
     "NoticeKind": "stateous.control.notices",
@@ -76,6 +78,7 @@ _LAZY: dict[str, str] = {
             "ScopeConflict",
             "TaskNotFound",
             "TaskNotHeld",
+            "TokenLive",
             "TokenNotActive",
             "TokenNotFound",
         )
@@ -127,12 +130,14 @@ __all__ = [
     "NoticesOff",
     "Occurrence",
     "OutcomeError",
+    "Purged",
     "SchemaNotReady",
     "ScopeConflict",
     "StateRef",
     "TaskNotFound",
     "TaskNotHeld",
     "Token",
+    "TokenLive",
     "TokenNotActive",
     "TokenNotFound",
     "Workflow",

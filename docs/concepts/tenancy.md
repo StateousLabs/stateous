@@ -27,6 +27,7 @@ So Stateous gives two small tools, and no tenancy model. Your code decides how t
 | `claim` | The labels that the claim asks for, `{}` for none. |
 | `report`, `note`, `memory`, `heartbeat` | The labels of the task's token. A refused heartbeat task counts as lost. |
 | `fire`, `pause`, `resume`, `cancel`, `read` | The labels of the token. A list keeps only the tokens that the caller may read. |
+| `purge` | The labels of the token. A purge of a token that is not there in the call's scope is not checked: it deletes nothing. |
 
 **Ids for each scope.** `ControlPlane(..., scope=["user"])` names the labels of a scope, at most 4. A token id is then unique only within those labels' values: user u1 and user u2 can both have `T-1`.
 

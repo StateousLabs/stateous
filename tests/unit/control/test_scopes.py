@@ -203,3 +203,31 @@ def test_the_authorizer_sees_the_scope_in_a_claims_labels(tmp_path: Path) -> Non
         plane.claim("box", ["coding"], caller="u1")
 
     assert seen == [U1]
+
+
+def test_a_purge_reaches_only_the_token_of_its_scope(plane: ControlPlane) -> None:
+    plane.start("T-1", {"repo": "a"}, labels=U1, caller="u1")
+    plane.start("T-1", {"repo": "b"}, labels=U2, caller="u2")
+    plane.cancel("T-1", caller="u1")
+
+    assert plane.purge("T-1", caller="u1").tokens == 1
+
+    assert plane.get("T-1", caller="u2").context["repo"] == "b"
+    with pytest.raises(TokenNotFound):
+        plane.get("T-1", caller="u1")
+    assert plane.purge("T-1", caller="u1").tokens == 0  # again: nothing to purge
+
+
+def test_a_purge_in_all_scopes_finds_the_one_token_with_the_id(plane: ControlPlane) -> None:
+    plane.start("T-1", TICKET, labels=U1, caller="u1")
+    plane.cancel("T-1", caller="u1")
+    plane.start("T-2", TICKET, labels=U1, caller="u1")
+    plane.start("T-2", TICKET, labels=U2, caller="u2")
+
+    assert plane.purge("NOPE", scope=ALL_SCOPES).tokens == 0
+    with pytest.raises(InvalidArgument, match="scope="):
+        plane.purge("T-2", scope=ALL_SCOPES)
+    purged = plane.purge("T-1", scope=ALL_SCOPES)
+
+    assert (purged.token, purged.tokens) == ("T-1", 1)
+    assert plane.tokens(scope=ALL_SCOPES, status="cancelled") == []

@@ -24,6 +24,7 @@ Stateous has seven commands: `compile`, `serve`, `migrate`, `init`, `supervise`,
 | `stateous token pause ID` | Pause a token. |
 | `stateous token resume ID` | Resume a token. |
 | `stateous token cancel ID` | Cancel a token. |
+| `stateous token purge ID` | Delete a token that ended, and its children, for good. |
 | `stateous install skill DIRECTORY` | Write the skill for a coding agent. |
 
 ## Workflows
@@ -109,7 +110,7 @@ See [Use Postgres](../how-to/use-postgres.md) for `--db`, and [Change a workflow
 stateous migrate [--db URL] [--namespace NAME] [--notices | --no-notices]
 ```
 
-It makes or updates the tables of a workflow's database, and then stops. Run it in a deploy, before your service starts a `ControlPlane`. It prints one line, for example `migrated sqlite:///stateous.db to 0001; notices off`.
+It makes or updates the tables of a workflow's database, and then stops. Run it in a deploy, before your service starts a `ControlPlane`. It prints one line, for example `migrated sqlite:///stateous.db to 0002; notices off`.
 
 | Argument or option | Meaning |
 |---|---|
@@ -310,6 +311,26 @@ stateous token cancel TICKET-1
 ```
 
 You cannot pause, resume or cancel a child token. Steer its top token. See [Steer tokens](../how-to/steer-tokens.md).
+
+### stateous token purge
+
+```text
+stateous token purge ID [--url URL]
+```
+
+It deletes a token that ended (`completed`, `failed` or `cancelled`), and each of its child tokens, for good. That is the history, the tasks, the timers, the labels, the context and the memory. It prints `ID: purged`, or `ID: purged, with N child token(s)` for a parent. A token that is not there prints `ID: no such token; nothing to purge`, with the exit code 0.
+
+| Argument or option | Meaning |
+|---|---|
+| `ID` | The token's id. |
+| `--url URL` | The control plane's URL. |
+
+```bash
+stateous token cancel TICKET-1
+stateous token purge TICKET-1
+```
+
+A live token is refused: cancel it first. A child token is refused: purge its top token. See [Purge](../concepts/pause-resume-cancel.md#purge).
 
 ## Tooling
 

@@ -66,6 +66,13 @@ class TokenNotActive(ControlPlaneError, ValueError):
     code: ClassVar[str] = "token_not_active"
 
 
+class TokenLive(ControlPlaneError, ValueError):
+    """The token, or a child of it, is still active or paused: it cannot be purged.
+    Cancel it first."""
+
+    code: ClassVar[str] = "token_live"
+
+
 class TaskNotHeld(ControlPlaneError, ValueError):
     """The task is not this supervisor's, or no one works on it now (or on the
     attempt that the request names)."""
@@ -82,7 +89,7 @@ class AttemptOver(TaskNotHeld):
 
 class ChildToken(ControlPlaneError, ValueError):
     """The token is a child of a parallel state: it is part of its parent's work. It
-    cannot be paused, resumed or cancelled on its own; steer its top token."""
+    cannot be paused, resumed, cancelled or purged on its own; steer its top token."""
 
     code: ClassVar[str] = "child_token"
 

@@ -28,7 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from stateous.control import checks
 from stateous.control.checks import MAX_BODY, MAX_DEPTH, MAX_TASK, Problem
 from stateous.control.clock import LOST
-from stateous.control.engine import Fired, HistoryEntry, Token, check_labels
+from stateous.control.engine import Fired, HistoryEntry, Purged, Token, check_labels
 from stateous.control.errors import (
     ChildToken,
     ControlPlaneError,
@@ -40,6 +40,7 @@ from stateous.control.errors import (
     InvalidTokenId,
     TaskNotFound,
     TaskNotHeld,
+    TokenLive,
     TokenNotActive,
     TokenNotFound,
 )
@@ -119,6 +120,8 @@ class Served(Protocol):
     def resume(self, token: str) -> Token: ...
 
     def cancel(self, token: str) -> Token: ...
+
+    def purge(self, token: str) -> Purged: ...
 
     def claim(
         self,
@@ -229,6 +232,11 @@ def create_app(
 
         return endpoint
 
+    async def purge(request: Request) -> Response:
+        token: str = request.path_params["token"]
+        purged = await run_in_threadpool(lambda: on(request).purge(token))
+        return JSONResponse({"token": purged.token, "purged": purged.tokens})
+
     async def workflow(request: Request) -> Response:
         return JSONResponse(document)
 
@@ -301,6 +309,7 @@ def create_app(
         Route("/tokens/{token}/pause", steer("pause"), methods=["POST"]),
         Route("/tokens/{token}/resume", steer("resume"), methods=["POST"]),
         Route("/tokens/{token}/cancel", steer("cancel"), methods=["POST"]),
+        Route("/tokens/{token}/purge", purge, methods=["POST"]),
         Route("/workflow", workflow, methods=["GET"]),
         Route("/health", health_check, methods=["GET"]),
         Route("/tasks/claim", claim, methods=["POST"]),
@@ -635,6 +644,7 @@ _HANDLERS: dict[Any, Handler] = {
     InvalidTokenId: _answer(422),
     EventNotAllowed: _answer(409),
     TokenNotActive: _answer(409),
+    TokenLive: _answer(409),
     ChildToken: _answer(409),
     TaskNotFound: _answer(404),
     TaskNotHeld: _answer(409),

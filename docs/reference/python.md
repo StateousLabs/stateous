@@ -95,6 +95,8 @@ A program outside uses `Client` to start, fire, read and steer tokens. Each meth
 
 ::: stateous.Fired
 
+::: stateous.Purged
+
 A notice tells your handler of a change. See [Notices](../concepts/notices.md).
 
 ::: stateous.Notice
@@ -120,6 +122,8 @@ Each error of a control plane has `code`, the stable code of its refusal. The HT
 ::: stateous.EventNotAllowed
 
 ::: stateous.TokenNotActive
+
+::: stateous.TokenLive
 
 ::: stateous.TaskNotHeld
 

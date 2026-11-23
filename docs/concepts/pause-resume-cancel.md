@@ -2,13 +2,15 @@
 
 ## In one sentence
 
-You can pause a token so that it does not move, resume it so that its held events apply, or cancel it for good.
+You can pause a token so that it does not move, resume it so that its held events apply, or cancel it for good. After a token ended, you can purge it: then nothing of it is left.
 
 ## Why it exists
 
 Sometimes a person must stop a run: a repository is frozen for a release, or a fault must be examined first. The run must not lose what comes in while it waits.
 
 Sometimes a run is no longer needed. Then all the work that it started must stop, and it must take no more events.
+
+Sometimes the data of a run must go. For example, a customer leaves, and you must delete what you keep of them. A cancelled token still keeps its id, its labels, its context and its whole history, which can hold free text. A purge deletes all of it.
 
 ## How it works
 
@@ -63,9 +65,27 @@ On resume, the held events apply in the order of arrival. Each one applies as if
 
 A routine that runs is told at its next heartbeat. The supervisor then cancels an `async def` routine. A cancelled token takes no more events: the answer is 409.
 
+### Purge
+
+`purge` deletes a token that ended (`completed`, `failed` or `cancelled`) for good. In one transaction, the control plane deletes the rows of the token and of each of its child tokens, of every visit, in every table:
+
+- the token, its context and its labels;
+- its history, the ledger;
+- its tasks, its timers and its memory;
+- the idempotency key of its start;
+- the notices of its family that no handler had yet.
+
+A supervisor's last claim that got one of these tasks forgets the task. Nothing records the purge. Only the control plane's log has the line `purged token TICKET-3 and 0 child token(s)`.
+
+A live token, active or paused, is refused: the answer is 409, with the code `token_live`. Cancel it first. So a purge never deletes the work of a routine that runs. A cancelled task is lost for its supervisor. A late report of it gets the answer 404, `task_not_found`.
+
+A token that is not there is purged as nothing: the answer says `"purged": 0`. So you can send a purge again, for example after a timeout.
+
+After a purge, the id is free. A new token with the same id starts a new history at `#1`.
+
 ### Child tokens
 
-`pause`, `resume` and `cancel` on a parent also act on its children. You cannot steer a child alone: the answer is 409, with the code `child_token`. See [Parallel and nested work](parallel.md).
+`pause`, `resume`, `cancel` and `purge` on a parent also act on its children. You cannot steer or purge a child alone: the answer is 409, with the code `child_token`. See [Parallel and nested work](parallel.md).
 
 ## Example
 
@@ -128,6 +148,18 @@ context:
 
 No supervisor ran, so no one took task 1 or task 2. The history shows them as `cancelled`.
 
+To delete the cancelled token and its history for good:
+
+```bash
+stateous token purge TICKET-3
+stateous token show TICKET-3
+```
+
+```text
+TICKET-3: purged
+error: the control plane at http://127.0.0.1:8080 refused (404): there is no token 'TICKET-3'
+```
+
 ## Guarantees
 
 - A paused token does not move, and it does not end on its own.
@@ -137,6 +169,9 @@ No supervisor ran, so no one took task 1 or task 2. The history shows them as `c
 - An idempotency key stays used across a pause. A second delivery during the pause is a duplicate.
 - Not guaranteed: that a running routine stops on pause. It continues, and its lease continues.
 - Not guaranteed: that a held event still fits on resume. The token can be in a different state then.
+- A purge deletes all the rows of a token and of its children, or none of them. It never deletes a live token.
+- A task id is never given again after a purge, so a late report of a purged task cannot reach a new task.
+- Not guaranteed: that a purge deletes what is outside the control plane's database. Your logs, a handler's copy of a notice and a supervisor's outbox stay. A supervisor removes the messages of a cancelled task when the control plane refuses them.
 
 ## See also
 

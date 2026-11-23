@@ -90,6 +90,20 @@ def test_pause_resume_and_cancel(client: Client) -> None:
     assert client.cancel("T-1")["status"] == "cancelled"
 
 
+def test_purge(client: Client) -> None:
+    client.start("T-1", {"repo": "acme/api"})
+
+    with pytest.raises(Refused) as refused:
+        client.purge("T-1")
+    assert (refused.value.status, refused.value.code) == (409, "token_live")
+    client.cancel("T-1")
+
+    assert client.purge("T-1") == {"token": "T-1", "purged": 1}
+    assert client.purge("T-1") == {"token": "T-1", "purged": 0}
+    with pytest.raises(NotFound):
+        client.get("T-1")
+
+
 def test_report_moves_a_task_that_waits_for_the_outside(
     client: Client, engine: ControlPlane
 ) -> None:

@@ -164,3 +164,34 @@ def test_a_list_limit_out_of_range_is_refused_with_an_authorizer(plane: ControlP
 
     with pytest.raises(InvalidArgument):
         plane.tokens(limit=5000, caller="u2")
+
+
+def test_a_purge_is_checked_with_the_tokens_labels(plane: ControlPlane) -> None:
+    plane.start("T-1", TICKET, labels=U1)
+    plane.cancel("T-1")
+
+    with pytest.raises(Forbidden):
+        plane.purge("T-1", caller="u2")
+
+    assert plane.get("T-1").status == "cancelled"
+    assert plane.purge("T-1", caller="u1").tokens == 1
+
+
+def test_a_purge_of_an_unknown_token_needs_no_labels(plane: ControlPlane) -> None:
+    assert plane.purge("NOPE", caller="u2").tokens == 0
+
+
+def test_the_authorizer_gets_purge_by_name(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def record(caller: object, action: Action, labels: Mapping[str, str]) -> bool:
+        seen.append(action)
+        return True
+
+    url = sqlite_url(tmp_path / "p.db")
+    with ControlPlane(sdlc(), database=url, migrate=True, authorize=record) as plane:
+        plane.start("T-1", TICKET, caller="c")
+        plane.cancel("T-1", caller="c")
+        plane.purge("T-1", caller="c")
+
+    assert seen == ["start", "cancel", "purge"]

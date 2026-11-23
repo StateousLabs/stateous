@@ -58,7 +58,7 @@ When guards choose between transitions, `otherwise=True` marks the transition to
 
 One run of the workflow, for example `TICKET-1`. It has an id, a state, a status, its context and its history.
 
-The status is `active`, `paused`, `completed`, `failed` or `cancelled`. A token that is `completed`, `failed` or `cancelled` never moves again.
+The status is `active`, `paused`, `completed`, `failed` or `cancelled`. A token that is `completed`, `failed` or `cancelled` never moves again. A purge can then delete it, with its history. See [Purge](pause-resume-cancel.md#purge).
 
 ### context
 

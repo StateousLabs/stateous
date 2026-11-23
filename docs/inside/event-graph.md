@@ -21,6 +21,7 @@ flowchart TD
     timer["Timer fires"]
     pause["Pause and resume"]
     cancel["Cancel"]
+    purge["Purge"]
     join["Join of a parallel state"]
 
     compile -.->|"graph file written"| serve
@@ -55,6 +56,9 @@ flowchart TD
 
     pause -->|"event_replayed, task_queued"| claim
     cancel -->|"task_cancelled"| beat
+    cancel -.->|"cancelled: the token ended"| purge
+    report -.->|"completed or failed: the token ended"| purge
+    purge -.->|"a late report: task_not_found"| report
 ```
 
 ## How to read it
@@ -64,6 +68,7 @@ flowchart TD
 - **Failures.** A failed report or an ended lease records `task_retrying`, and the task is queued again. With no retries left, the token gets `error`, or it fails.
 - **Lost work.** When a token leaves a state, or is cancelled, `task_cancelled` makes the next heartbeat answer the task as lost. The supervisor then cancels its routine.
 - **Parallel states.** Entering a parallel state records `branch_started`, and starts each child token. A child that completes or fails starts the join of its parent.
+- **The end of the data.** A token that ended can be purged when a person or a program asks. The purge emits no ledger entry, because it deletes the ledger of the token. A late report of a purged task gets `task_not_found`.
 
 `branch_started` and the join are also emitted when [Start a token](workflows.md#start-a-token), [Fire an event](workflows.md#fire-an-event) or [Timer fires](workflows.md#timer-fires) move a token. The graph shows each edge one time, from the most usual workflow.
 

@@ -86,7 +86,7 @@ When a child ends, the control plane checks the join in the same transaction. Th
 
 `pause` and `resume` on the parent also pause and resume its children. On resume, the events that the parent and its children held apply in the order that they arrived. So, with `join="any"`, the child that ended first goes on.
 
-You cannot pause, resume or cancel a child alone. The answer is 409, with the code `child_token`, because a child is a part of its parent's work. Cancel the parent: that cancels its children.
+You cannot pause, resume, cancel or purge a child alone. The answer is 409, with the code `child_token`, because a child is a part of its parent's work. Cancel the parent: that cancels its children. A purge of the parent, after it ended, deletes the children of each visit of each parallel state.
 
 `GET /tokens/{id}` shows a child's `parent`. `GET /tokens?parent=<id>` lists the children. `stateous token show` with the parent's id shows them below the parent.
 

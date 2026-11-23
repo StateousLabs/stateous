@@ -255,6 +255,27 @@ class Client:
         """
         return self._object("POST", f"/tokens/{_segment(token)}/cancel", {})
 
+    def purge(self, token: str) -> dict[str, Any]:
+        """Delete a token that ended, and its children, for good: its history, its
+        tasks, its timers, its labels, its context and its memory. Nothing of it is
+        left to read.
+
+        Args:
+            token: The token's id. A child token cannot be purged: purge its top
+                token.
+
+        Returns:
+            `{"token": id, "purged": n}`: `n` is how many tokens were deleted, the
+                token and its children. 0 when there is no such token, for example
+                because it was purged before: a purge can be sent again.
+
+        Raises:
+            Refused: The token, or a child of it, is active or paused (409,
+                `token_live`): cancel it first. Or it is a child token (409,
+                `child_token`).
+        """
+        return self._object("POST", f"/tokens/{_segment(token)}/purge", {})
+
     def report(
         self,
         task: int,

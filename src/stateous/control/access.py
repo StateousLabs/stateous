@@ -12,9 +12,10 @@ from typing import Literal
 
 Action = Literal[
     "claim", "report", "heartbeat", "note", "memory",
-    "start", "fire", "pause", "resume", "cancel", "read",
+    "start", "fire", "pause", "resume", "cancel", "purge", "read",
 ]  # fmt: skip
-"""What a caller does: a supervisor's call, a token's start or steering, or a read."""
+"""What a caller does: a supervisor's call, a token's start or steering, its purge, or
+a read."""
 
 Authorize = Callable[[object, Action, Mapping[str, str]], bool]
 """The developer's function: `authorize(caller, action, labels)`. True allows."""

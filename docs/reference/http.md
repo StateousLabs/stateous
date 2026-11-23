@@ -106,6 +106,16 @@ Cancel an active or a paused token. The answer is the token.
 
 The three steering routes take no body. A child token refuses them with `child_token`: steer its top token.
 
+### `POST /tokens/{id}/purge`
+
+Delete a token that ended, and each of its child tokens, for good: their rows in every table, in one transaction. The route takes no body. The answer is `200`:
+
+```json
+{"token": "TICKET-1", "purged": 3}
+```
+
+`purged` is how many tokens were deleted: the token and its children. It is `0` when there is no such token, for example after an earlier purge, so a purge is safe to send again. An active or a paused token refuses it with `token_live` (409): cancel it first. A child token refuses it with `child_token` (409): purge its top token. See [Purge](../concepts/pause-resume-cancel.md#purge).
+
 ## The workflow
 
 ### `GET /workflow`
@@ -238,8 +248,9 @@ The sentence is for people, and it can change. The code does not change: a progr
 | `invalid_body` | 422 | The body does not have the shape of the request. |
 | `event_not_allowed` | 409 | The event cannot move the token in its state. |
 | `token_not_active` | 409 | The token's status does not allow the request. |
+| `token_live` | 409 | The token, or a child of it, is active or paused, so it cannot be purged. Cancel it first. |
 | `forbidden` | 403 | The control plane's authorizer refused the caller this action. |
-| `child_token` | 409 | The token is a child of a parallel state; steer its top token. |
+| `child_token` | 409 | The token is a child of a parallel state; steer or purge its top token. |
 | `task_not_held` | 409 | The task is not this supervisor's, or no one works on it now. |
 | `attempt_over` | 409 | The request is for an attempt of the task that is over: the task moved to a new attempt. |
 | `database_busy` | 503 | The database cannot take the request now; try again. |

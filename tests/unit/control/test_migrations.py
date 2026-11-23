@@ -133,7 +133,7 @@ def insert_a_token(url: str) -> None:
 
 def test_the_baseline_is_the_first_revision_kept_in_its_own_table() -> None:
     assert (BASELINE, VERSION_TABLE) == ("0001", "stateous_version")
-    assert head() == "0001"
+    assert head() == "0002"
 
 
 def test_a_new_database_is_made_at_the_newest_revision(tmp_path: Path) -> None:
@@ -333,3 +333,73 @@ def test_opening_a_database_twice_changes_nothing(tmp_path: Path) -> None:
 
     assert table_names(url) == before
     assert version_of(url) == head()
+
+
+def sqlite_sql(url: str, table: str) -> str:
+    engine = create_engine(url)
+    with engine.connect() as connection:
+        sql = connection.scalar(
+            text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :t"), {"t": table}
+        )
+    engine.dispose()
+    return str(sql)
+
+
+@pytest.mark.filterwarnings("ignore:Skipped unsupported reflection of expression-based index")
+def test_0002_never_gives_a_deleted_tasks_id_again_and_keeps_the_tasks(tmp_path: Path) -> None:
+    """On SQLite a table without AUTOINCREMENT gives the id of its last row again once
+    that row is deleted. A purge deletes tasks; a new task must not take the id of a
+    purged one, whose supervisor can still report on it."""
+    url = sqlite_url(tmp_path / "old.db")
+    engine = create_engine(url)
+    upgrade_from_empty(engine, revision=BASELINE)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO tasks (id, token, state, visit, status, attempt, queued_at) "
+                "VALUES (7, 'T-1', 'coding', 1, 'done', 1, '2026-10-06 09:00:00')"
+            )
+        )
+    assert "AUTOINCREMENT" not in sqlite_sql(url, "tasks")
+
+    migrate(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM tasks WHERE id = 7"))
+        connection.execute(
+            text(
+                "INSERT INTO tasks (token, state, visit, status, attempt, queued_at) "
+                "VALUES ('T-2', 'coding', 1, 'queued', 0, '2026-10-06 09:00:00')"
+            )
+        )
+        ids = connection.execute(text("SELECT id FROM tasks")).scalars().all()
+        indexes = connection.execute(text("PRAGMA index_list('tasks')")).all()
+    engine.dispose()
+
+    assert version_of(url) == "0002"
+    assert "AUTOINCREMENT" in sqlite_sql(url, "tasks")
+    assert ids == [8]
+    assert "tasks_queue" in {row[1] for row in indexes}
+
+
+def test_a_new_sqlite_database_never_gives_a_deleted_tasks_id_again(tmp_path: Path) -> None:
+    url = sqlite_url(tmp_path / "new.db")
+    Store(url).close()
+
+    assert "AUTOINCREMENT" in sqlite_sql(url, "tasks")
+
+
+def test_0002_can_be_undone_on_sqlite(tmp_path: Path) -> None:
+    from alembic import command
+
+    url = sqlite_url(tmp_path / "down.db")
+    engine = create_engine(url)
+    upgrade_from_empty(engine)
+    with engine.begin() as connection:
+        command.downgrade(
+            migrations._config(migrations.HERE, connection),  # pyright: ignore[reportPrivateUsage]
+            BASELINE,
+        )
+    engine.dispose()
+
+    assert version_of(url) == BASELINE
+    assert "AUTOINCREMENT" not in sqlite_sql(url, "tasks")

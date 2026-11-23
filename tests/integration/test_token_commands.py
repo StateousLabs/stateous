@@ -89,6 +89,18 @@ def test_pause_resume_and_cancel(served: str) -> None:
     assert ok("token", "cancel", "T-1", "--url", served).endswith(", cancelled\n")
 
 
+def test_purge(served: str) -> None:
+    ok("token", "start", "T-1", '{"repo": "acme/api"}', "--url", served)
+
+    live = run("token", "purge", "T-1", "--url", served)
+    assert live.exit_code == 1
+    assert "cancel it first" in live.output
+    ok("token", "cancel", "T-1", "--url", served)
+
+    assert ok("token", "purge", "T-1", "--url", served) == "T-1: purged\n"
+    assert ok("token", "purge", "T-1", "--url", served) == "T-1: no such token; nothing to purge\n"
+
+
 @pytest.mark.parametrize(
     ("args", "message"),
     [

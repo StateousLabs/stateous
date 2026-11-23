@@ -1,4 +1,4 @@
-"""`stateous token ...`: start, fire, show, pause, resume and cancel tokens over the
+"""`stateous token ...`: start, fire, show, pause, resume, cancel and purge tokens over the
 control plane's HTTP API (see the docs, How-to guides > Steer tokens). The output is ASCII."""
 
 from __future__ import annotations
@@ -19,7 +19,8 @@ MOST_CHILDREN = 1000
 """The most children that `show` lists: the API's largest listing."""
 
 token_app = typer.Typer(
-    help="Act on tokens: start, fire, show, pause, resume, cancel.", no_args_is_help=True
+    help="Act on tokens: start, fire, show, pause, resume, cancel, purge.",
+    no_args_is_help=True,
 )
 
 Url = Annotated[str, typer.Option("--url", envvar="STATEOUS_URL", help="The control plane's URL.")]
@@ -150,6 +151,24 @@ def resume(token: TokenId, url: Url = DEFAULT_URL) -> None:
 def cancel(token: TokenId, url: Url = DEFAULT_URL) -> None:
     """Cancel a token for good."""
     _steered(url, lambda client: client.cancel(token))
+
+
+@token_app.command("purge")
+@reported
+def purge(token: TokenId, url: Url = DEFAULT_URL) -> None:
+    """Delete a token that ended, and its children, for good. Cancel a live token first."""
+    with Client(url) as client:
+        typer.echo(purged_line(client.purge(token)))
+
+
+def purged_line(answer: dict[str, Any]) -> str:
+    """`T-1: purged`, with the number of children; or that there was no such token."""
+    count = answer.get("purged")
+    if count == 0:
+        return f"{answer['token']}: no such token; nothing to purge"
+    children = count - 1 if isinstance(count, int) else 0
+    shown = f", with {children} child token(s)" if children > 0 else ""
+    return f"{answer['token']}: purged{shown}"
 
 
 def _steered(url: str, act: Callable[[Client], dict[str, Any]]) -> None:

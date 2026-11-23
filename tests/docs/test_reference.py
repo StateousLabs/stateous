@@ -87,7 +87,9 @@ def test_there_are_seven_commands() -> None:
     }
     token = child(group, "token")
     assert isinstance(token, TyperGroup)
-    assert set(token.commands) == {"start", "fire", "show", "pause", "resume", "cancel"}
+    assert set(token.commands) == {
+        "start", "fire", "show", "pause", "resume", "cancel", "purge",
+    }  # fmt: skip
     install = child(group, "install")
     assert isinstance(install, TyperGroup)
     assert set(install.commands) == {"skill"}

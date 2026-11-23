@@ -16,7 +16,7 @@ The hash of the graph file without the `timeout=` and `retries=` of its states. 
 
 ### ledger
 
-The history of each token. Each change adds one row, and the rows are never changed. `stateous token show` prints the ledger of a token.
+The history of each token. Each change adds one row, and the rows are never changed. Only a purge deletes them, with the token. `stateous token show` prints the ledger of a token.
 
 ### lease
 
@@ -33,6 +33,10 @@ The supervisor's local file of messages that the control plane did not answer ye
 ### idempotency key
 
 A key that you give with an event from outside. A second event with the same key applies nothing, and gets the answer "duplicate". See [Reliability](../concepts/reliability.md).
+
+### purge
+
+The deletion of a token that ended, and of its child tokens, from every table of the control plane. Nothing records it. See [Pause, resume and cancel](../concepts/pause-resume-cancel.md#purge).
 
 ### held event
 

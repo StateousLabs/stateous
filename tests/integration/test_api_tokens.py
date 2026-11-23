@@ -232,3 +232,15 @@ def test_an_unknown_path_or_a_wrong_method_answers_json(http: TestClient) -> Non
     assert (missing.status_code, wrong.status_code) == (404, 405)
     assert "/nothing" in missing.json()["error"]
     assert "GET" in wrong.json()["error"]
+
+
+def test_purge_deletes_an_ended_token_and_refuses_a_live_one(http: TestClient) -> None:
+    started(http)
+
+    live = http.post("/tokens/T-1/purge")
+    assert (live.status_code, live.json()["code"]) == (409, "token_live")
+    http.post("/tokens/T-1/cancel")
+
+    assert http.post("/tokens/T-1/purge").json() == {"token": "T-1", "purged": 1}
+    assert http.get("/tokens/T-1").status_code == 404
+    assert http.post("/tokens/T-1/purge").json() == {"token": "T-1", "purged": 0}

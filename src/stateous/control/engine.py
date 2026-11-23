@@ -47,6 +47,7 @@ from stateous.control.errors import (
     InvalidTokenId,
     TaskNotFound,
     TaskNotHeld,
+    TokenLive,
     TokenNotActive,
     TokenNotFound,
 )
@@ -144,6 +145,17 @@ class HistoryEntry:
 class Fired:
     token: Token
     duplicate: bool = False
+
+
+@dataclass(frozen=True)
+class Purged:
+    """What `purge` deleted."""
+
+    token: str
+    """The id that the purge named."""
+    tokens: int
+    """How many tokens it deleted: the token and each of its children, of every visit.
+    0 when there was no such token, for example because it was purged before."""
 
 
 @dataclass(frozen=True)
@@ -354,7 +366,10 @@ class Engine:
         return found
 
     def _refuse_child(
-        self, tx: Transaction, row: tables.Token, verb: Literal["pause", "resume", "cancel"]
+        self,
+        tx: Transaction,
+        row: tables.Token,
+        verb: Literal["pause", "resume", "cancel", "purge"],
     ) -> None:
         """A child is part of its parent's work (see the docs, Concepts > Parallel and nested work):
         steer the top token instead. `ChildToken` names it."""
@@ -363,7 +378,9 @@ class Engine:
         top = row
         while top.parent is not None and (above := tx.token(top.parent)) is not None:
             top = above
-        done = {"pause": "paused", "resume": "resumed", "cancel": "cancelled"}[verb]
+        done = {
+            "pause": "paused", "resume": "resumed", "cancel": "cancelled", "purge": "purged",
+        }[verb]  # fmt: skip
         raise ChildToken(
             f"token {public_id(row.token)!r} is a child of {public_id(row.parent or '')!r}: "
             f"it is part of its parent's work, and cannot be {done} on its own; "
@@ -394,6 +411,41 @@ class Engine:
                 tx.append(row.token, "event_dropped", event=held.event, reason=reason)
         self._leave(tx, row, via=None, why="the parent was cancelled")
         self._end(tx, row, "cancelled", **data)
+
+    @_retried
+    def purge(self, token: str) -> Purged:
+        """Delete a token that ended, and each of its children, for good: their rows
+        in every table go in one transaction, and nothing records the purge. A live
+        token is refused (`TokenLive`): cancel it first, so that no routine of it
+        still runs. A child is refused (`ChildToken`): purge its top token. No such
+        token: nothing is deleted, so a purge can be called again."""
+        with self._transaction() as tx:
+            row = tx.token(token)
+            if row is None:
+                return Purged(public_id(token), 0)
+            self._refuse_child(tx, row, "purge")
+            family = self._whole_family(tx, row)
+            for member in family:
+                if member.status not in ENDED:
+                    raise TokenLive(
+                        f"token {public_id(member.token)!r} is {member.status}; cancel it "
+                        "first, then purge it"
+                        if member is row
+                        else f"token {public_id(row.token)!r} has the child "
+                        f"{public_id(member.token)!r}, which is {member.status}; cancel "
+                        f"{public_id(row.token)!r} first, then purge it"
+                    )
+            tx.purge([member.token for member in family], family=row.token)
+            log.info("purged token %s and %d child token(s)", public_id(token), len(family) - 1)
+            return Purged(public_id(token), len(family))
+
+    def _whole_family(self, tx: Transaction, row: tables.Token) -> list[tables.Token]:
+        """The token, and every token below it: the children of each visit of each
+        parallel state, not only those of its state now."""
+        found = [row]
+        for child in tx.children(row.token):
+            found.extend(self._whole_family(tx, child))
+        return found
 
     def _replay(self, tx: Transaction, row: tables.Token, held: _Held) -> None:
         """Apply one held event, or drop it and say why. An event from a task applies

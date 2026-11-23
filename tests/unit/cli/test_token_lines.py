@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from stateous.cli.errors import CommandError
-from stateous.cli.tokens import entry_line, json_object, token_line
+from stateous.cli.tokens import entry_line, json_object, purged_line, token_line
 
 
 def test_a_token_line_names_the_id_the_state_and_the_status() -> None:
@@ -17,6 +17,12 @@ def test_a_token_line_names_the_id_the_state_and_the_status() -> None:
     assert token_line({**token, "state": "__end__", "status": "completed"}) == (
         "T-1: END, completed"
     )
+
+
+def test_a_purged_line_counts_the_children() -> None:
+    assert purged_line({"token": "T-1", "purged": 1}) == "T-1: purged"
+    assert purged_line({"token": "T-1", "purged": 3}) == "T-1: purged, with 2 child token(s)"
+    assert purged_line({"token": "T-1", "purged": 0}) == "T-1: no such token; nothing to purge"
 
 
 @pytest.mark.parametrize(

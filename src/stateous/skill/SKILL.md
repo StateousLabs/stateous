@@ -100,7 +100,7 @@ When a routine blocks the try-out, the script ends itself some time after `--tim
 
 ## Then
 
-To run the workflow for real, run `stateous serve` and `stateous supervise`. Read `references/how-to/run-supervisors.md` and `references/reference/cli.md`. To steer tokens, read `references/how-to/steer-tokens.md`.
+To run the workflow for real, run `stateous serve` and `stateous supervise`. Read `references/how-to/run-supervisors.md` and `references/reference/cli.md`. To steer tokens, or to purge a token that ended, read `references/how-to/steer-tokens.md`.
 
 ## All the reference pages
 
