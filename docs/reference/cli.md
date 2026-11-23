@@ -120,6 +120,8 @@ It makes or updates the tables of a workflow's database, and then stops. Run it 
 
 `stateous serve` makes or updates the tables by itself. A `ControlPlane` in your own service does not: it refuses tables that are missing or out of date, and names this command.
 
+An update is one way. After 0.6.0 updates a database to `0002`, Stateous 0.5.x does not open it. Take a backup first. See [Upgrading to 0.6](release-notes.md#upgrading-to-06).
+
 ```bash
 stateous migrate --db postgresql://stateous:secret@db.internal:5432/app --namespace plan_tasks --notices
 ```

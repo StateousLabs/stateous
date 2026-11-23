@@ -174,11 +174,11 @@ def test_a_purge_is_checked_with_the_tokens_labels(plane: ControlPlane) -> None:
         plane.purge("T-1", caller="u2")
 
     assert plane.get("T-1").status == "cancelled"
-    assert plane.purge("T-1", caller="u1").tokens == 1
+    assert plane.purge("T-1", caller="u1").purged == 1
 
 
 def test_a_purge_of_an_unknown_token_needs_no_labels(plane: ControlPlane) -> None:
-    assert plane.purge("NOPE", caller="u2").tokens == 0
+    assert plane.purge("NOPE", caller="u2").purged == 0
 
 
 def test_the_authorizer_gets_purge_by_name(tmp_path: Path) -> None:

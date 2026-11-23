@@ -117,6 +117,11 @@ NOTIFY_MOST = 7900
 """Bytes of a "task ready" notice with its labels; Postgres takes at most 8000."""
 
 
+PURGE_CHUNK = 1000
+"""The most token ids that one statement of a purge names. A family can have more
+children than a statement can take as parameters."""
+
+
 def ready_channel(namespace: str) -> str:
     """The Postgres channel of "task ready" between the replicas of `namespace`. A hash
     keeps it short (Postgres keeps 63 bytes of a name) and different for each one."""
@@ -667,8 +672,10 @@ class Transaction:
     lock of the task it got before, and holds no other token's lock then. A claim
     with a request id also locks the supervisor's row in `claims` (`last_claim`). It
     takes that lock only before any token lock, and no transaction that holds a token
-    lock waits for that row. So this order is safe too. SQLite takes one writer at a
-    time and needs no locks.
+    lock waits for that row. So this order is safe too. A purge holds the family's
+    lock, and never touches `claims`. It deletes only the rows of `notices` that no
+    deliverer holds (`SKIP LOCKED`), so it never waits for a deliverer either. SQLite
+    takes one writer at a time and needs no locks.
 
     A heartbeat changes task rows without a token lock, in the order of their ids. A
     change to a family can change the tasks of several children in another order.
@@ -1315,26 +1322,23 @@ class Transaction:
         """Delete every row that names one of `tokens`, in each table: the ledger, the
         tasks, the timers, the memory, the labels, the start keys and the tokens. The
         notices of `family`, the top token of them all, go too, except those that a
-        deliverer holds now and deletes itself. A supervisor's last
-        claim that got one of their tasks keeps its request id, and forgets the task.
-        Call it under the family's lock."""
+        deliverer holds now and deletes itself. Call it under the family's lock.
+
+        It never waits for a row of `claims` (see the lock order above). A
+        supervisor's last claim can keep the id of a purged task: an id is never
+        given again, so a repeat of that claim finds no task, and is a new claim."""
         keys = list(tokens)
-        tasks = select(tables.Task.id).where(tables.Task.token.in_(keys))
-        self._session.execute(
-            update(tables.Claim)
-            .where(tables.Claim.task_id.in_(tasks))
-            .values(task_id=None, attempt=None)
-            .execution_options(synchronize_session=False)
-        )
-        for table in (
-            tables.LedgerEntry, tables.Task, tables.Timer, tables.Memory,
-            tables.TokenLabel, tables.StartKey, tables.Token,
-        ):  # fmt: skip
-            self._session.execute(
-                delete(table)
-                .where(table.token.in_(keys))
-                .execution_options(synchronize_session=False)
-            )
+        for start in range(0, len(keys), PURGE_CHUNK):
+            chunk = keys[start : start + PURGE_CHUNK]
+            for table in (
+                tables.LedgerEntry, tables.Task, tables.Timer, tables.Memory,
+                tables.TokenLabel, tables.StartKey, tables.Token,
+            ):  # fmt: skip
+                self._session.execute(
+                    delete(table)
+                    .where(table.token.in_(chunk))
+                    .execution_options(synchronize_session=False)
+                )
         # A deliverer can hold notices of the family now, and its handler can be the
         # caller of this purge: skip the rows that it locked, which it deletes itself.
         held_by_no_one = (

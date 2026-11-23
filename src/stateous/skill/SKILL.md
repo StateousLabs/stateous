@@ -139,3 +139,4 @@ To run the workflow for real, run `stateous serve` and `stateous supervise`. Rea
 - `references/reference/python.md`: The Python API, with each signature and docstring.
 - `references/reference/files.md`: The files.
 - `references/reference/limits.md`: Limits.
+- `references/reference/release-notes.md`: Release notes.

@@ -88,10 +88,13 @@ def test_a_purge_leaves_no_row_that_names_the_token_or_its_children() -> None:
 
     purged = engine.purge(TOP)
 
-    assert purged == Purged(token=TOP, tokens=3)
+    assert purged == Purged(token=TOP, purged=3)
     assert rows_naming(engine, TOP) == []
-    claims = every_row(engine)["claims"]
-    assert all(claim["task_id"] not in family_tasks for claim in claims)
+    # A supervisor's last claim keeps the bare id of a purged task: no row has it now,
+    # and an id is never given again.
+    kept = {claim["task_id"] for claim in every_row(engine)["claims"]} - {None}
+    assert kept <= family_tasks
+    assert kept.isdisjoint(task_ids(engine))
     assert rows_naming(engine, OTHER) == others_before
 
 
@@ -113,7 +116,7 @@ def test_a_purge_deletes_the_children_of_every_visit() -> None:
     engine.fire(TOP, "done", None)  # a second visit of `reviews`: two more children
     engine.cancel(TOP)
 
-    assert engine.purge(TOP) == Purged(token=TOP, tokens=5)
+    assert engine.purge(TOP) == Purged(token=TOP, purged=5)
     assert rows_naming(engine, TOP) == []
 
 
@@ -132,7 +135,7 @@ def test_an_ended_token_of_each_status_can_be_purged() -> None:
     assert statuses == {"DONE-1": "completed", "FAILED-1": "failed", "CANCELLED-1": "cancelled"}
 
     for token in statuses:
-        assert engine.purge(token) == Purged(token=token, tokens=1)
+        assert engine.purge(token) == Purged(token=token, purged=1)
         assert rows_naming(engine, token) == []
 
 
@@ -180,9 +183,9 @@ def test_an_unknown_token_is_purged_as_nothing_so_a_purge_can_be_called_again() 
     engine.start("T-1", TICKET)
     engine.cancel("T-1")
 
-    assert engine.purge("NOPE") == Purged(token="NOPE", tokens=0)
-    assert engine.purge("T-1") == Purged(token="T-1", tokens=1)
-    assert engine.purge("T-1") == Purged(token="T-1", tokens=0)
+    assert engine.purge("NOPE") == Purged(token="NOPE", purged=0)
+    assert engine.purge("T-1") == Purged(token="T-1", purged=1)
+    assert engine.purge("T-1") == Purged(token="T-1", purged=0)
 
 
 def test_a_purged_id_can_start_a_new_token_with_a_new_history() -> None:
@@ -223,3 +226,36 @@ def test_a_late_report_of_a_purged_task_is_task_not_found() -> None:
     with pytest.raises(TaskNotFound):
         engine.report(grant.task, Outcome(kind="event", event="done"), supervisor="box")
     assert engine.heartbeat("box", [grant.task]) == [grant.task]
+
+
+def test_the_check_runs_under_the_lock_and_a_refusal_deletes_nothing() -> None:
+    """The control plane's authorizer gets the labels that the purge reads under the
+    family's lock, not labels read in an earlier transaction."""
+    engine = new_engine()
+    engine.start("T-1", TICKET, labels={"user": "u1"})
+    engine.cancel("T-1")
+    seen: list[dict[str, str]] = []
+
+    def refuse(labels: dict[str, str]) -> None:
+        seen.append(labels)
+        raise PermissionError("no")
+
+    with pytest.raises(PermissionError):
+        engine.purge("T-1", check=refuse)
+
+    assert seen == [{"user": "u1"}]
+    assert engine.get("T-1").status == "cancelled"
+    assert engine.purge("NOPE", check=refuse).purged == 0  # nothing to check
+
+
+def test_a_large_family_is_deleted_in_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from stateous.control.store import store as store_module
+
+    monkeypatch.setattr(store_module, "PURGE_CHUNK", 2)
+    engine = Engine(Store("sqlite://"), Graph(parallel_document()), clock=Clock())
+    engine.start(TOP, TICKET)
+    engine.fire(TOP, "done", None)
+    engine.cancel(TOP)
+
+    assert engine.purge(TOP).purged == 3
+    assert rows_naming(engine, TOP) == []

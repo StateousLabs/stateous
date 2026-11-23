@@ -153,7 +153,7 @@ class Purged:
 
     token: str
     """The id that the purge named."""
-    tokens: int
+    purged: int
     """How many tokens it deleted: the token and each of its children, of every visit.
     0 when there was no such token, for example because it was purged before."""
 
@@ -413,16 +413,19 @@ class Engine:
         self._end(tx, row, "cancelled", **data)
 
     @_retried
-    def purge(self, token: str) -> Purged:
+    def purge(self, token: str, *, check: Callable[[dict[str, str]], None] | None = None) -> Purged:
         """Delete a token that ended, and each of its children, for good: their rows
         in every table go in one transaction, and nothing records the purge. A live
         token is refused (`TokenLive`): cancel it first, so that no routine of it
         still runs. A child is refused (`ChildToken`): purge its top token. No such
-        token: nothing is deleted, so a purge can be called again."""
+        token: nothing is deleted, so a purge can be called again. `check(labels)`
+        runs under the family's lock, with the token's labels; it raises to refuse."""
         with self._transaction() as tx:
             row = tx.token(token)
             if row is None:
                 return Purged(public_id(token), 0)
+            if check is not None:
+                check(dict(row.labels))
             self._refuse_child(tx, row, "purge")
             family = self._whole_family(tx, row)
             for member in family:

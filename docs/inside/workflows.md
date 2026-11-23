@@ -455,12 +455,12 @@ Actor-initiated. A person runs `stateous token purge`, or a program calls `Clien
 **Steps**
 
 1. Find the token in the call's scope. No such token: answer that nothing was purged, and stop.
-2. Ask the authorizer, with the action `purge` and the token's labels.
-3. Take the lock of the token's family. Read the token again: it can have gone meanwhile.
+2. Take the lock of the token's family, and read the token. No such token: answer that nothing was purged.
+3. Ask the authorizer, with the action `purge` and the labels that it read.
 4. Refuse a child token: purge its top token.
 5. Find each token below it: the children of each visit of each parallel state, and their children.
 6. Refuse the purge when the token or any token below it is active or paused.
-7. In one transaction, delete their rows of `ledger`, `tasks`, `timers`, `memory`, `token_labels`, `start_keys` and `tokens`. Delete the rows of `notices` of the family that no deliverer holds now. Clear `task_id` and `attempt` of each `claims` row that names one of their tasks.
+7. In one transaction, delete their rows of `ledger`, `tasks`, `timers`, `memory`, `token_labels`, `start_keys` and `tokens`. Delete the rows of `notices` of the family that no deliverer holds now. Do not touch `claims`: a purge holding the family's lock never waits for a row of `claims`.
 8. A supervisor that still runs a routine of a purged task learns at its next heartbeat that the task is lost. Its report gets `task_not_found`, and it removes the message from its outbox.
 
 **Actors**
@@ -484,7 +484,7 @@ Actor-initiated. A person runs `stateous token purge`, or a program calls `Clien
 | | Fields |
 |---|---|
 | In | The token id; the caller and the scope, from the transport. |
-| Out | The answer: `token` (the id that the call named) and `purged` (how many tokens were deleted). The rows of the token and its children are gone from every table. `claims.task_id` and `claims.attempt` are cleared where they named a purged task. |
+| Out | The answer: `token` (the id that the call named) and `purged` (how many tokens were deleted). The rows of the token and its children are gone from every table. A row of `claims` can keep the bare id of a purged task. |
 
 ## Join of a parallel state
 

@@ -235,7 +235,7 @@ def create_app(
     async def purge(request: Request) -> Response:
         token: str = request.path_params["token"]
         purged = await run_in_threadpool(lambda: on(request).purge(token))
-        return JSONResponse({"token": purged.token, "purged": purged.tokens})
+        return JSONResponse({"token": purged.token, "purged": purged.purged})
 
     async def workflow(request: Request) -> Response:
         return JSONResponse(document)

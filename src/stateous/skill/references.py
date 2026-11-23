@@ -52,6 +52,7 @@ PAGES: tuple[str, ...] = (
     "reference/python.md",
     "reference/files.md",
     "reference/limits.md",
+    "reference/release-notes.md",
 )
 """The public pages, relative to `docs/`, in the order of the site's menu. A fixed list,
 so that a private file in `docs/` can never go into the skill."""

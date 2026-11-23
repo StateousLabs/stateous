@@ -16,7 +16,7 @@ This page tells what Stateous does not do, and the limits that it has today.
 - `count('event')` counts the event over the whole life of the token, not for one visit. See [Guards](../concepts/guards.md).
 - In a context or payload model, a field with `default_factory` can be required in `contract.py`. This occurs when the field's type is a model or a union.
 - `stateous serve` has no option for a scope. For token ids in each scope, embed the control plane. See [Tenancy](../concepts/tenancy.md).
-- A start key never expires. The same key in the same scope always gives the same token.
+- A start key never expires. The same key in the same scope always gives the same token, until a purge deletes that token.
 - A made id (a ULID) sorts in the order of creation only for the ids that one process makes. Ids that two replicas make in the same millisecond can sort in either order.
 - `compile` cannot prove that two guards with `branches.all` or `branches.any` never overlap. Use one such guard and `otherwise=True`. See [Parallel and nested work](../concepts/parallel.md).
 

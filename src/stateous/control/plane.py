@@ -324,17 +324,15 @@ class ControlPlane:
         """Delete a token that ended, with its children, for good: its history, tasks,
         timers, labels, context, memory and notices. A live token raises `TokenLive`:
         cancel it first. A child raises `ChildToken`. No such token in the scope:
-        `Purged` with `tokens=0`, so the call can be made again."""
+        `Purged` with `purged=0`, so the call can be made again. The authorizer gets
+        the action `purge` with the labels that the purge reads under the token's
+        lock."""
         found = self._key(token, scope, caller, missing="")
         if not found:  # in no scope: there is nothing to purge
             return Purged(token, 0)
-        if self._authorize is not None:
-            try:
-                labels = self._engine.get(found).labels
-            except TokenNotFound:
-                return Purged(token, 0)
-            self._allow(caller, "purge", labels)
-        return self._engine.purge(found)
+        if self._authorize is None:
+            return self._engine.purge(found)
+        return self._engine.purge(found, check=lambda labels: self._allow(caller, "purge", labels))
 
     # ── supervisors ─────────────────────────────────────────────────────
 

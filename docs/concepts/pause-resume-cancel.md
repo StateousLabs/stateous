@@ -73,9 +73,13 @@ A routine that runs is told at its next heartbeat. The supervisor then cancels a
 - its history, the ledger;
 - its tasks, its timers and its memory;
 - the idempotency key of its start;
-- the notices of its family that no handler had yet.
+- the notices of its family that no handler had yet, also its `cancelled` notice.
 
-A supervisor's last claim that got one of these tasks forgets the task. Nothing records the purge. Only the control plane's log has the line `purged token TICKET-3 and 0 child token(s)`.
+The idempotency key goes too. So a retry of the start with the same key makes a new token. It does not find the purged one.
+
+Purge a token after your handler has its last notice, or purge it from the handler. Else the handler never hears that it ended.
+
+Nothing records the purge. Only the control plane's log has the line `purged token TICKET-3 and 0 child token(s)`.
 
 A live token, active or paused, is refused: the answer is 409, with the code `token_live`. Cancel it first. So a purge never deletes the work of a routine that runs. A cancelled task is lost for its supervisor. A late report of it gets the answer 404, `task_not_found`.
 
@@ -172,6 +176,8 @@ error: the control plane at http://127.0.0.1:8080 refused (404): there is no tok
 - A purge deletes all the rows of a token and of its children, or none of them. It never deletes a live token.
 - A task id is never given again after a purge, so a late report of a purged task cannot reach a new task.
 - Not guaranteed: that a purge deletes what is outside the control plane's database. Your logs, a handler's copy of a notice and a supervisor's outbox stay. A supervisor removes the messages of a cancelled task when the control plane refuses them.
+- Not guaranteed: that the deleted bytes leave the disk at once. Postgres keeps dead rows until a vacuum, and also keeps its WAL and your backups. SQLite keeps free pages unless `PRAGMA secure_delete` is on.
+- Not guaranteed, on Postgres: that a handler never gets a notice of a purged family. A deliverer that holds notices during a purge still hands them on. If its handler then fails, those notices come back.
 
 ## See also
 

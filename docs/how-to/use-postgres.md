@@ -52,6 +52,12 @@ When a limit stops a request, the answer is 503 with the code `database_busy`. S
 
 When Postgres stops a transaction for a deadlock, the control plane runs it one more time. A schema upgrade at start has no statement limit, but it keeps the lock limit.
 
+## 4. Upgrade Stateous
+
+Take a backup of the database first. An upgrade of the schema is one way: an older Stateous does not open the database after it.
+
+Stateous 0.6.0 moves the schema to `0002`. On Postgres, no table changes, but Stateous 0.5.x then refuses the database. To go back, restore the backup. See [Upgrading to 0.6](../reference/release-notes.md#upgrading-to-06).
+
 ## SQLite or Postgres
 
 | | SQLite | Postgres |
@@ -70,3 +76,4 @@ Each token moves one step at a time on both databases.
 - [Change a workflow](change-a-workflow.md): what `serve` checks in the database at start.
 - [Embed a control plane](embed-a-control-plane.md): a control plane in your own service, and `stateous migrate`.
 - [The commands](../reference/cli.md): every option of `stateous serve`.
+- [Release notes](../reference/release-notes.md): what each version changes, and how to upgrade.

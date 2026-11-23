@@ -108,6 +108,7 @@ packages = ["src/stateous"]
 "docs/reference/python.md" = "stateous/skill/references/reference/python.md"
 "docs/reference/files.md" = "stateous/skill/references/reference/files.md"
 "docs/reference/limits.md" = "stateous/skill/references/reference/limits.md"
+"docs/reference/release-notes.md" = "stateous/skill/references/reference/release-notes.md"
 
 # Only these go into the source package. A list, not the .gitignore files: the build
 # does not read a .gitignore inside a folder, so local notes would go in.
